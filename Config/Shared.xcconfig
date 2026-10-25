@@ -1,0 +1,23 @@
+// Shared signing defaults. Contributors without an Apple account get an ad-hoc ("Sign to Run Locally") build
+// that installs the helper with the LEGACY installer (one admin prompt per rebuild).
+// For a Team-ID build (SMAppService path) create Config/Signing.local.xcconfig (git-ignored) with:
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   CODE_SIGN_IDENTITY = Apple Development
+//   CODE_SIGN_STYLE = Automatic
+DEVELOPMENT_TEAM =
+CODE_SIGN_IDENTITY = -
+CODE_SIGN_STYLE = Manual
+ENABLE_HARDENED_RUNTIME = YES
+// Xcode 27 silently drops ENABLE_HARDENED_RUNTIME for ad-hoc signing ("note: Disabling hardened runtime with
+// ad-hoc codesigning"). The helper's peer check needs the runtime flag on BOTH binaries, so pass it to codesign
+// explicitly. For Team-ID builds Xcode adds `-o runtime` itself; the duplicate is harmless (verified).
+OTHER_CODE_SIGN_FLAGS = $(inherited) --options=runtime
+// The Debug-only "debug dylib" (SwiftUI previews) is a separate ad-hoc image that an ad-hoc hardened-runtime
+// executable refuses to load ("mapping process and mapped file (non-platform) have different Team IDs",
+// verified: dyld abort at launch). Keep one statically linked executable.
+ENABLE_DEBUG_DYLIB = NO
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+// Bump ONLY when helper code changes: the app reinstalls/re-registers the helper when this differs.
+HELPER_BUILD_VERSION = 1
+#include? "Signing.local.xcconfig"

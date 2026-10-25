@@ -1,0 +1,3598 @@
+{
+ "schema": 1,
+ "platform": "t6041",
+ "chip": "Apple M4 Max",
+ "verified": true,
+ "observedOn": [
+  "Mac16,5"
+ ],
+ "note": "Empirically derived on Mac16,5 (MBP 16\", 2 fans), macOS 27.0.1. Match by platform-name; keys absent on another product with the same chip are simply skipped.",
+ "headline": {
+  "cpu": [
+   "Tp01",
+   "Tp05",
+   "Tp09",
+   "Tp0D",
+   "Tp0H",
+   "Tp0L",
+   "Tp0P",
+   "Tp0T",
+   "Tp0X",
+   "Tp0b",
+   "Tp0e",
+   "Tp0i",
+   "Tp1j",
+   "Tp1n",
+   "Tp1t",
+   "Tp1w",
+   "Tp1z",
+   "Tp22",
+   "Tp25",
+   "Tp28",
+   "Tp2B",
+   "Tp2E",
+   "Tp2J",
+   "Tp2M",
+   "Te05",
+   "Te0S"
+  ],
+  "cpuHotspot": [
+   "Tpx1",
+   "Tpx9",
+   "Te06",
+   "Te0T"
+  ],
+  "gpu": [
+   "Tg05",
+   "Tg0K",
+   "Tg0S",
+   "Tg0Y",
+   "Tg0d",
+   "Tg0k",
+   "Tg0z",
+   "Tg1E",
+   "Tg1V",
+   "Tg1c",
+   "Tg1l",
+   "Tg22",
+   "Tg2H",
+   "Tg2Q",
+   "Tg2Y",
+   "Tg2g",
+   "Tg2o",
+   "Tg34",
+   "Tg3J",
+   "Tg3a",
+   "Tg3i",
+   "Tg3q"
+  ],
+  "soc": [
+   "TCMb"
+  ],
+  "memory": [
+   "TVMR"
+  ],
+  "battery": [
+   "TB0T"
+  ],
+  "ssd": [
+   "TH0x"
+  ]
+ },
+ "fanNames": [
+  "Left",
+  "Right"
+ ],
+ "fanNamesRu": [
+  "Левый",
+  "Правый"
+ ],
+ "sensors": [
+  {
+   "key": "Tp00",
+   "name": "P-cluster 1 probe 1 (raw)",
+   "nameRu": "P-кластер 1, датчик 1 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp01",
+   "name": "P-cluster 1 probe 1",
+   "nameRu": "P-кластер 1, датчик 1",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp02",
+   "name": "P-cluster 1 probe 1 hotspot",
+   "nameRu": "P-кластер 1, датчик 1, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp04",
+   "name": "P-cluster 1 probe 2 (raw)",
+   "nameRu": "P-кластер 1, датчик 2 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp05",
+   "name": "P-cluster 1 probe 2",
+   "nameRu": "P-кластер 1, датчик 2",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp06",
+   "name": "P-cluster 1 probe 2 hotspot",
+   "nameRu": "P-кластер 1, датчик 2, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp08",
+   "name": "P-cluster 1 probe 3 (raw)",
+   "nameRu": "P-кластер 1, датчик 3 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp09",
+   "name": "P-cluster 1 probe 3",
+   "nameRu": "P-кластер 1, датчик 3",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0A",
+   "name": "P-cluster 1 probe 3 hotspot",
+   "nameRu": "P-кластер 1, датчик 3, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0C",
+   "name": "P-cluster 1 probe 4 (raw)",
+   "nameRu": "P-кластер 1, датчик 4 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0D",
+   "name": "P-cluster 1 probe 4",
+   "nameRu": "P-кластер 1, датчик 4",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0E",
+   "name": "P-cluster 1 probe 4 hotspot",
+   "nameRu": "P-кластер 1, датчик 4, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0G",
+   "name": "P-cluster 1 probe 5 (raw)",
+   "nameRu": "P-кластер 1, датчик 5 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0H",
+   "name": "P-cluster 1 probe 5",
+   "nameRu": "P-кластер 1, датчик 5",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0I",
+   "name": "P-cluster 1 probe 5 hotspot",
+   "nameRu": "P-кластер 1, датчик 5, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0K",
+   "name": "P-cluster 1 probe 6 (raw)",
+   "nameRu": "P-кластер 1, датчик 6 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0L",
+   "name": "P-cluster 1 probe 6",
+   "nameRu": "P-кластер 1, датчик 6",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0M",
+   "name": "P-cluster 1 probe 6 hotspot",
+   "nameRu": "P-кластер 1, датчик 6, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0O",
+   "name": "P-cluster 1 probe 7 (raw)",
+   "nameRu": "P-кластер 1, датчик 7 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0P",
+   "name": "P-cluster 1 probe 7",
+   "nameRu": "P-кластер 1, датчик 7",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0Q",
+   "name": "P-cluster 1 probe 7 hotspot",
+   "nameRu": "P-кластер 1, датчик 7, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0S",
+   "name": "P-cluster 1 probe 8 (raw)",
+   "nameRu": "P-кластер 1, датчик 8 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0T",
+   "name": "P-cluster 1 probe 8",
+   "nameRu": "P-кластер 1, датчик 8",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0U",
+   "name": "P-cluster 1 probe 8 hotspot",
+   "nameRu": "P-кластер 1, датчик 8, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0W",
+   "name": "P-cluster 1 probe 9 (raw)",
+   "nameRu": "P-кластер 1, датчик 9 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0X",
+   "name": "P-cluster 1 probe 9",
+   "nameRu": "P-кластер 1, датчик 9",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0Y",
+   "name": "P-cluster 1 probe 9 hotspot",
+   "nameRu": "P-кластер 1, датчик 9, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0a",
+   "name": "P-cluster 1 probe 10 (raw)",
+   "nameRu": "P-кластер 1, датчик 10 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0b",
+   "name": "P-cluster 1 probe 10",
+   "nameRu": "P-кластер 1, датчик 10",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0c",
+   "name": "P-cluster 1 probe 10 hotspot",
+   "nameRu": "P-кластер 1, датчик 10, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0d",
+   "name": "P-cluster 1 probe 11 (raw)",
+   "nameRu": "P-кластер 1, датчик 11 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0e",
+   "name": "P-cluster 1 probe 11",
+   "nameRu": "P-кластер 1, датчик 11",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0f",
+   "name": "P-cluster 1 probe 11 hotspot",
+   "nameRu": "P-кластер 1, датчик 11, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0g",
+   "name": "P-cluster 1 probe 12 (raw)",
+   "nameRu": "P-кластер 1, датчик 12 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0i",
+   "name": "P-cluster 1 probe 12",
+   "nameRu": "P-кластер 1, датчик 12",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0k",
+   "name": "P-cluster 1 probe 12 hotspot",
+   "nameRu": "P-кластер 1, датчик 12, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0l",
+   "name": "P-cluster 1 fabric 1 (raw)",
+   "nameRu": "P-кластер 1, шина 1 (сырой)",
+   "group": "cpuFabric",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0m",
+   "name": "P-cluster 1 fabric 1",
+   "nameRu": "P-кластер 1, шина 1",
+   "group": "cpuFabric",
+   "role": "calibrated",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0n",
+   "name": "P-cluster 1 fabric 1 hotspot",
+   "nameRu": "P-кластер 1, шина 1, пик",
+   "group": "cpuFabric",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0o",
+   "name": "P-cluster 1 fabric 2 (raw)",
+   "nameRu": "P-кластер 1, шина 2 (сырой)",
+   "group": "cpuFabric",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0q",
+   "name": "P-cluster 1 fabric 2",
+   "nameRu": "P-кластер 1, шина 2",
+   "group": "cpuFabric",
+   "role": "calibrated",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0t",
+   "name": "P-cluster 1 fabric 2 hotspot",
+   "nameRu": "P-кластер 1, шина 2, пик",
+   "group": "cpuFabric",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0u",
+   "name": "P-cluster 1 fabric 3 (raw)",
+   "nameRu": "P-кластер 1, шина 3 (сырой)",
+   "group": "cpuFabric",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0v",
+   "name": "P-cluster 1 fabric 3",
+   "nameRu": "P-кластер 1, шина 3",
+   "group": "cpuFabric",
+   "role": "calibrated",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp0w",
+   "name": "P-cluster 1 fabric 3 hotspot",
+   "nameRu": "P-кластер 1, шина 3, пик",
+   "group": "cpuFabric",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1i",
+   "name": "P-cluster 2 probe 1 (raw)",
+   "nameRu": "P-кластер 2, датчик 1 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1j",
+   "name": "P-cluster 2 probe 1",
+   "nameRu": "P-кластер 2, датчик 1",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1k",
+   "name": "P-cluster 2 probe 1 hotspot",
+   "nameRu": "P-кластер 2, датчик 1, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1m",
+   "name": "P-cluster 2 probe 2 (raw)",
+   "nameRu": "P-кластер 2, датчик 2 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1n",
+   "name": "P-cluster 2 probe 2",
+   "nameRu": "P-кластер 2, датчик 2",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1o",
+   "name": "P-cluster 2 probe 2 hotspot",
+   "nameRu": "P-кластер 2, датчик 2, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1q",
+   "name": "P-cluster 2 probe 3 (raw)",
+   "nameRu": "P-кластер 2, датчик 3 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1t",
+   "name": "P-cluster 2 probe 3",
+   "nameRu": "P-кластер 2, датчик 3",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1u",
+   "name": "P-cluster 2 probe 3 hotspot",
+   "nameRu": "P-кластер 2, датчик 3, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1v",
+   "name": "P-cluster 2 probe 4 (raw)",
+   "nameRu": "P-кластер 2, датчик 4 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1w",
+   "name": "P-cluster 2 probe 4",
+   "nameRu": "P-кластер 2, датчик 4",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1x",
+   "name": "P-cluster 2 probe 4 hotspot",
+   "nameRu": "P-кластер 2, датчик 4, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1y",
+   "name": "P-cluster 2 probe 5 (raw)",
+   "nameRu": "P-кластер 2, датчик 5 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp1z",
+   "name": "P-cluster 2 probe 5",
+   "nameRu": "P-кластер 2, датчик 5",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp20",
+   "name": "P-cluster 2 probe 5 hotspot",
+   "nameRu": "P-кластер 2, датчик 5, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp21",
+   "name": "P-cluster 2 probe 6 (raw)",
+   "nameRu": "P-кластер 2, датчик 6 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp22",
+   "name": "P-cluster 2 probe 6",
+   "nameRu": "P-кластер 2, датчик 6",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp23",
+   "name": "P-cluster 2 probe 6 hotspot",
+   "nameRu": "P-кластер 2, датчик 6, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp24",
+   "name": "P-cluster 2 probe 7 (raw)",
+   "nameRu": "P-кластер 2, датчик 7 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp25",
+   "name": "P-cluster 2 probe 7",
+   "nameRu": "P-кластер 2, датчик 7",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp26",
+   "name": "P-cluster 2 probe 7 hotspot",
+   "nameRu": "P-кластер 2, датчик 7, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp27",
+   "name": "P-cluster 2 probe 8 (raw)",
+   "nameRu": "P-кластер 2, датчик 8 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp28",
+   "name": "P-cluster 2 probe 8",
+   "nameRu": "P-кластер 2, датчик 8",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp29",
+   "name": "P-cluster 2 probe 8 hotspot",
+   "nameRu": "P-кластер 2, датчик 8, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2A",
+   "name": "P-cluster 2 probe 9 (raw)",
+   "nameRu": "P-кластер 2, датчик 9 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2B",
+   "name": "P-cluster 2 probe 9",
+   "nameRu": "P-кластер 2, датчик 9",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2C",
+   "name": "P-cluster 2 probe 9 hotspot",
+   "nameRu": "P-кластер 2, датчик 9, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2D",
+   "name": "P-cluster 2 probe 10 (raw)",
+   "nameRu": "P-кластер 2, датчик 10 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2E",
+   "name": "P-cluster 2 probe 10",
+   "nameRu": "P-кластер 2, датчик 10",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2G",
+   "name": "P-cluster 2 probe 10 hotspot",
+   "nameRu": "P-кластер 2, датчик 10, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2I",
+   "name": "P-cluster 2 probe 11 (raw)",
+   "nameRu": "P-кластер 2, датчик 11 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2J",
+   "name": "P-cluster 2 probe 11",
+   "nameRu": "P-кластер 2, датчик 11",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2K",
+   "name": "P-cluster 2 probe 11 hotspot",
+   "nameRu": "P-кластер 2, датчик 11, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2L",
+   "name": "P-cluster 2 probe 12 (raw)",
+   "nameRu": "P-кластер 2, датчик 12 (сырой)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2M",
+   "name": "P-cluster 2 probe 12",
+   "nameRu": "P-кластер 2, датчик 12",
+   "group": "cpuPerformance",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2N",
+   "name": "P-cluster 2 probe 12 hotspot",
+   "nameRu": "P-кластер 2, датчик 12, пик",
+   "group": "cpuPerformance",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2O",
+   "name": "P-cluster 2 fabric 1 (raw)",
+   "nameRu": "P-кластер 2, шина 1 (сырой)",
+   "group": "cpuFabric",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2Q",
+   "name": "P-cluster 2 fabric 1",
+   "nameRu": "P-кластер 2, шина 1",
+   "group": "cpuFabric",
+   "role": "calibrated",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2R",
+   "name": "P-cluster 2 fabric 1 hotspot",
+   "nameRu": "P-кластер 2, шина 1, пик",
+   "group": "cpuFabric",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2S",
+   "name": "P-cluster 2 fabric 2 (raw)",
+   "nameRu": "P-кластер 2, шина 2 (сырой)",
+   "group": "cpuFabric",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2T",
+   "name": "P-cluster 2 fabric 2",
+   "nameRu": "P-кластер 2, шина 2",
+   "group": "cpuFabric",
+   "role": "calibrated",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2U",
+   "name": "P-cluster 2 fabric 2 hotspot",
+   "nameRu": "P-кластер 2, шина 2, пик",
+   "group": "cpuFabric",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2V",
+   "name": "P-cluster 2 fabric 3 (raw)",
+   "nameRu": "P-кластер 2, шина 3 (сырой)",
+   "group": "cpuFabric",
+   "role": "probe",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2W",
+   "name": "P-cluster 2 fabric 3",
+   "nameRu": "P-кластер 2, шина 3",
+   "group": "cpuFabric",
+   "role": "calibrated",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tp2X",
+   "name": "P-cluster 2 fabric 3 hotspot",
+   "nameRu": "P-кластер 2, шина 3, пик",
+   "group": "cpuFabric",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tpx0",
+   "name": "P-cluster 1 core avg",
+   "nameRu": "P-кластер 1: core avg",
+   "group": "cpuAggregate",
+   "role": "average",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tpx1",
+   "name": "P-cluster 1 core max",
+   "nameRu": "P-кластер 1: core max",
+   "group": "cpuAggregate",
+   "role": "maximum",
+   "visible": true,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tpx2",
+   "name": "P-cluster 1 fabric avg",
+   "nameRu": "P-кластер 1: fabric avg",
+   "group": "cpuAggregate",
+   "role": "average",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tpx3",
+   "name": "P-cluster 1 fabric max",
+   "nameRu": "P-кластер 1: fabric max",
+   "group": "cpuAggregate",
+   "role": "maximum",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tpx4",
+   "name": "P-cluster 1 zone avg",
+   "nameRu": "P-кластер 1: zone avg",
+   "group": "cpuAggregate",
+   "role": "average",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tpx5",
+   "name": "P-cluster 1 zone max",
+   "nameRu": "P-кластер 1: zone max",
+   "group": "cpuAggregate",
+   "role": "maximum",
+   "visible": false,
+   "cluster": 0,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tpx8",
+   "name": "P-cluster 2 core avg",
+   "nameRu": "P-кластер 2: core avg",
+   "group": "cpuAggregate",
+   "role": "average",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Tpx9",
+   "name": "P-cluster 2 core max",
+   "nameRu": "P-кластер 2: core max",
+   "group": "cpuAggregate",
+   "role": "maximum",
+   "visible": true,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "TpxA",
+   "name": "P-cluster 2 fabric avg",
+   "nameRu": "P-кластер 2: fabric avg",
+   "group": "cpuAggregate",
+   "role": "average",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "TpxB",
+   "name": "P-cluster 2 fabric max",
+   "nameRu": "P-кластер 2: fabric max",
+   "group": "cpuAggregate",
+   "role": "maximum",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "TpxC",
+   "name": "P-cluster 2 zone avg",
+   "nameRu": "P-кластер 2: zone avg",
+   "group": "cpuAggregate",
+   "role": "average",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "TpxD",
+   "name": "P-cluster 2 zone max",
+   "nameRu": "P-кластер 2: zone max",
+   "group": "cpuAggregate",
+   "role": "maximum",
+   "visible": false,
+   "cluster": 1,
+   "invalidValues": [
+    40.0
+   ]
+  },
+  {
+   "key": "Te04",
+   "name": "E-cluster probe 1 (raw)",
+   "nameRu": "E-кластер, датчик 1 (сырой)",
+   "group": "cpuEfficiency",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0
+  },
+  {
+   "key": "Te05",
+   "name": "E-cluster probe 1",
+   "nameRu": "E-кластер, датчик 1",
+   "group": "cpuEfficiency",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0
+  },
+  {
+   "key": "Te06",
+   "name": "E-cluster probe 1 hotspot",
+   "nameRu": "E-кластер, датчик 1, пик",
+   "group": "cpuEfficiency",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0
+  },
+  {
+   "key": "Te0R",
+   "name": "E-cluster probe 2 (raw)",
+   "nameRu": "E-кластер, датчик 2 (сырой)",
+   "group": "cpuEfficiency",
+   "role": "probe",
+   "visible": false,
+   "cluster": 0
+  },
+  {
+   "key": "Te0S",
+   "name": "E-cluster probe 2",
+   "nameRu": "E-кластер, датчик 2",
+   "group": "cpuEfficiency",
+   "role": "calibrated",
+   "visible": true,
+   "cluster": 0
+  },
+  {
+   "key": "Te0T",
+   "name": "E-cluster probe 2 hotspot",
+   "nameRu": "E-кластер, датчик 2, пик",
+   "group": "cpuEfficiency",
+   "role": "hotspot",
+   "visible": false,
+   "cluster": 0
+  },
+  {
+   "key": "Tex0",
+   "name": "E-cluster die 1",
+   "nameRu": "E-кластер, кристалл 1",
+   "group": "cpuAggregate",
+   "role": "calibrated",
+   "visible": false,
+   "cluster": 0
+  },
+  {
+   "key": "Tex1",
+   "name": "E-cluster die 1 max",
+   "nameRu": "E-кластер, кристалл 1 макс",
+   "group": "cpuAggregate",
+   "role": "maximum",
+   "visible": false,
+   "cluster": 0
+  },
+  {
+   "key": "Tex2",
+   "name": "E-cluster die 2",
+   "nameRu": "E-кластер, кристалл 2",
+   "group": "cpuAggregate",
+   "role": "calibrated",
+   "visible": false,
+   "cluster": 0
+  },
+  {
+   "key": "Tex3",
+   "name": "E-cluster die 2 max",
+   "nameRu": "E-кластер, кристалл 2 макс",
+   "group": "cpuAggregate",
+   "role": "maximum",
+   "visible": false,
+   "cluster": 0
+  },
+  {
+   "key": "Tg04",
+   "name": "GPU probe 1 (raw)",
+   "nameRu": "GPU, датчик 1 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg05",
+   "name": "GPU probe 1",
+   "nameRu": "GPU, датчик 1",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg0K",
+   "name": "GPU probe 2",
+   "nameRu": "GPU, датчик 2",
+   "group": "gpu",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Tg0L",
+   "name": "GPU probe 2 (mirror)",
+   "nameRu": "GPU, датчик 2 (копия)",
+   "group": "gpu",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Tg0R",
+   "name": "GPU probe 3 (raw)",
+   "nameRu": "GPU, датчик 3 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg0S",
+   "name": "GPU probe 3",
+   "nameRu": "GPU, датчик 3",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg0X",
+   "name": "GPU probe 4 (raw)",
+   "nameRu": "GPU, датчик 4 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg0Y",
+   "name": "GPU probe 4",
+   "nameRu": "GPU, датчик 4",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg0d",
+   "name": "GPU probe 5",
+   "nameRu": "GPU, датчик 5",
+   "group": "gpu",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Tg0e",
+   "name": "GPU probe 5 (mirror)",
+   "nameRu": "GPU, датчик 5 (копия)",
+   "group": "gpu",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Tg0j",
+   "name": "GPU probe 6 (raw)",
+   "nameRu": "GPU, датчик 6 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg0k",
+   "name": "GPU probe 6",
+   "nameRu": "GPU, датчик 6",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg0y",
+   "name": "GPU probe 7 (raw)",
+   "nameRu": "GPU, датчик 7 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg0z",
+   "name": "GPU probe 7",
+   "nameRu": "GPU, датчик 7",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg1E",
+   "name": "GPU probe 8",
+   "nameRu": "GPU, датчик 8",
+   "group": "gpu",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Tg1F",
+   "name": "GPU probe 8 (mirror)",
+   "nameRu": "GPU, датчик 8 (копия)",
+   "group": "gpu",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Tg1U",
+   "name": "GPU probe 9 (raw)",
+   "nameRu": "GPU, датчик 9 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg1V",
+   "name": "GPU probe 9",
+   "nameRu": "GPU, датчик 9",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg1c",
+   "name": "GPU probe 10",
+   "nameRu": "GPU, датчик 10",
+   "group": "gpu",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Tg1d",
+   "name": "GPU probe 10 (mirror)",
+   "nameRu": "GPU, датчик 10 (копия)",
+   "group": "gpu",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Tg1k",
+   "name": "GPU probe 11 (raw)",
+   "nameRu": "GPU, датчик 11 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg1l",
+   "name": "GPU probe 11",
+   "nameRu": "GPU, датчик 11",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg21",
+   "name": "GPU probe 12 (raw)",
+   "nameRu": "GPU, датчик 12 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg22",
+   "name": "GPU probe 12",
+   "nameRu": "GPU, датчик 12",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg2H",
+   "name": "GPU probe 13",
+   "nameRu": "GPU, датчик 13",
+   "group": "gpu",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Tg2I",
+   "name": "GPU probe 13 (mirror)",
+   "nameRu": "GPU, датчик 13 (копия)",
+   "group": "gpu",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Tg2P",
+   "name": "GPU probe 14 (raw)",
+   "nameRu": "GPU, датчик 14 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg2Q",
+   "name": "GPU probe 14",
+   "nameRu": "GPU, датчик 14",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg2X",
+   "name": "GPU probe 15 (raw)",
+   "nameRu": "GPU, датчик 15 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg2Y",
+   "name": "GPU probe 15",
+   "nameRu": "GPU, датчик 15",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg2f",
+   "name": "GPU probe 16 (raw)",
+   "nameRu": "GPU, датчик 16 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg2g",
+   "name": "GPU probe 16",
+   "nameRu": "GPU, датчик 16",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg2n",
+   "name": "GPU probe 17 (raw)",
+   "nameRu": "GPU, датчик 17 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg2o",
+   "name": "GPU probe 17",
+   "nameRu": "GPU, датчик 17",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg33",
+   "name": "GPU probe 18 (raw)",
+   "nameRu": "GPU, датчик 18 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg34",
+   "name": "GPU probe 18",
+   "nameRu": "GPU, датчик 18",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg3J",
+   "name": "GPU probe 19",
+   "nameRu": "GPU, датчик 19",
+   "group": "gpu",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Tg3K",
+   "name": "GPU probe 19 (mirror)",
+   "nameRu": "GPU, датчик 19 (копия)",
+   "group": "gpu",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Tg3Z",
+   "name": "GPU probe 20 (raw)",
+   "nameRu": "GPU, датчик 20 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg3a",
+   "name": "GPU probe 20",
+   "nameRu": "GPU, датчик 20",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg3h",
+   "name": "GPU probe 21 (raw)",
+   "nameRu": "GPU, датчик 21 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg3i",
+   "name": "GPU probe 21",
+   "nameRu": "GPU, датчик 21",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tg3p",
+   "name": "GPU probe 22 (raw)",
+   "nameRu": "GPU, датчик 22 (сырой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tg3q",
+   "name": "GPU probe 22",
+   "nameRu": "GPU, датчик 22",
+   "group": "gpu",
+   "role": "calibrated",
+   "visible": true
+  },
+  {
+   "key": "Tf04",
+   "name": "SoC CPU-side fabric 1",
+   "nameRu": "SoC: Шина у CPU 1",
+   "group": "socFabric",
+   "role": "average",
+   "visible": true
+  },
+  {
+   "key": "Tf06",
+   "name": "SoC CPU-side fabric 1 peak",
+   "nameRu": "SoC: Шина у CPU 1, пик",
+   "group": "socFabric",
+   "role": "peakHold",
+   "visible": false
+  },
+  {
+   "key": "Tf08",
+   "name": "SoC CPU-side fabric 1 probe 1",
+   "nameRu": "SoC: Шина у CPU 1, датчик 1",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf09",
+   "name": "SoC CPU-side fabric 1 probe 2",
+   "nameRu": "SoC: Шина у CPU 1, датчик 2",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf0A",
+   "name": "SoC CPU-side fabric 1 probe 3",
+   "nameRu": "SoC: Шина у CPU 1, датчик 3",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf0B",
+   "name": "SoC CPU-side fabric 1 probe 4",
+   "nameRu": "SoC: Шина у CPU 1, датчик 4",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf14",
+   "name": "SoC GPU fabric 1",
+   "nameRu": "SoC: Шина GPU 1",
+   "group": "socFabric",
+   "role": "average",
+   "visible": true
+  },
+  {
+   "key": "Tf16",
+   "name": "SoC GPU fabric 1 peak",
+   "nameRu": "SoC: Шина GPU 1, пик",
+   "group": "socFabric",
+   "role": "peakHold",
+   "visible": false
+  },
+  {
+   "key": "Tf18",
+   "name": "SoC GPU fabric 1 probe 1",
+   "nameRu": "SoC: Шина GPU 1, датчик 1",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf19",
+   "name": "SoC GPU fabric 1 probe 2",
+   "nameRu": "SoC: Шина GPU 1, датчик 2",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf1A",
+   "name": "SoC GPU fabric 1 probe 3",
+   "nameRu": "SoC: Шина GPU 1, датчик 3",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf1B",
+   "name": "SoC GPU fabric 1 probe 4",
+   "nameRu": "SoC: Шина GPU 1, датчик 4",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf24",
+   "name": "SoC GPU fabric 2",
+   "nameRu": "SoC: Шина GPU 2",
+   "group": "socFabric",
+   "role": "average",
+   "visible": true
+  },
+  {
+   "key": "Tf26",
+   "name": "SoC GPU fabric 2 peak",
+   "nameRu": "SoC: Шина GPU 2, пик",
+   "group": "socFabric",
+   "role": "peakHold",
+   "visible": false
+  },
+  {
+   "key": "Tf28",
+   "name": "SoC GPU fabric 2 probe 1",
+   "nameRu": "SoC: Шина GPU 2, датчик 1",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf29",
+   "name": "SoC GPU fabric 2 probe 2",
+   "nameRu": "SoC: Шина GPU 2, датчик 2",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf2A",
+   "name": "SoC GPU fabric 2 probe 3",
+   "nameRu": "SoC: Шина GPU 2, датчик 3",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf2B",
+   "name": "SoC GPU fabric 2 probe 4",
+   "nameRu": "SoC: Шина GPU 2, датчик 4",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf34",
+   "name": "SoC GPU fabric 3",
+   "nameRu": "SoC: Шина GPU 3",
+   "group": "socFabric",
+   "role": "average",
+   "visible": true
+  },
+  {
+   "key": "Tf36",
+   "name": "SoC GPU fabric 3 peak",
+   "nameRu": "SoC: Шина GPU 3, пик",
+   "group": "socFabric",
+   "role": "peakHold",
+   "visible": false
+  },
+  {
+   "key": "Tf38",
+   "name": "SoC GPU fabric 3 probe 1",
+   "nameRu": "SoC: Шина GPU 3, датчик 1",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf39",
+   "name": "SoC GPU fabric 3 probe 2",
+   "nameRu": "SoC: Шина GPU 3, датчик 2",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf3A",
+   "name": "SoC GPU fabric 3 probe 3",
+   "nameRu": "SoC: Шина GPU 3, датчик 3",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf3B",
+   "name": "SoC GPU fabric 3 probe 4",
+   "nameRu": "SoC: Шина GPU 3, датчик 4",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf44",
+   "name": "SoC CPU-side fabric 2",
+   "nameRu": "SoC: Шина у CPU 2",
+   "group": "socFabric",
+   "role": "average",
+   "visible": true
+  },
+  {
+   "key": "Tf46",
+   "name": "SoC CPU-side fabric 2 peak",
+   "nameRu": "SoC: Шина у CPU 2, пик",
+   "group": "socFabric",
+   "role": "peakHold",
+   "visible": false
+  },
+  {
+   "key": "Tf48",
+   "name": "SoC CPU-side fabric 2 probe 1",
+   "nameRu": "SoC: Шина у CPU 2, датчик 1",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf49",
+   "name": "SoC CPU-side fabric 2 probe 2",
+   "nameRu": "SoC: Шина у CPU 2, датчик 2",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf4A",
+   "name": "SoC CPU-side fabric 2 probe 3",
+   "nameRu": "SoC: Шина у CPU 2, датчик 3",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf4B",
+   "name": "SoC CPU-side fabric 2 probe 4",
+   "nameRu": "SoC: Шина у CPU 2, датчик 4",
+   "group": "socFabric",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tf9F",
+   "name": "SoC fabric aggregate",
+   "nameRu": "SoC: шина, среднее",
+   "group": "socFabric",
+   "role": "average",
+   "visible": false
+  },
+  {
+   "key": "TfA0",
+   "name": "SoC fabric aggregate max",
+   "nameRu": "SoC: шина, максимум",
+   "group": "socFabric",
+   "role": "maximum",
+   "visible": false
+  },
+  {
+   "key": "Ts00",
+   "name": "SoC sensor 1",
+   "nameRu": "SoC, датчик 1",
+   "group": "soc",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts01",
+   "name": "SoC sensor 1 (mirror)",
+   "nameRu": "SoC, датчик 1 (копия)",
+   "group": "soc",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Ts02",
+   "name": "SoC sensor 1 hotspot",
+   "nameRu": "SoC, датчик 1, пик",
+   "group": "soc",
+   "role": "hotspot",
+   "visible": false
+  },
+  {
+   "key": "Ts04",
+   "name": "SoC sensor 2",
+   "nameRu": "SoC, датчик 2",
+   "group": "soc",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts05",
+   "name": "SoC sensor 2 (mirror)",
+   "nameRu": "SoC, датчик 2 (копия)",
+   "group": "soc",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Ts06",
+   "name": "SoC sensor 2 hotspot",
+   "nameRu": "SoC, датчик 2, пик",
+   "group": "soc",
+   "role": "hotspot",
+   "visible": false
+  },
+  {
+   "key": "Ts08",
+   "name": "SoC sensor 3",
+   "nameRu": "SoC, датчик 3",
+   "group": "soc",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts09",
+   "name": "SoC sensor 3 (mirror)",
+   "nameRu": "SoC, датчик 3 (копия)",
+   "group": "soc",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Ts0A",
+   "name": "SoC sensor 3 hotspot",
+   "nameRu": "SoC, датчик 3, пик",
+   "group": "soc",
+   "role": "hotspot",
+   "visible": false
+  },
+  {
+   "key": "Ts0C",
+   "name": "SoC sensor 4",
+   "nameRu": "SoC, датчик 4",
+   "group": "soc",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts0D",
+   "name": "SoC sensor 4 (mirror)",
+   "nameRu": "SoC, датчик 4 (копия)",
+   "group": "soc",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Ts0E",
+   "name": "SoC sensor 4 hotspot",
+   "nameRu": "SoC, датчик 4, пик",
+   "group": "soc",
+   "role": "hotspot",
+   "visible": false
+  },
+  {
+   "key": "Ts0G",
+   "name": "SoC sensor 5",
+   "nameRu": "SoC, датчик 5",
+   "group": "soc",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts0H",
+   "name": "SoC sensor 5 (mirror)",
+   "nameRu": "SoC, датчик 5 (копия)",
+   "group": "soc",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Ts0I",
+   "name": "SoC sensor 5 hotspot",
+   "nameRu": "SoC, датчик 5, пик",
+   "group": "soc",
+   "role": "hotspot",
+   "visible": false
+  },
+  {
+   "key": "Ts0K",
+   "name": "SoC sensor 6",
+   "nameRu": "SoC, датчик 6",
+   "group": "soc",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts0L",
+   "name": "SoC sensor 6 (mirror)",
+   "nameRu": "SoC, датчик 6 (копия)",
+   "group": "soc",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Ts0M",
+   "name": "SoC sensor 6 hotspot",
+   "nameRu": "SoC, датчик 6, пик",
+   "group": "soc",
+   "role": "hotspot",
+   "visible": false
+  },
+  {
+   "key": "Ts0O",
+   "name": "SoC sensor 7",
+   "nameRu": "SoC, датчик 7",
+   "group": "soc",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts0Q",
+   "name": "SoC sensor 7 (mirror)",
+   "nameRu": "SoC, датчик 7 (копия)",
+   "group": "soc",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Ts0R",
+   "name": "SoC sensor 7 hotspot",
+   "nameRu": "SoC, датчик 7, пик",
+   "group": "soc",
+   "role": "hotspot",
+   "visible": false
+  },
+  {
+   "key": "Ts0T",
+   "name": "SoC sensor 8",
+   "nameRu": "SoC, датчик 8",
+   "group": "soc",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts0U",
+   "name": "SoC sensor 8 (mirror)",
+   "nameRu": "SoC, датчик 8 (копия)",
+   "group": "soc",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Ts0W",
+   "name": "SoC sensor 8 hotspot",
+   "nameRu": "SoC, датчик 8, пик",
+   "group": "soc",
+   "role": "hotspot",
+   "visible": false
+  },
+  {
+   "key": "Ts0d",
+   "name": "SoC sensor 9",
+   "nameRu": "SoC, датчик 9",
+   "group": "soc",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts0e",
+   "name": "SoC sensor 9 (mirror)",
+   "nameRu": "SoC, датчик 9 (копия)",
+   "group": "soc",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Ts0f",
+   "name": "SoC sensor 9 hotspot",
+   "nameRu": "SoC, датчик 9, пик",
+   "group": "soc",
+   "role": "hotspot",
+   "visible": false
+  },
+  {
+   "key": "Ts0g",
+   "name": "SoC sensor 10",
+   "nameRu": "SoC, датчик 10",
+   "group": "soc",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts0h",
+   "name": "SoC sensor 10 (mirror)",
+   "nameRu": "SoC, датчик 10 (копия)",
+   "group": "soc",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "Ts0i",
+   "name": "SoC sensor 10 hotspot",
+   "nameRu": "SoC, датчик 10, пик",
+   "group": "soc",
+   "role": "hotspot",
+   "visible": false
+  },
+  {
+   "key": "Tsx0",
+   "name": "SoC sensors average",
+   "nameRu": "SoC: среднее",
+   "group": "soc",
+   "role": "average",
+   "visible": false
+  },
+  {
+   "key": "Tsx1",
+   "name": "SoC sensors max",
+   "nameRu": "SoC: максимум",
+   "group": "soc",
+   "role": "maximum",
+   "visible": false
+  },
+  {
+   "key": "TCMb",
+   "name": "SoC die average",
+   "nameRu": "Кристалл SoC, среднее",
+   "group": "cpuAggregate",
+   "role": "average",
+   "visible": true
+  },
+  {
+   "key": "TCMz",
+   "name": "SoC die hotspot",
+   "nameRu": "Кристалл SoC, пик",
+   "group": "cpuAggregate",
+   "role": "maximum",
+   "visible": true
+  },
+  {
+   "key": "TCDX",
+   "name": "SoC die aggregate",
+   "nameRu": "Кристалл SoC, агрегат",
+   "group": "cpuAggregate",
+   "role": "maximum",
+   "visible": false
+  },
+  {
+   "key": "TVD0",
+   "name": "Virtual die",
+   "nameRu": "Виртуальный кристалл",
+   "group": "virtual",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "TVV0",
+   "name": "Virtual voltage-domain temp",
+   "nameRu": "Виртуальный (домен питания)",
+   "group": "virtual",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "TVMR",
+   "name": "Memory",
+   "nameRu": "Память",
+   "group": "memory",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TVMr",
+   "name": "Memory 2",
+   "nameRu": "Память 2",
+   "group": "memory",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TVm0",
+   "name": "Memory m0",
+   "nameRu": "Память m0",
+   "group": "memory",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TVm1",
+   "name": "Memory m1",
+   "nameRu": "Память m1",
+   "group": "memory",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TVm2",
+   "name": "Memory m2",
+   "nameRu": "Память m2",
+   "group": "memory",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TVm3",
+   "name": "Memory m3",
+   "nameRu": "Память m3",
+   "group": "memory",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "TVh0",
+   "name": "Memory h0",
+   "nameRu": "Память h0",
+   "group": "memory",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TVh1",
+   "name": "Memory h1",
+   "nameRu": "Память h1",
+   "group": "memory",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TVh2",
+   "name": "Memory h2",
+   "nameRu": "Память h2",
+   "group": "memory",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TVh3",
+   "name": "Memory h3",
+   "nameRu": "Память h3",
+   "group": "memory",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TVXX",
+   "name": "Memory summary",
+   "nameRu": "Память, сводно",
+   "group": "memory",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "TVXm",
+   "name": "Memory summary m",
+   "nameRu": "Память, сводно m",
+   "group": "memory",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "TVXh",
+   "name": "Memory summary h",
+   "nameRu": "Память, сводно h",
+   "group": "memory",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "TVMX",
+   "name": "Memory max (stepwise)",
+   "nameRu": "Память, макс",
+   "group": "memory",
+   "role": "maximum",
+   "visible": false
+  },
+  {
+   "key": "TVxx",
+   "name": "Memory max mirror",
+   "nameRu": "Память, макс (копия)",
+   "group": "memory",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "TVMx",
+   "name": "Memory stepwise x",
+   "nameRu": "Память x",
+   "group": "memory",
+   "role": "maximum",
+   "visible": false
+  },
+  {
+   "key": "TVmS",
+   "name": "Memory stepwise S",
+   "nameRu": "Память S",
+   "group": "memory",
+   "role": "maximum",
+   "visible": false
+  },
+  {
+   "key": "TVms",
+   "name": "Memory stepwise s",
+   "nameRu": "Память s",
+   "group": "memory",
+   "role": "maximum",
+   "visible": false
+  },
+  {
+   "key": "TMVR",
+   "name": "Memory voltage regulator",
+   "nameRu": "Регулятор питания памяти",
+   "group": "memory",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TB0T",
+   "name": "Battery",
+   "nameRu": "Аккумулятор",
+   "group": "battery",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TB1T",
+   "name": "Battery cell 1",
+   "nameRu": "Аккумулятор, ячейка 1",
+   "group": "battery",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TB2T",
+   "name": "Battery cell 2",
+   "nameRu": "Аккумулятор, ячейка 2",
+   "group": "battery",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TG0B",
+   "name": "Gas gauge TG0B",
+   "nameRu": "Контроллер АКБ TG0B",
+   "group": "battery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "TG0V",
+   "name": "Gas gauge TG0V",
+   "nameRu": "Контроллер АКБ TG0V",
+   "group": "battery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "TG2B",
+   "name": "Gas gauge TG2B",
+   "nameRu": "Контроллер АКБ TG2B",
+   "group": "battery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "TG0C",
+   "name": "Gas gauge TG0C",
+   "nameRu": "Контроллер АКБ TG0C",
+   "group": "battery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TG0H",
+   "name": "Gas gauge TG0H",
+   "nameRu": "Контроллер АКБ TG0H",
+   "group": "battery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TG1B",
+   "name": "Gas gauge TG1B",
+   "nameRu": "Контроллер АКБ TG1B",
+   "group": "battery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TH0x",
+   "name": "SSD (NAND)",
+   "nameRu": "SSD (NAND)",
+   "group": "storage",
+   "role": "maximum",
+   "visible": true
+  },
+  {
+   "key": "TH0a",
+   "name": "SSD NAND A",
+   "nameRu": "SSD NAND A",
+   "group": "storage",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TH0b",
+   "name": "SSD NAND B",
+   "nameRu": "SSD NAND B",
+   "group": "storage",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "TH1a",
+   "name": "SSD 2 NAND A",
+   "nameRu": "SSD 2 NAND A",
+   "group": "storage",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TH1b",
+   "name": "SSD 2 NAND B",
+   "nameRu": "SSD 2 NAND B",
+   "group": "storage",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TS0P",
+   "name": "SSD proximity",
+   "nameRu": "Рядом с SSD",
+   "group": "storage",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TW0P",
+   "name": "Wi-Fi / Bluetooth",
+   "nameRu": "Wi-Fi / Bluetooth",
+   "group": "wireless",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TR1d",
+   "name": "RF probe 1",
+   "nameRu": "Радиомодуль 1",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TR2d",
+   "name": "RF probe 2",
+   "nameRu": "Радиомодуль 2",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TR0Z",
+   "name": "RF reference (fixed)",
+   "nameRu": "Радиомодуль, эталон",
+   "group": "wireless",
+   "role": "reference",
+   "visible": false
+  },
+  {
+   "key": "TRD0",
+   "name": "RF delivery 1",
+   "nameRu": "Радиотракт 1",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRD1",
+   "name": "RF delivery 2",
+   "nameRu": "Радиотракт 2",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRD2",
+   "name": "RF delivery 3",
+   "nameRu": "Радиотракт 3",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRD3",
+   "name": "RF delivery 4",
+   "nameRu": "Радиотракт 4",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRD4",
+   "name": "RF delivery 5",
+   "nameRu": "Радиотракт 5",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRD5",
+   "name": "RF delivery 6",
+   "nameRu": "Радиотракт 6",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRD6",
+   "name": "RF delivery 7",
+   "nameRu": "Радиотракт 7",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRD7",
+   "name": "RF delivery 8",
+   "nameRu": "Радиотракт 8",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRD8",
+   "name": "RF delivery 9",
+   "nameRu": "Радиотракт 9",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRD9",
+   "name": "RF delivery 10",
+   "nameRu": "Радиотракт 10",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRDa",
+   "name": "RF delivery 11",
+   "nameRu": "Радиотракт 11",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRDb",
+   "name": "RF delivery 12",
+   "nameRu": "Радиотракт 12",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRDc",
+   "name": "RF delivery 13",
+   "nameRu": "Радиотракт 13",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRDd",
+   "name": "RF delivery 14",
+   "nameRu": "Радиотракт 14",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRDe",
+   "name": "RF delivery 15",
+   "nameRu": "Радиотракт 15",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRDf",
+   "name": "RF delivery 16",
+   "nameRu": "Радиотракт 16",
+   "group": "wireless",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TRDX",
+   "name": "RF delivery max",
+   "nameRu": "Радиотракт, максимум",
+   "group": "wireless",
+   "role": "maximum",
+   "visible": false
+  },
+  {
+   "key": "Ts0P",
+   "name": "Palm rest",
+   "nameRu": "Подставка для рук",
+   "group": "enclosure",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts1P",
+   "name": "Palm rest 2",
+   "nameRu": "Подставка для рук 2",
+   "group": "enclosure",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TAOL",
+   "name": "Ambient (outside lid)",
+   "nameRu": "Окружающая среда (снаружи)",
+   "group": "enclosure",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TaLP",
+   "name": "Airflow left",
+   "nameRu": "Воздушный поток слева",
+   "group": "airflow",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TaRF",
+   "name": "Airflow right",
+   "nameRu": "Воздушный поток справа",
+   "group": "airflow",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TaLW",
+   "name": "Airflow left wall",
+   "nameRu": "Левая стенка",
+   "group": "airflow",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TaRW",
+   "name": "Airflow right wall",
+   "nameRu": "Правая стенка",
+   "group": "airflow",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TaTP",
+   "name": "Ambient top",
+   "nameRu": "Верх корпуса",
+   "group": "airflow",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TaLT",
+   "name": "Thunderbolt left",
+   "nameRu": "Thunderbolt слева",
+   "group": "ports",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TaRT",
+   "name": "Thunderbolt right",
+   "nameRu": "Thunderbolt справа",
+   "group": "ports",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TCHP",
+   "name": "Charger proximity",
+   "nameRu": "Рядом с зарядным контроллером",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TPMP",
+   "name": "PMU proximity",
+   "nameRu": "Рядом с PMU",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TPSP",
+   "name": "Power supply proximity",
+   "nameRu": "Рядом с блоком питания",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TSVR",
+   "name": "SoC regulator V",
+   "nameRu": "Регулятор SoC V",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TSWR",
+   "name": "SoC regulator W",
+   "nameRu": "Регулятор SoC W",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TSXR",
+   "name": "SoC regulator X",
+   "nameRu": "Регулятор SoC X",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPD0",
+   "name": "PMU die 1",
+   "nameRu": "Кристалл PMU 1",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPD1",
+   "name": "PMU die 2",
+   "nameRu": "Кристалл PMU 2",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPD2",
+   "name": "PMU die 3",
+   "nameRu": "Кристалл PMU 3",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPD3",
+   "name": "PMU die 4",
+   "nameRu": "Кристалл PMU 4",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPD4",
+   "name": "PMU die 5",
+   "nameRu": "Кристалл PMU 5",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPD5",
+   "name": "PMU die 6",
+   "nameRu": "Кристалл PMU 6",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPD6",
+   "name": "PMU die 7",
+   "nameRu": "Кристалл PMU 7",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPD7",
+   "name": "PMU die 8",
+   "nameRu": "Кристалл PMU 8",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPD8",
+   "name": "PMU die 9",
+   "nameRu": "Кристалл PMU 9",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPD9",
+   "name": "PMU die 10",
+   "nameRu": "Кристалл PMU 10",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPDa",
+   "name": "PMU die 11",
+   "nameRu": "Кристалл PMU 11",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPDb",
+   "name": "PMU die 12",
+   "nameRu": "Кристалл PMU 12",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPDc",
+   "name": "PMU die 13",
+   "nameRu": "Кристалл PMU 13",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPDd",
+   "name": "PMU die 14",
+   "nameRu": "Кристалл PMU 14",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPDe",
+   "name": "PMU die 15",
+   "nameRu": "Кристалл PMU 15",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPDf",
+   "name": "PMU die 16",
+   "nameRu": "Кристалл PMU 16",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TPDX",
+   "name": "PMU die max",
+   "nameRu": "Кристалл PMU, максимум",
+   "group": "powerDelivery",
+   "role": "maximum",
+   "visible": true
+  },
+  {
+   "key": "TDBP",
+   "name": "Board near battery",
+   "nameRu": "Плата у АКБ",
+   "group": "board",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TDCR",
+   "name": "Board center right",
+   "nameRu": "Плата, центр справа",
+   "group": "board",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TDEC",
+   "name": "Board edge center",
+   "nameRu": "Плата, край по центру",
+   "group": "board",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TDEL",
+   "name": "Board edge left",
+   "nameRu": "Плата, левый край",
+   "group": "board",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TDER",
+   "name": "Board edge right",
+   "nameRu": "Плата, правый край",
+   "group": "board",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TDTP",
+   "name": "Board top",
+   "nameRu": "Плата, верх",
+   "group": "board",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TDeL",
+   "name": "Board edge left 2",
+   "nameRu": "Плата, левый край 2",
+   "group": "board",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TDeR",
+   "name": "Board edge right 2",
+   "nameRu": "Плата, правый край 2",
+   "group": "board",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TD00",
+   "name": "SoC diode 00 (static)",
+   "nameRu": "Диод SoC 00",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD01",
+   "name": "SoC diode 01 (static)",
+   "nameRu": "Диод SoC 01",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD02",
+   "name": "SoC diode 02 (static)",
+   "nameRu": "Диод SoC 02",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD03",
+   "name": "SoC diode 03 (static)",
+   "nameRu": "Диод SoC 03",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD04",
+   "name": "SoC diode 04 (static)",
+   "nameRu": "Диод SoC 04",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD10",
+   "name": "SoC diode 10 (static)",
+   "nameRu": "Диод SoC 10",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD11",
+   "name": "SoC diode 11 (static)",
+   "nameRu": "Диод SoC 11",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD12",
+   "name": "SoC diode 12 (static)",
+   "nameRu": "Диод SoC 12",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD13",
+   "name": "SoC diode 13 (static)",
+   "nameRu": "Диод SoC 13",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD14",
+   "name": "SoC diode 14 (static)",
+   "nameRu": "Диод SoC 14",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD20",
+   "name": "SoC diode 20 (static)",
+   "nameRu": "Диод SoC 20",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD21",
+   "name": "SoC diode 21 (static)",
+   "nameRu": "Диод SoC 21",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD22",
+   "name": "SoC diode 22 (static)",
+   "nameRu": "Диод SoC 22",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD23",
+   "name": "SoC diode 23 (static)",
+   "nameRu": "Диод SoC 23",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TD24",
+   "name": "SoC diode 24 (static)",
+   "nameRu": "Диод SoC 24",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TDVx",
+   "name": "Board diode virtual (static)",
+   "nameRu": "Диод платы, вирт.",
+   "group": "board",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TVS0",
+   "name": "Virtual sensor 0",
+   "nameRu": "Вирт. датчик 0",
+   "group": "virtual",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TVS1",
+   "name": "Virtual sensor 1",
+   "nameRu": "Вирт. датчик 1",
+   "group": "virtual",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TVS2",
+   "name": "Virtual sensor 2",
+   "nameRu": "Вирт. датчик 2",
+   "group": "virtual",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TVA0",
+   "name": "Virtual ambient",
+   "nameRu": "Вирт. окружающая",
+   "group": "virtual",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Ta00",
+   "name": "Ta00 (unused on this SKU)",
+   "nameRu": "Ta00 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Ta01",
+   "name": "Ta01 (unused on this SKU)",
+   "nameRu": "Ta01 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Ta04",
+   "name": "Ta04 (unused on this SKU)",
+   "nameRu": "Ta04 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Ta05",
+   "name": "Ta05 (unused on this SKU)",
+   "nameRu": "Ta05 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Ta08",
+   "name": "Ta08 (unused on this SKU)",
+   "nameRu": "Ta08 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Ta09",
+   "name": "Ta09 (unused on this SKU)",
+   "nameRu": "Ta09 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Ta0K",
+   "name": "Ta0K (unused on this SKU)",
+   "nameRu": "Ta0K (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Ta0L",
+   "name": "Ta0L (unused on this SKU)",
+   "nameRu": "Ta0L (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Ta0O",
+   "name": "Ta0O (unused on this SKU)",
+   "nameRu": "Ta0O (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Ta0P",
+   "name": "Ta0P (unused on this SKU)",
+   "nameRu": "Ta0P (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Ta0R",
+   "name": "Ta0R (unused on this SKU)",
+   "nameRu": "Ta0R (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Ta0S",
+   "name": "Ta0S (unused on this SKU)",
+   "nameRu": "Ta0S (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TVMD",
+   "name": "TVMD (unused on this SKU)",
+   "nameRu": "TVMD (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TVmd",
+   "name": "TVmd (unused on this SKU)",
+   "nameRu": "TVmd (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "TVXs",
+   "name": "TVXs (unused on this SKU)",
+   "nameRu": "TVXs (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Tz11",
+   "name": "Tz11 (unused on this SKU)",
+   "nameRu": "Tz11 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Tz12",
+   "name": "Tz12 (unused on this SKU)",
+   "nameRu": "Tz12 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Tz13",
+   "name": "Tz13 (unused on this SKU)",
+   "nameRu": "Tz13 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Tz14",
+   "name": "Tz14 (unused on this SKU)",
+   "nameRu": "Tz14 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Tz15",
+   "name": "Tz15 (unused on this SKU)",
+   "nameRu": "Tz15 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Tz16",
+   "name": "Tz16 (unused on this SKU)",
+   "nameRu": "Tz16 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Tz17",
+   "name": "Tz17 (unused on this SKU)",
+   "nameRu": "Tz17 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Tz18",
+   "name": "Tz18 (unused on this SKU)",
+   "nameRu": "Tz18 (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "Tz1j",
+   "name": "Tz1j (unused on this SKU)",
+   "nameRu": "Tz1j (не используется)",
+   "group": "other",
+   "role": "unused",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdev1",
+   "name": "PMU tdev1 (= SMC TMVR)",
+   "nameRu": "PMU tdev1 (= SMC TMVR)",
+   "group": "powerDelivery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdev2",
+   "name": "PMU tdev2 (= SMC TPMP)",
+   "nameRu": "PMU tdev2 (= SMC TPMP)",
+   "group": "powerDelivery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdev3",
+   "name": "PMU tdev3 (= SMC TaLW)",
+   "nameRu": "PMU tdev3 (= SMC TaLW)",
+   "group": "powerDelivery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdev4",
+   "name": "PMU tdev4 (= SMC TaRW)",
+   "nameRu": "PMU tdev4 (= SMC TaRW)",
+   "group": "powerDelivery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdev5",
+   "name": "PMU tdev5 (= SMC TaRT)",
+   "nameRu": "PMU tdev5 (= SMC TaRT)",
+   "group": "powerDelivery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdev6",
+   "name": "PMU tdev6 (= SMC TCHP)",
+   "nameRu": "PMU tdev6 (= SMC TCHP)",
+   "group": "powerDelivery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdev7",
+   "name": "PMU tdev7 (= SMC TS0P)",
+   "nameRu": "PMU tdev7 (= SMC TS0P)",
+   "group": "powerDelivery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdev8",
+   "name": "PMU tdev8 (= SMC TaLT)",
+   "nameRu": "PMU tdev8 (= SMC TaLT)",
+   "group": "powerDelivery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tcal",
+   "name": "PMU tcal (= SMC TR0Z)",
+   "nameRu": "PMU tcal (= SMC TR0Z)",
+   "group": "powerDelivery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "hid:gas gauge battery",
+   "name": "gas gauge battery (= SMC TB0T)",
+   "nameRu": "gas gauge battery (= SMC TB0T)",
+   "group": "battery",
+   "role": "duplicate",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdie1",
+   "name": "PMU die 1 (HID)",
+   "nameRu": "Кристалл PMU 1 (HID)",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdie2",
+   "name": "PMU die 2 (HID)",
+   "nameRu": "Кристалл PMU 2 (HID)",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdie3",
+   "name": "PMU die 3 (HID)",
+   "nameRu": "Кристалл PMU 3 (HID)",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdie4",
+   "name": "PMU die 4 (HID)",
+   "nameRu": "Кристалл PMU 4 (HID)",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdie5",
+   "name": "PMU die 5 (HID)",
+   "nameRu": "Кристалл PMU 5 (HID)",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdie6",
+   "name": "PMU die 6 (HID)",
+   "nameRu": "Кристалл PMU 6 (HID)",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdie7",
+   "name": "PMU die 7 (HID)",
+   "nameRu": "Кристалл PMU 7 (HID)",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdie8",
+   "name": "PMU die 8 (HID)",
+   "nameRu": "Кристалл PMU 8 (HID)",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdie9",
+   "name": "PMU die 9 (HID)",
+   "nameRu": "Кристалл PMU 9 (HID)",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "hid:PMU tdie10",
+   "name": "PMU die 10 (HID)",
+   "nameRu": "Кристалл PMU 10 (HID)",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "hid:NAND CH0 temp",
+   "name": "SSD NAND channel 0 (HID, 1 °C steps)",
+   "nameRu": "SSD NAND, канал 0 (HID)",
+   "group": "storage",
+   "role": "duplicate",
+   "visible": false
+  }
+ ]
+}

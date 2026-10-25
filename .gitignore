@@ -1,0 +1,20 @@
+# Generated
+Thermik.xcodeproj/
+App/Info.plist
+Helper/Info.plist
+build/
+DerivedData/
+.build/
+Packages/ThermikCore/.build/
+.swiftpm/
+*.xcuserstate
+xcuserdata/
+# Local signing
+Config/Signing.local.xcconfig
+# PROPRIETARY third-party material — never commit (clean-room rule)
+TG Pro.zip
+*.zip
+.DS_Store
+
+# Local research notes, probes and raw hardware dumps (may contain machine identifiers)
+research/

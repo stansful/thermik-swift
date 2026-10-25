@@ -1,0 +1,6 @@
+// Copy to Config/Signing.local.xcconfig (git-ignored) to build with your Team ID (enables the SMAppService helper path).
+// Without that file the build is ad-hoc ("Sign to Run Locally", no Apple account needed) and the app installs the
+// helper with the legacy installer (one administrator prompt per rebuild of the helper).
+DEVELOPMENT_TEAM = ABCDE12345
+CODE_SIGN_IDENTITY = Apple Development
+CODE_SIGN_STYLE = Automatic

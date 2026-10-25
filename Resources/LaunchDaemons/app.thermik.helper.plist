@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- SMAppService daemon plist. Copied to Thermik.app/Contents/Library/LaunchDaemons/.
+     Registered with SMAppService.daemon(plistName: "app.thermik.helper.plist"). -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>app.thermik.helper</string>
+	<!-- App-bundle-relative; survives the user moving Thermik.app. Only valid for SMAppService plists. -->
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/thermik-helper</string>
+	<key>MachServices</key>
+	<dict>
+		<key>app.thermik.helper</key>
+		<true/>
+	</dict>
+	<!-- Not required for in-bundle plists (association is automatic), harmless. -->
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>app.thermik.Thermik</string>
+	</array>
+	<!-- Relaunch after crash (exit != 0); a clean idle exit (0) waits for the next XPC lookup.
+	     Implies RunAtLoad: the helper runs once per boot and recovers stranded manual state. -->
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ProcessType</key>
+	<string>Adaptive</string>
+	<!-- Optional hardening for Team-ID builds (enforced since macOS 14). Generate at build time:
+	<key>SpawnConstraint</key>
+	<dict>
+		<key>team-identifier</key><string>$(DEVELOPMENT_TEAM)</string>
+		<key>signing-identifier</key><string>app.thermik.helper</string>
+	</dict>
+	-->
+</dict>
+</plist>
