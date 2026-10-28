@@ -1,0 +1,151 @@
+# Tests every push to a branch other than master, and every pull request. A push to master does not start this
+# workflow: release.yml calls it (workflow_call) before it publishes anything, so the checks run once per push and no
+# skipped CI run is left behind.
+#   scripts        actionlint (the workflows), shellcheck (scripts/, .github/scripts/) and the tests of the release
+#                  scripts (scripts/tests/run.sh) with Ubuntu's bash 5 and GNU tools
+#   selftest       the thermik-probe self-checks (scripts/lib/selftest.sh), and the release scripts' tests again with
+#                  macOS's bash 3.2 and BSD tools, which scripts/make-release.sh runs with
+#   debug          the Debug build (scripts/lib/build.sh Debug), which must leave every tracked file as committed (it
+#                  regenerates App/Resources/Localizable.xcstrings)
+#   release-build  scripts/build-release.sh: the release files as release.yml publishes them, uploaded as the
+#                  artifact release-<version> (release.yml's publish job takes them from there)
+# The macOS jobs run on GitHub's xcode-27 runners with Xcode 27.1 (.github/actions/xcode).
+name: CI
+
+on:
+  push:
+    branches-ignore: [master]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release:
+        description: Called by release.yml, which runs these checks on every push to master
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# A newer push to a branch or pull request cancels its older checks. The checks release.yml calls get a group of
+# their own run (release.yml runs one release at a time itself), so nothing, not even a dry run of the same branch,
+# cancels them.
+concurrency:
+  group: ci-${{ inputs.release && format('release-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !inputs.release }}
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  scripts:
+    name: Scripts and workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      ACTIONLINT_IMAGE: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # the workflows, with shellcheck over their run: scripts
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo "$ACTIONLINT_IMAGE" -color
+      # actionlint does not look at script files; the same image's shellcheck does. -f gcc: this static build
+      # cannot print the Cyrillic source lines of its default format, whatever the locale
+      - name: shellcheck
+        if: ${{ !cancelled() }}
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo --entrypoint shellcheck "$ACTIONLINT_IMAGE" -x -f gcc \
+            scripts/*.sh scripts/lib/*.sh scripts/tests/*.sh .github/scripts/*.sh
+      - name: Release scripts tests (scripts/tests/run.sh, bash 5)
+        if: ${{ !cancelled() }}
+        run: scripts/tests/run.sh
+
+  selftest:
+    name: Self-checks
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/xcode
+        with:
+          xcodegen: "false"
+      - name: thermik-probe self-checks (scripts/lib/selftest.sh)
+        run: scripts/lib/selftest.sh
+      - name: Release scripts tests (scripts/tests/run.sh, bash 3.2)
+        if: ${{ !cancelled() }}
+        env:
+          TEST_BASH: /bin/bash
+        run: scripts/tests/run.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ failure() }}
+        with:
+          name: selftest-logs
+          path: build/selftest/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  debug:
+    name: Debug build
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/xcode
+      - name: scripts/lib/build.sh Debug
+        run: scripts/lib/build.sh Debug
+      - name: The build changed no tracked file
+        run: |
+          changed="$(git status --porcelain --untracked-files=no)"
+          if [[ -n "$changed" ]]; then
+            git --no-pager diff --stat
+            echo "::error title=The build changed tracked files::${changed//$'\n'/; }. scripts/lib/build.sh regenerates App/Resources/Localizable.xcstrings from App/Resources/L10n/: run it and commit the result."
+            exit 1
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ failure() }}
+        with:
+          name: debug-build-log
+          path: build/xcodebuild-Debug.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  release-build:
+    name: Release build
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/xcode
+      - name: scripts/build-release.sh
+        run: scripts/build-release.sh --out "$RUNNER_TEMP/release"
+      - name: Read the version
+        id: version
+        run: |
+          . scripts/lib/version.sh
+          echo "version=$(app_version_get .)" >> "$GITHUB_OUTPUT"
+      # The files release.yml publishes when this run releases the version (kept for the 30 days GitHub allows
+      # re-running a failed publish job); a branch's build to try out otherwise
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ steps.version.outputs.version }}
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+          retention-days: ${{ inputs.release && 30 || 7 }}
+          compression-level: 0
+          overwrite: true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ failure() }}
+        with:
+          name: release-build-log
+          path: build/xcodebuild-Release.log
+          if-no-files-found: ignore
+          retention-days: 7

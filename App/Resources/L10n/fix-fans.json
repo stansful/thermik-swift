@@ -1,0 +1,6 @@
+{
+  "The helper returned the fans to Auto because it could not read the temperatures or set the fan speed safely.": {"ru": "Помощник вернул вентиляторы в режим «Авто», потому что не смог прочитать температуры или безопасно задать скорость вентиляторов.", "comment": "Fan control status after the helper's own safety check (no readable die sensor, failed override write) returned the fans to macOS"},
+  "Fan control stopped because the fans kept returning to Auto.": {"ru": "Управление вентиляторами остановлено, потому что вентиляторы постоянно возвращались в режим «Авто».", "comment": "Fan control status after Thermik lost control of the fans several times in two minutes (macOS took them back, the helper reverted)"},
+  "Not every fan could be read, so Thermik does not control the fans. Quit and reopen Thermik to try again.": {"ru": "Не удалось прочитать данные всех вентиляторов, поэтому Thermik не управляет ими. Завершите и снова откройте Thermik, чтобы попробовать ещё раз.", "comment": "Fan control status: fan discovery could not read one of the fans on a Mac where all fans must be controlled together"},
+  "Each fan has its own speed: %@": {"ru": "У каждого вентилятора своя скорость: %@", "comment": "Popover, Fixed mode with 'Same speed for all fans' off; %@ lists the fans, e.g. 'Left fan 30 % · Right fan 60 %'"}
+}

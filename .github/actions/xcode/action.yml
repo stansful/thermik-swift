@@ -1,0 +1,45 @@
+name: Xcode build host
+description: The Xcode the project builds with (DEVELOPER_DIR for every later step) and, for the app, XcodeGen
+
+inputs:
+  xcode-version:
+    description: >-
+      The Xcode of local builds (docs/development.md), from the runner image's /Applications/Xcode_<version>.app.
+      The xcode-27 runners have 27.1.
+    default: "27.1"
+  xcodegen:
+    description: Install XcodeGen (Homebrew), which scripts/lib/build.sh needs; the self-checks need only Swift
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Select Xcode ${{ inputs.xcode-version }}
+      shell: bash --noprofile --norc -euo pipefail {0}
+      env:
+        XCODE_VERSION: ${{ inputs.xcode-version }}
+      run: |
+        developer_dir="/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+        if [[ ! -d "$developer_dir" ]]; then
+          echo "::error title=No Xcode ${XCODE_VERSION} on this runner::It has: $(cd /Applications && ls -d Xcode*.app | tr '\n' ' ')"
+          exit 1
+        fi
+        echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"
+        DEVELOPER_DIR="$developer_dir" xcodebuild -version
+
+    - name: Install XcodeGen
+      if: inputs.xcodegen == 'true'
+      shell: bash --noprofile --norc -euo pipefail {0}
+      env:
+        HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        HOMEBREW_NO_ENV_HINTS: "1"
+      run: |
+        brew install xcodegen
+        # project.yml needs 2.46.0 or later (docs/development.md)
+        . scripts/lib/version.sh
+        have="$(xcodegen --version | sed -n 's/^Version: //p')"
+        if ! version_valid "$have" || version_gt 2.46.0 "$have"; then
+          echo "::error title=XcodeGen is too old::Homebrew installed XcodeGen '${have}', the project needs 2.46.0 or later."
+          exit 1
+        fi
+        echo "XcodeGen $have"

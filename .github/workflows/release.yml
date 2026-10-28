@@ -1,0 +1,303 @@
+name: Release
+
+# Releases Thermik from master. Every push to master runs the whole CI first (ci.yml through workflow_call; ci.yml
+# skips its own run of that push, so the checks run once), and the CI's release build (scripts/build-release.sh, what
+# a local build runs) is what gets published: when the version in Config/Shared.xcconfig (MARKETING_VERSION) has no
+# release yet, Thermik-<version>.zip, Thermik-<version>-dSYMs.zip and SHA256SUMS become GitHub release
+# "Thermik <version>" with the plain tag <version> (no "v") on the built commit: a draft first, every upload checked,
+# then published as the latest release.
+# A push that does not bump the version is tested and ends with a notice. Bump it with scripts/make-release.sh,
+# which commits "feat: release - version X.Y.Z". Nothing is published from a commit whose checks fail: re-run the
+# failed jobs, or push a fix (the version is still unreleased).
+#
+# Jobs:
+#   gate     reads the version and its release state (.github/scripts/release-state.sh).
+#   quality  the whole CI (ci.yml) on every push to master, released or not. Its release-build job builds the
+#            release files (the artifact release-<version>); no secrets: the app is ad-hoc signed.
+#   publish  creates the release from that artifact: draft -> upload and check the assets -> publish (GitHub creates
+#            the tag).
+#
+# workflow_dispatch with dry_run runs the checks and the release build of any branch the same way and publishes
+# nothing; the release files stay the run's artifact.
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build only: no tag, no release"
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  # One release run at a time, never cancelled half-way. GitHub keeps one waiting run per group: a newer push to master
+  # replaces a run that has not started, and the newer run releases the version instead (queue: max would keep them
+  # all, but actionlint 1.7.12 does not know the key yet). Dry runs get their own group.
+  group: ${{ inputs.dry_run && format('release-dry-run-{0}', github.run_id) || 'release' }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  gate:
+    name: Decide
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+      publish: ${{ steps.decide.outputs.publish }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            /Config/Shared.xcconfig
+            /scripts/lib/
+            /.github/scripts/
+          sparse-checkout-cone-mode: false
+
+      - name: Read the version and its release state
+        id: decide
+        env:
+          DRY_RUN: ${{ inputs.dry_run == true }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          . scripts/lib/version.sh
+          if ! version="$(app_version_get .)"; then
+            echo "::error file=Config/Shared.xcconfig::Expected exactly one line MARKETING_VERSION = X.Y.Z."
+            exit 1
+          fi
+          if ! build="$(app_build_get .)" || ! build_valid "$build"; then
+            echo "::error file=Config/Shared.xcconfig::Expected exactly one line CURRENT_PROJECT_VERSION = N, a build number from 1 with up to 9 digits."
+            exit 1
+          fi
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            # Any branch and any version: build and check, never publish. The state is only reported.
+            state="$(bash .github/scripts/release-state.sh)" || state="not releasable"
+            publish=false
+          else
+            if [[ "$GITHUB_REF" != "refs/heads/master" ]]; then
+              echo "::error::Releases are published only from master. Use dry_run to build another branch."
+              exit 1
+            fi
+            state="$(bash .github/scripts/release-state.sh)"
+            case $state in
+              released)
+                publish=false
+                echo "::notice title=Nothing to release::Version ${version} is already released. Bump it with scripts/make-release.sh (commit \"feat: release - version X.Y.Z\") and push to release."
+                ;;
+              retry)
+                publish=true
+                echo "::notice::Tag ${version} is already on this commit without a release: publishing it."
+                ;;
+              new)
+                publish=true
+                ;;
+              *)
+                echo "::error::release-state.sh printed '${state}'."
+                exit 1
+                ;;
+            esac
+          fi
+
+          {
+            echo "version=$version"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version $version, build $build ($state): publish $publish"
+
+  # Every push to master, released or not, gets the whole CI here (ci.yml itself ignores pushes to master), and its
+  # release-build job builds what publish uploads. It runs even when the gate refused the version, so the push is
+  # still tested.
+  quality:
+    name: CI
+    needs: gate
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    with:
+      release: true
+
+  # A separate job on another machine, so the write token never meets the build, and a failed upload can be re-run
+  # without rebuilding.
+  publish:
+    name: Publish release
+    needs: [gate, quality]
+    if: needs.gate.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.gate.outputs.version }}
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # Full history and tags for the notes, without the tree.
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+          sparse-checkout: |
+            /Config/Shared.xcconfig
+            /scripts/lib/
+            /.github/scripts/
+          sparse-checkout-cone-mode: false
+
+      # Built by the quality job of this run (ci.yml, release-build) from this very commit
+      - name: Download the release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ env.VERSION }}
+          path: ${{ runner.temp }}/release-assets
+
+      - name: Check the release files
+        run: |
+          . scripts/lib/version.sh
+          if [[ "$(app_version_get .)" != "$VERSION" ]]; then
+            echo "::error file=Config/Shared.xcconfig::MARKETING_VERSION is not $VERSION."
+            exit 1
+          fi
+          expected="$(release_assets "$VERSION" | LC_ALL=C sort)"
+          actual="$(find "$RUNNER_TEMP/release-assets" -mindepth 1 -maxdepth 1 -printf '%P\n' | LC_ALL=C sort)"
+          if [[ "$expected" != "$actual" ]]; then
+            echo "::error::The release build holds ${actual//$'\n'/ }, not ${expected//$'\n'/ }."
+            exit 1
+          fi
+          (cd "$RUNNER_TEMP/release-assets" && sha256sum -c SHA256SUMS)
+
+      - name: Write release notes
+        run: |
+          bash .github/scripts/release-notes.sh > "$RUNNER_TEMP/release-notes.md"
+          cat "$RUNNER_TEMP/release-notes.md"
+
+      - name: Publish ${{ needs.gate.outputs.version }}
+        run: |
+          . scripts/lib/version.sh
+          # Fresh state, not the gate's: this job may be a re-run days later.
+          state="$(bash .github/scripts/release-state.sh)"
+          if [[ "$state" == released ]]; then
+            # A re-run after GitHub applied the publish but answered it with an error: the release went live
+            # from this very commit.
+            if [[ "$(git ls-remote --tags origin | tag_commit "$VERSION")" == "$GITHUB_SHA" ]]; then
+              echo "::notice::${VERSION} is already published from this commit."
+              exit 0
+            fi
+            echo "::error::${VERSION} has already been released from another commit."
+            exit 1
+          fi
+          # A re-run of an old run must not release a commit that master has already moved past. That newer run
+          # releases the version instead (GITHUB_TOKEN could not tag this commit anyway once the workflows differ).
+          tip="$(git ls-remote origin refs/heads/master | cut -f 1)"
+          if [[ "$tip" != "$GITHUB_SHA" ]]; then
+            echo "::notice title=Not published::master moved to ${tip}; the run for that commit releases ${VERSION}."
+            exit 0
+          fi
+
+          assets=()
+          while IFS= read -r name; do
+            assets+=("$RUNNER_TEMP/release-assets/$name")
+          done < <(release_assets "$VERSION")
+          for f in "${assets[@]}"; do
+            if [[ ! -s "$f" ]]; then
+              echo "::error::The release build lacks $(basename "$f")."
+              exit 1
+            fi
+          done
+
+          # A run interrupted before publishing leaves a draft. Remove our own, never one a person made.
+          gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq '.[] | select(.draft and .tag_name == env.VERSION) | "\(.id) \(.author.login)"' \
+            | while read -r release_id author; do
+                if [[ "$author" != "github-actions[bot]" ]]; then
+                  echo "::error::Draft release ${VERSION} by ${author} already exists. Publish or delete it, then re-run."
+                  exit 1
+                fi
+                gh api --method DELETE "repos/$GH_REPO/releases/$release_id" --silent
+              done
+
+          # 1) A draft: invisible to /releases/latest. GitHub creates the tag on publish. The API returns the draft's
+          #    id at once; everything below works with that id, never with a lookup in the release list, which lags
+          #    behind.
+          id="$(gh api --method POST "repos/$GH_REPO/releases" \
+            -f tag_name="$VERSION" -f target_commitish="$GITHUB_SHA" \
+            -f name="Thermik $VERSION" -F body=@"$RUNNER_TEMP/release-notes.md" \
+            -F draft=true --jq .id)"
+          if [[ ! "$id" =~ ^[0-9]+$ ]]; then
+            echo "::error::Creating the draft for ${VERSION} returned no release id: ${id}"
+            exit 1
+          fi
+          # A failed step removes the draft, but never a release that went live: GitHub may apply the PATCH below
+          # and still answer it with an error, so once the PATCH was sent only a release that is still a draft
+          # goes. A re-run then finds the release published from this commit.
+          trap 'if [[ -z "${published:-}" ]] && { [[ -z "${patching:-}" ]] || [[ "$(gh api "repos/$GH_REPO/releases/$id" --jq .draft 2>/dev/null)" == true ]]; }; then gh api --method DELETE "repos/$GH_REPO/releases/$id" --silent || true; fi' EXIT
+
+          # 2) Every asset, then the draft's asset list against the built files: name, size and digest
+          for f in "${assets[@]}"; do
+            curl -fsS --max-time 300 -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/octet-stream" --data-binary "@$f" \
+              "https://uploads.github.com/repos/$GH_REPO/releases/$id/assets?name=$(basename "$f")" > /dev/null
+          done
+          uploaded="$RUNNER_TEMP/uploaded.txt"
+          for _ in 1 2 3 4 5 6; do
+            gh api "repos/$GH_REPO/releases/$id" \
+              --jq '.assets[] | "\(.name) \(.size) \(.state) \(.digest // "-")"' > "$uploaded"
+            [[ "$(wc -l < "$uploaded")" -ne "${#assets[@]}" ]] || break
+            sleep 5
+          done
+          if [[ "$(wc -l < "$uploaded")" -ne "${#assets[@]}" ]]; then
+            echo "::error::The draft has $(wc -l < "$uploaded") assets instead of ${#assets[@]}."
+            exit 1
+          fi
+          for f in "${assets[@]}"; do
+            name="$(basename "$f")"
+            size="" asset_state="" digest=""
+            read -r _ size asset_state digest < <(awk -v n="$name" '$1 == n' "$uploaded") || true
+            if [[ "$size" != "$(wc -c < "$f" | tr -d ' ')" || "$asset_state" != uploaded ]]; then
+              echo "::error::${name} on the draft does not match the built file (size ${size:-?}, state ${asset_state:-?})."
+              exit 1
+            fi
+            if [[ "$digest" == "-" ]]; then
+              echo "::warning::GitHub reported no digest for ${name}."
+            elif [[ "$digest" != "sha256:$(sha256sum "$f" | cut -d ' ' -f 1)" ]]; then
+              echo "::error::${name} on the draft has digest ${digest}, which differs from the built file."
+              exit 1
+            fi
+          done
+
+          # 3) Publish as the latest release
+          patching=1
+          gh api --method PATCH "repos/$GH_REPO/releases/$id" -F draft=false -f make_latest=true --silent
+          published=1
+
+          latest=""
+          for _ in 1 2 3 4 5 6; do
+            latest="$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name || true)"
+            [[ "$latest" == "$VERSION" ]] && break
+            sleep 5
+          done
+          if [[ "$latest" != "$VERSION" ]]; then
+            echo "::error::/releases/latest returns \"${latest}\", not ${VERSION}."
+            exit 1
+          fi
+          # The tag GitHub created on publish, an annotated one followed to its commit
+          tag_sha="$(git ls-remote --tags origin | tag_commit "$VERSION")"
+          if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::Tag ${VERSION} points at ${tag_sha:-nothing}, not ${GITHUB_SHA}."
+            exit 1
+          fi
+          echo "Published https://github.com/$GH_REPO/releases/tag/$VERSION"

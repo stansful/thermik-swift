@@ -20,6 +20,10 @@ import ThermikCore
     let sensorSampler: any SensorSampling
     let systemSampler: any SystemSampling
 
+    /// The running app's environment, for entry points the system calls without one (App Intents, `thermik://`
+    /// links). Set once by `init`; there is exactly one environment per process.
+    private(set) static var current: AppEnvironment?
+
     /// `demo == true` with launch argument `-ThermikDemo YES` (synthetic data, mock helper; works on any Mac).
     init(demo: Bool) {
         isDemo = demo
@@ -32,6 +36,7 @@ import ThermikCore
         systemSampler = demo ? DemoSystemSampler() : SystemSampler()
         sensors = SensorStore(settings: settings)
         system = SystemStore()
+        system.attach(events: events)
         history = HistoryStore(sensors: sensors)
         fans = FanStore(settings: settings, sensors: sensors, system: system, helper: helper, events: events, router: router)
         history.attach(fans: fans, system: system)
@@ -39,6 +44,7 @@ import ThermikCore
         diagnostics = DiagnosticsStore(sensors: sensors, fans: fans, system: system, helper: helper, sampler: systemSampler,
                                        events: events)
         alerts.attach(diagnostics: diagnostics, systemSampler: systemSampler)
+        Self.current = self
     }
 
     static var launchedInDemoMode: Bool { UserDefaults.standard.bool(forKey: "ThermikDemo") }

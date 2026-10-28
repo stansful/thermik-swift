@@ -4,6 +4,10 @@
 // an ad-hoc + hardened-runtime binary cannot dlopen another ad-hoc dylib (HELP §1, probe_lv).
 import PackageDescription
 
+// Release builds of the shipped libraries are optimized for size like the app (Config/Release.xcconfig): the
+// xcconfig does not reach package targets.
+let sizeOptimized: [SwiftSetting] = [.unsafeFlags(["-Osize"], .when(configuration: .release))]
+
 let package = Package(
     name: "ThermikCore",
     defaultLocalization: "en",
@@ -21,17 +25,22 @@ let package = Package(
         .target(name: "CThermikSPI",
                 linkerSettings: [.linkedFramework("IOKit"), .linkedFramework("CoreFoundation")]),
         .target(name: "ThermikHelperShared",
+                swiftSettings: sizeOptimized,
                 linkerSettings: [.linkedFramework("Security")]),
         .target(name: "ThermikSMC",
+                swiftSettings: sizeOptimized,
                 linkerSettings: [.linkedFramework("IOKit")]),
         .target(name: "ThermikSMCWriter",
-                dependencies: ["ThermikSMC", "ThermikHelperShared"]),
+                dependencies: ["ThermikSMC", "ThermikHelperShared"],
+                swiftSettings: sizeOptimized),
         .target(name: "ThermikHelperCore",
                 dependencies: ["ThermikSMCWriter", "ThermikSMC", "ThermikHelperShared"],
+                swiftSettings: sizeOptimized,
                 linkerSettings: [.linkedFramework("IOKit"), .linkedFramework("Security")]),
         .target(name: "ThermikCore",
                 dependencies: ["ThermikSMC", "ThermikHelperShared", "CThermikSPI"],
                 resources: [.process("Resources")],
+                swiftSettings: sizeOptimized,
                 linkerSettings: [.linkedFramework("IOKit"), .linkedFramework("AppKit")]),
         .executableTarget(name: "ThermikProbe",
                           dependencies: ["ThermikCore", "ThermikSMC", "ThermikSMCWriter", "ThermikHelperShared", "ThermikHelperCore"]),

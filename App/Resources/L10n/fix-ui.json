@@ -1,0 +1,18 @@
+{
+  "Sensors unavailable": {"ru": "Датчики недоступны", "comment": "Sensor discovery failed (no SMC and no HID sensors): popover hero, Overview tile, sensor placeholders"},
+  "CSV log: %@": {"ru": "Журнал CSV: %@", "comment": "Logs page: CSV logging error; %@ is the system error text"},
+  "the control lease expired": {"ru": "истекла аренда управления", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "the control lease was lost": {"ru": "аренда управления потеряна", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "Thermik disconnected from the helper": {"ru": "Thermik отключился от помощника", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "recovery after a helper restart": {"ru": "восстановление после перезапуска помощника", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "no chip temperature could be read": {"ru": "не удалось прочитать температуру чипа", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "overheating": {"ru": "перегрев", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "reset requested by Thermik": {"ru": "сброс по запросу Thermik", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "Thermik released the fans": {"ru": "Thermik передал управление macOS", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "the helper was uninstalled": {"ru": "помощник удалён", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "repeated restore attempt": {"ru": "повторная попытка восстановления", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "the safety override could not be applied": {"ru": "не удалось включить защиту от перегрева", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "the safety override ended": {"ru": "защита от перегрева отключена", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "the safety override could not be released": {"ru": "не удалось отключить защиту от перегрева", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
+  "the helper was stopped": {"ru": "помощник остановлен", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”): the helper process was terminated"}
+}

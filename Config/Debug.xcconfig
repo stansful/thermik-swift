@@ -1,3 +1,13 @@
 #include "Shared.xcconfig"
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG $(inherited)
 SWIFT_OPTIMIZATION_LEVEL = -Onone
+// Debuggable builds are an explicit developer opt-in (THERMIK_DEBUGGABLE, default NO in Shared.xcconfig), never a
+// side effect of the Debug configuration: the helper this build embeds is installed as root, and a helper that
+// accepts debuggable clients lets any same-user process attach a debugger to Thermik (Developer Mode) and drive
+// the fans through its trusted connection. Opt in with `scripts/lib/build.sh Debug --debuggable` (command line) or
+// `THERMIK_DEBUGGABLE = YES` in Config/Signing.local.xcconfig (Xcode Run with the debugger attached). YES does both:
+//   - injects com.apple.security.get-task-allow into both binaries, so lldb / Xcode can attach, and
+//   - compiles a helper that accepts such clients (THERMIK_ALLOW_DEBUGGABLE_CLIENTS, Helper/main.swift).
+// NO: neither binary is debuggable and the helper refuses debuggable clients, exactly like Release.
+CODE_SIGN_INJECT_BASE_ENTITLEMENTS = $(THERMIK_DEBUGGABLE)
+THERMIK_DEBUGGABLE_CONDITION_YES = THERMIK_ALLOW_DEBUGGABLE_CLIENTS
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG $(THERMIK_DEBUGGABLE_CONDITION_$(THERMIK_DEBUGGABLE)) $(inherited)

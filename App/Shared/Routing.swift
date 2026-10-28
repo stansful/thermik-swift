@@ -5,17 +5,22 @@ import ThermikCore
 
 enum Route: Hashable, Codable, Sendable {
     case overview, sensors(SensorID?), fans, battery, system, diagnostics, logs, alerts
-    /// Sidebar identity (ignores the selected sensor).
+    /// Settings live in the main window too (nil: keep the tab that was open).
+    case settings(SettingsTab?)
+    /// Sidebar identity (ignores the selected sensor / settings tab).
     var page: Page {
         switch self {
         case .overview: .overview; case .sensors: .sensors; case .fans: .fans; case .battery: .battery
         case .system: .system; case .diagnostics: .diagnostics; case .logs: .logs; case .alerts: .alerts
+        case .settings: .settings
         }
     }
-    enum Page: String, Hashable, Codable, Sendable, CaseIterable { case overview, sensors, fans, battery, system, diagnostics, logs, alerts }
+    enum Page: String, Hashable, Codable, Sendable, CaseIterable {
+        case overview, sensors, fans, battery, system, diagnostics, logs, alerts, settings
+    }
 }
 
-enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
+enum SettingsTab: String, CaseIterable, Identifiable, Codable, Sendable {
     case general, menuBar, sensors, fans, alerts, logging, appearance, helper, advanced, about
     var id: String { rawValue }
 }
@@ -41,8 +46,10 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
     var settingsOpen = false
     var inspectedSensor: SensorID? = nil     // inspector open → keep sampling it every tick
     var isAnyUIVisible: Bool { popoverOpen || mainWindowVisible }
+    /// The System page is the only view of per-core load, GPU usage and IOReport data.
+    var showsSystemPage: Bool { mainWindowVisible && visiblePage == .system }
     /// IOReport frequency/power sampling (~6–8 ms) only while something shows it.
-    var needsSoCMetrics: Bool { popoverOpen || (mainWindowVisible && (visiblePage == .overview || visiblePage == .system)) }
+    var needsSoCMetrics: Bool { showsSystemPage }
     var needsBatteryDetail: Bool { mainWindowVisible && visiblePage == .battery }
     var needsAllSensors: Bool { popoverOpen || (mainWindowVisible && [.overview, .sensors].contains(visiblePage)) }
 }

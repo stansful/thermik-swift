@@ -1,0 +1,5 @@
+# actionlint (ci.yml) knows the GitHub-hosted runner labels of its own release; newer ones go here. xcode-27 is
+# GitHub's Xcode 27 image (generally available since 2026-10-15), younger than actionlint 1.7.12.
+self-hosted-runner:
+  labels:
+    - xcode-27

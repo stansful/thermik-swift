@@ -16,8 +16,11 @@ OTHER_CODE_SIGN_FLAGS = $(inherited) --options=runtime
 // executable refuses to load ("mapping process and mapped file (non-platform) have different Team IDs",
 // verified: dyld abort at launch). Keep one statically linked executable.
 ENABLE_DEBUG_DYLIB = NO
-MARKETING_VERSION = 0.1.0
-CURRENT_PROJECT_VERSION = 1
+MARKETING_VERSION = 0.2.0
+CURRENT_PROJECT_VERSION = 2
 // Bump ONLY when helper code changes: the app reinstalls/re-registers the helper when this differs.
-HELPER_BUILD_VERSION = 1
+HELPER_BUILD_VERSION = 6
+// Developer opt-in for a debuggable Debug build (see Debug.xcconfig); Release ignores it. Set it to YES in
+// Signing.local.xcconfig (below) or with `scripts/lib/build.sh Debug --debuggable`, never here.
+THERMIK_DEBUGGABLE = NO
 #include? "Signing.local.xcconfig"

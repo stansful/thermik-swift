@@ -1171,7 +1171,7 @@
   {
    "key": "Tpx0",
    "name": "P-cluster 1 core avg",
-   "nameRu": "P-кластер 1: core avg",
+   "nameRu": "P-кластер 1: сред. ядер",
    "group": "cpuAggregate",
    "role": "average",
    "visible": false,
@@ -1183,7 +1183,7 @@
   {
    "key": "Tpx1",
    "name": "P-cluster 1 core max",
-   "nameRu": "P-кластер 1: core max",
+   "nameRu": "P-кластер 1: макс. ядер",
    "group": "cpuAggregate",
    "role": "maximum",
    "visible": true,
@@ -1195,7 +1195,7 @@
   {
    "key": "Tpx2",
    "name": "P-cluster 1 fabric avg",
-   "nameRu": "P-кластер 1: fabric avg",
+   "nameRu": "P-кластер 1: сред. шины",
    "group": "cpuAggregate",
    "role": "average",
    "visible": false,
@@ -1207,7 +1207,7 @@
   {
    "key": "Tpx3",
    "name": "P-cluster 1 fabric max",
-   "nameRu": "P-кластер 1: fabric max",
+   "nameRu": "P-кластер 1: макс. шины",
    "group": "cpuAggregate",
    "role": "maximum",
    "visible": false,
@@ -1219,7 +1219,7 @@
   {
    "key": "Tpx4",
    "name": "P-cluster 1 zone avg",
-   "nameRu": "P-кластер 1: zone avg",
+   "nameRu": "P-кластер 1: сред. зоны",
    "group": "cpuAggregate",
    "role": "average",
    "visible": false,
@@ -1231,7 +1231,7 @@
   {
    "key": "Tpx5",
    "name": "P-cluster 1 zone max",
-   "nameRu": "P-кластер 1: zone max",
+   "nameRu": "P-кластер 1: макс. зоны",
    "group": "cpuAggregate",
    "role": "maximum",
    "visible": false,
@@ -1243,7 +1243,7 @@
   {
    "key": "Tpx8",
    "name": "P-cluster 2 core avg",
-   "nameRu": "P-кластер 2: core avg",
+   "nameRu": "P-кластер 2: сред. ядер",
    "group": "cpuAggregate",
    "role": "average",
    "visible": false,
@@ -1255,7 +1255,7 @@
   {
    "key": "Tpx9",
    "name": "P-cluster 2 core max",
-   "nameRu": "P-кластер 2: core max",
+   "nameRu": "P-кластер 2: макс. ядер",
    "group": "cpuAggregate",
    "role": "maximum",
    "visible": true,
@@ -1267,7 +1267,7 @@
   {
    "key": "TpxA",
    "name": "P-cluster 2 fabric avg",
-   "nameRu": "P-кластер 2: fabric avg",
+   "nameRu": "P-кластер 2: сред. шины",
    "group": "cpuAggregate",
    "role": "average",
    "visible": false,
@@ -1279,7 +1279,7 @@
   {
    "key": "TpxB",
    "name": "P-cluster 2 fabric max",
-   "nameRu": "P-кластер 2: fabric max",
+   "nameRu": "P-кластер 2: макс. шины",
    "group": "cpuAggregate",
    "role": "maximum",
    "visible": false,
@@ -1291,7 +1291,7 @@
   {
    "key": "TpxC",
    "name": "P-cluster 2 zone avg",
-   "nameRu": "P-кластер 2: zone avg",
+   "nameRu": "P-кластер 2: сред. зоны",
    "group": "cpuAggregate",
    "role": "average",
    "visible": false,
@@ -1303,7 +1303,7 @@
   {
    "key": "TpxD",
    "name": "P-cluster 2 zone max",
-   "nameRu": "P-кластер 2: zone max",
+   "nameRu": "P-кластер 2: макс. зоны",
    "group": "cpuAggregate",
    "role": "maximum",
    "visible": false,
@@ -1372,8 +1372,7 @@
    "nameRu": "E-кластер, кристалл 1",
    "group": "cpuAggregate",
    "role": "calibrated",
-   "visible": false,
-   "cluster": 0
+   "visible": false
   },
   {
    "key": "Tex1",
@@ -1381,8 +1380,7 @@
    "nameRu": "E-кластер, кристалл 1 макс",
    "group": "cpuAggregate",
    "role": "maximum",
-   "visible": false,
-   "cluster": 0
+   "visible": false
   },
   {
    "key": "Tex2",
@@ -1390,8 +1388,7 @@
    "nameRu": "E-кластер, кристалл 2",
    "group": "cpuAggregate",
    "role": "calibrated",
-   "visible": false,
-   "cluster": 0
+   "visible": false
   },
   {
    "key": "Tex3",
@@ -1399,13 +1396,12 @@
    "nameRu": "E-кластер, кристалл 2 макс",
    "group": "cpuAggregate",
    "role": "maximum",
-   "visible": false,
-   "cluster": 0
+   "visible": false
   },
   {
    "key": "Tg04",
    "name": "GPU probe 1 (raw)",
-   "nameRu": "GPU, датчик 1 (сырой)",
+   "nameRu": "ГП, датчик 1 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1413,7 +1409,7 @@
   {
    "key": "Tg05",
    "name": "GPU probe 1",
-   "nameRu": "GPU, датчик 1",
+   "nameRu": "ГП, датчик 1",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1421,7 +1417,7 @@
   {
    "key": "Tg0K",
    "name": "GPU probe 2",
-   "nameRu": "GPU, датчик 2",
+   "nameRu": "ГП, датчик 2",
    "group": "gpu",
    "role": "probe",
    "visible": true
@@ -1429,7 +1425,7 @@
   {
    "key": "Tg0L",
    "name": "GPU probe 2 (mirror)",
-   "nameRu": "GPU, датчик 2 (копия)",
+   "nameRu": "ГП, датчик 2 (копия)",
    "group": "gpu",
    "role": "duplicate",
    "visible": false
@@ -1437,7 +1433,7 @@
   {
    "key": "Tg0R",
    "name": "GPU probe 3 (raw)",
-   "nameRu": "GPU, датчик 3 (сырой)",
+   "nameRu": "ГП, датчик 3 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1445,7 +1441,7 @@
   {
    "key": "Tg0S",
    "name": "GPU probe 3",
-   "nameRu": "GPU, датчик 3",
+   "nameRu": "ГП, датчик 3",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1453,7 +1449,7 @@
   {
    "key": "Tg0X",
    "name": "GPU probe 4 (raw)",
-   "nameRu": "GPU, датчик 4 (сырой)",
+   "nameRu": "ГП, датчик 4 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1461,7 +1457,7 @@
   {
    "key": "Tg0Y",
    "name": "GPU probe 4",
-   "nameRu": "GPU, датчик 4",
+   "nameRu": "ГП, датчик 4",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1469,7 +1465,7 @@
   {
    "key": "Tg0d",
    "name": "GPU probe 5",
-   "nameRu": "GPU, датчик 5",
+   "nameRu": "ГП, датчик 5",
    "group": "gpu",
    "role": "probe",
    "visible": true
@@ -1477,7 +1473,7 @@
   {
    "key": "Tg0e",
    "name": "GPU probe 5 (mirror)",
-   "nameRu": "GPU, датчик 5 (копия)",
+   "nameRu": "ГП, датчик 5 (копия)",
    "group": "gpu",
    "role": "duplicate",
    "visible": false
@@ -1485,7 +1481,7 @@
   {
    "key": "Tg0j",
    "name": "GPU probe 6 (raw)",
-   "nameRu": "GPU, датчик 6 (сырой)",
+   "nameRu": "ГП, датчик 6 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1493,7 +1489,7 @@
   {
    "key": "Tg0k",
    "name": "GPU probe 6",
-   "nameRu": "GPU, датчик 6",
+   "nameRu": "ГП, датчик 6",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1501,7 +1497,7 @@
   {
    "key": "Tg0y",
    "name": "GPU probe 7 (raw)",
-   "nameRu": "GPU, датчик 7 (сырой)",
+   "nameRu": "ГП, датчик 7 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1509,7 +1505,7 @@
   {
    "key": "Tg0z",
    "name": "GPU probe 7",
-   "nameRu": "GPU, датчик 7",
+   "nameRu": "ГП, датчик 7",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1517,7 +1513,7 @@
   {
    "key": "Tg1E",
    "name": "GPU probe 8",
-   "nameRu": "GPU, датчик 8",
+   "nameRu": "ГП, датчик 8",
    "group": "gpu",
    "role": "probe",
    "visible": true
@@ -1525,7 +1521,7 @@
   {
    "key": "Tg1F",
    "name": "GPU probe 8 (mirror)",
-   "nameRu": "GPU, датчик 8 (копия)",
+   "nameRu": "ГП, датчик 8 (копия)",
    "group": "gpu",
    "role": "duplicate",
    "visible": false
@@ -1533,7 +1529,7 @@
   {
    "key": "Tg1U",
    "name": "GPU probe 9 (raw)",
-   "nameRu": "GPU, датчик 9 (сырой)",
+   "nameRu": "ГП, датчик 9 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1541,7 +1537,7 @@
   {
    "key": "Tg1V",
    "name": "GPU probe 9",
-   "nameRu": "GPU, датчик 9",
+   "nameRu": "ГП, датчик 9",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1549,7 +1545,7 @@
   {
    "key": "Tg1c",
    "name": "GPU probe 10",
-   "nameRu": "GPU, датчик 10",
+   "nameRu": "ГП, датчик 10",
    "group": "gpu",
    "role": "probe",
    "visible": true
@@ -1557,7 +1553,7 @@
   {
    "key": "Tg1d",
    "name": "GPU probe 10 (mirror)",
-   "nameRu": "GPU, датчик 10 (копия)",
+   "nameRu": "ГП, датчик 10 (копия)",
    "group": "gpu",
    "role": "duplicate",
    "visible": false
@@ -1565,7 +1561,7 @@
   {
    "key": "Tg1k",
    "name": "GPU probe 11 (raw)",
-   "nameRu": "GPU, датчик 11 (сырой)",
+   "nameRu": "ГП, датчик 11 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1573,7 +1569,7 @@
   {
    "key": "Tg1l",
    "name": "GPU probe 11",
-   "nameRu": "GPU, датчик 11",
+   "nameRu": "ГП, датчик 11",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1581,7 +1577,7 @@
   {
    "key": "Tg21",
    "name": "GPU probe 12 (raw)",
-   "nameRu": "GPU, датчик 12 (сырой)",
+   "nameRu": "ГП, датчик 12 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1589,7 +1585,7 @@
   {
    "key": "Tg22",
    "name": "GPU probe 12",
-   "nameRu": "GPU, датчик 12",
+   "nameRu": "ГП, датчик 12",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1597,7 +1593,7 @@
   {
    "key": "Tg2H",
    "name": "GPU probe 13",
-   "nameRu": "GPU, датчик 13",
+   "nameRu": "ГП, датчик 13",
    "group": "gpu",
    "role": "probe",
    "visible": true
@@ -1605,7 +1601,7 @@
   {
    "key": "Tg2I",
    "name": "GPU probe 13 (mirror)",
-   "nameRu": "GPU, датчик 13 (копия)",
+   "nameRu": "ГП, датчик 13 (копия)",
    "group": "gpu",
    "role": "duplicate",
    "visible": false
@@ -1613,7 +1609,7 @@
   {
    "key": "Tg2P",
    "name": "GPU probe 14 (raw)",
-   "nameRu": "GPU, датчик 14 (сырой)",
+   "nameRu": "ГП, датчик 14 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1621,7 +1617,7 @@
   {
    "key": "Tg2Q",
    "name": "GPU probe 14",
-   "nameRu": "GPU, датчик 14",
+   "nameRu": "ГП, датчик 14",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1629,7 +1625,7 @@
   {
    "key": "Tg2X",
    "name": "GPU probe 15 (raw)",
-   "nameRu": "GPU, датчик 15 (сырой)",
+   "nameRu": "ГП, датчик 15 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1637,7 +1633,7 @@
   {
    "key": "Tg2Y",
    "name": "GPU probe 15",
-   "nameRu": "GPU, датчик 15",
+   "nameRu": "ГП, датчик 15",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1645,7 +1641,7 @@
   {
    "key": "Tg2f",
    "name": "GPU probe 16 (raw)",
-   "nameRu": "GPU, датчик 16 (сырой)",
+   "nameRu": "ГП, датчик 16 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1653,7 +1649,7 @@
   {
    "key": "Tg2g",
    "name": "GPU probe 16",
-   "nameRu": "GPU, датчик 16",
+   "nameRu": "ГП, датчик 16",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1661,7 +1657,7 @@
   {
    "key": "Tg2n",
    "name": "GPU probe 17 (raw)",
-   "nameRu": "GPU, датчик 17 (сырой)",
+   "nameRu": "ГП, датчик 17 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1669,7 +1665,7 @@
   {
    "key": "Tg2o",
    "name": "GPU probe 17",
-   "nameRu": "GPU, датчик 17",
+   "nameRu": "ГП, датчик 17",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1677,7 +1673,7 @@
   {
    "key": "Tg33",
    "name": "GPU probe 18 (raw)",
-   "nameRu": "GPU, датчик 18 (сырой)",
+   "nameRu": "ГП, датчик 18 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1685,7 +1681,7 @@
   {
    "key": "Tg34",
    "name": "GPU probe 18",
-   "nameRu": "GPU, датчик 18",
+   "nameRu": "ГП, датчик 18",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1693,7 +1689,7 @@
   {
    "key": "Tg3J",
    "name": "GPU probe 19",
-   "nameRu": "GPU, датчик 19",
+   "nameRu": "ГП, датчик 19",
    "group": "gpu",
    "role": "probe",
    "visible": true
@@ -1701,7 +1697,7 @@
   {
    "key": "Tg3K",
    "name": "GPU probe 19 (mirror)",
-   "nameRu": "GPU, датчик 19 (копия)",
+   "nameRu": "ГП, датчик 19 (копия)",
    "group": "gpu",
    "role": "duplicate",
    "visible": false
@@ -1709,7 +1705,7 @@
   {
    "key": "Tg3Z",
    "name": "GPU probe 20 (raw)",
-   "nameRu": "GPU, датчик 20 (сырой)",
+   "nameRu": "ГП, датчик 20 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1717,7 +1713,7 @@
   {
    "key": "Tg3a",
    "name": "GPU probe 20",
-   "nameRu": "GPU, датчик 20",
+   "nameRu": "ГП, датчик 20",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1725,7 +1721,7 @@
   {
    "key": "Tg3h",
    "name": "GPU probe 21 (raw)",
-   "nameRu": "GPU, датчик 21 (сырой)",
+   "nameRu": "ГП, датчик 21 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1733,7 +1729,7 @@
   {
    "key": "Tg3i",
    "name": "GPU probe 21",
-   "nameRu": "GPU, датчик 21",
+   "nameRu": "ГП, датчик 21",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1741,7 +1737,7 @@
   {
    "key": "Tg3p",
    "name": "GPU probe 22 (raw)",
-   "nameRu": "GPU, датчик 22 (сырой)",
+   "nameRu": "ГП, датчик 22 (сырой)",
    "group": "gpu",
    "role": "probe",
    "visible": false
@@ -1749,7 +1745,7 @@
   {
    "key": "Tg3q",
    "name": "GPU probe 22",
-   "nameRu": "GPU, датчик 22",
+   "nameRu": "ГП, датчик 22",
    "group": "gpu",
    "role": "calibrated",
    "visible": true
@@ -1757,7 +1753,7 @@
   {
    "key": "Tf04",
    "name": "SoC CPU-side fabric 1",
-   "nameRu": "SoC: Шина у CPU 1",
+   "nameRu": "SoC: Шина у ЦП 1",
    "group": "socFabric",
    "role": "average",
    "visible": true
@@ -1765,7 +1761,7 @@
   {
    "key": "Tf06",
    "name": "SoC CPU-side fabric 1 peak",
-   "nameRu": "SoC: Шина у CPU 1, пик",
+   "nameRu": "SoC: Шина у ЦП 1, пик",
    "group": "socFabric",
    "role": "peakHold",
    "visible": false
@@ -1773,7 +1769,7 @@
   {
    "key": "Tf08",
    "name": "SoC CPU-side fabric 1 probe 1",
-   "nameRu": "SoC: Шина у CPU 1, датчик 1",
+   "nameRu": "SoC: Шина у ЦП 1, датчик 1",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1781,7 +1777,7 @@
   {
    "key": "Tf09",
    "name": "SoC CPU-side fabric 1 probe 2",
-   "nameRu": "SoC: Шина у CPU 1, датчик 2",
+   "nameRu": "SoC: Шина у ЦП 1, датчик 2",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1789,7 +1785,7 @@
   {
    "key": "Tf0A",
    "name": "SoC CPU-side fabric 1 probe 3",
-   "nameRu": "SoC: Шина у CPU 1, датчик 3",
+   "nameRu": "SoC: Шина у ЦП 1, датчик 3",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1797,7 +1793,7 @@
   {
    "key": "Tf0B",
    "name": "SoC CPU-side fabric 1 probe 4",
-   "nameRu": "SoC: Шина у CPU 1, датчик 4",
+   "nameRu": "SoC: Шина у ЦП 1, датчик 4",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1805,7 +1801,7 @@
   {
    "key": "Tf14",
    "name": "SoC GPU fabric 1",
-   "nameRu": "SoC: Шина GPU 1",
+   "nameRu": "SoC: Шина ГП 1",
    "group": "socFabric",
    "role": "average",
    "visible": true
@@ -1813,7 +1809,7 @@
   {
    "key": "Tf16",
    "name": "SoC GPU fabric 1 peak",
-   "nameRu": "SoC: Шина GPU 1, пик",
+   "nameRu": "SoC: Шина ГП 1, пик",
    "group": "socFabric",
    "role": "peakHold",
    "visible": false
@@ -1821,7 +1817,7 @@
   {
    "key": "Tf18",
    "name": "SoC GPU fabric 1 probe 1",
-   "nameRu": "SoC: Шина GPU 1, датчик 1",
+   "nameRu": "SoC: Шина ГП 1, датчик 1",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1829,7 +1825,7 @@
   {
    "key": "Tf19",
    "name": "SoC GPU fabric 1 probe 2",
-   "nameRu": "SoC: Шина GPU 1, датчик 2",
+   "nameRu": "SoC: Шина ГП 1, датчик 2",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1837,7 +1833,7 @@
   {
    "key": "Tf1A",
    "name": "SoC GPU fabric 1 probe 3",
-   "nameRu": "SoC: Шина GPU 1, датчик 3",
+   "nameRu": "SoC: Шина ГП 1, датчик 3",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1845,7 +1841,7 @@
   {
    "key": "Tf1B",
    "name": "SoC GPU fabric 1 probe 4",
-   "nameRu": "SoC: Шина GPU 1, датчик 4",
+   "nameRu": "SoC: Шина ГП 1, датчик 4",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1853,7 +1849,7 @@
   {
    "key": "Tf24",
    "name": "SoC GPU fabric 2",
-   "nameRu": "SoC: Шина GPU 2",
+   "nameRu": "SoC: Шина ГП 2",
    "group": "socFabric",
    "role": "average",
    "visible": true
@@ -1861,7 +1857,7 @@
   {
    "key": "Tf26",
    "name": "SoC GPU fabric 2 peak",
-   "nameRu": "SoC: Шина GPU 2, пик",
+   "nameRu": "SoC: Шина ГП 2, пик",
    "group": "socFabric",
    "role": "peakHold",
    "visible": false
@@ -1869,7 +1865,7 @@
   {
    "key": "Tf28",
    "name": "SoC GPU fabric 2 probe 1",
-   "nameRu": "SoC: Шина GPU 2, датчик 1",
+   "nameRu": "SoC: Шина ГП 2, датчик 1",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1877,7 +1873,7 @@
   {
    "key": "Tf29",
    "name": "SoC GPU fabric 2 probe 2",
-   "nameRu": "SoC: Шина GPU 2, датчик 2",
+   "nameRu": "SoC: Шина ГП 2, датчик 2",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1885,7 +1881,7 @@
   {
    "key": "Tf2A",
    "name": "SoC GPU fabric 2 probe 3",
-   "nameRu": "SoC: Шина GPU 2, датчик 3",
+   "nameRu": "SoC: Шина ГП 2, датчик 3",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1893,7 +1889,7 @@
   {
    "key": "Tf2B",
    "name": "SoC GPU fabric 2 probe 4",
-   "nameRu": "SoC: Шина GPU 2, датчик 4",
+   "nameRu": "SoC: Шина ГП 2, датчик 4",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1901,7 +1897,7 @@
   {
    "key": "Tf34",
    "name": "SoC GPU fabric 3",
-   "nameRu": "SoC: Шина GPU 3",
+   "nameRu": "SoC: Шина ГП 3",
    "group": "socFabric",
    "role": "average",
    "visible": true
@@ -1909,7 +1905,7 @@
   {
    "key": "Tf36",
    "name": "SoC GPU fabric 3 peak",
-   "nameRu": "SoC: Шина GPU 3, пик",
+   "nameRu": "SoC: Шина ГП 3, пик",
    "group": "socFabric",
    "role": "peakHold",
    "visible": false
@@ -1917,7 +1913,7 @@
   {
    "key": "Tf38",
    "name": "SoC GPU fabric 3 probe 1",
-   "nameRu": "SoC: Шина GPU 3, датчик 1",
+   "nameRu": "SoC: Шина ГП 3, датчик 1",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1925,7 +1921,7 @@
   {
    "key": "Tf39",
    "name": "SoC GPU fabric 3 probe 2",
-   "nameRu": "SoC: Шина GPU 3, датчик 2",
+   "nameRu": "SoC: Шина ГП 3, датчик 2",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1933,7 +1929,7 @@
   {
    "key": "Tf3A",
    "name": "SoC GPU fabric 3 probe 3",
-   "nameRu": "SoC: Шина GPU 3, датчик 3",
+   "nameRu": "SoC: Шина ГП 3, датчик 3",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1941,7 +1937,7 @@
   {
    "key": "Tf3B",
    "name": "SoC GPU fabric 3 probe 4",
-   "nameRu": "SoC: Шина GPU 3, датчик 4",
+   "nameRu": "SoC: Шина ГП 3, датчик 4",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1949,7 +1945,7 @@
   {
    "key": "Tf44",
    "name": "SoC CPU-side fabric 2",
-   "nameRu": "SoC: Шина у CPU 2",
+   "nameRu": "SoC: Шина у ЦП 2",
    "group": "socFabric",
    "role": "average",
    "visible": true
@@ -1957,7 +1953,7 @@
   {
    "key": "Tf46",
    "name": "SoC CPU-side fabric 2 peak",
-   "nameRu": "SoC: Шина у CPU 2, пик",
+   "nameRu": "SoC: Шина у ЦП 2, пик",
    "group": "socFabric",
    "role": "peakHold",
    "visible": false
@@ -1965,7 +1961,7 @@
   {
    "key": "Tf48",
    "name": "SoC CPU-side fabric 2 probe 1",
-   "nameRu": "SoC: Шина у CPU 2, датчик 1",
+   "nameRu": "SoC: Шина у ЦП 2, датчик 1",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1973,7 +1969,7 @@
   {
    "key": "Tf49",
    "name": "SoC CPU-side fabric 2 probe 2",
-   "nameRu": "SoC: Шина у CPU 2, датчик 2",
+   "nameRu": "SoC: Шина у ЦП 2, датчик 2",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1981,7 +1977,7 @@
   {
    "key": "Tf4A",
    "name": "SoC CPU-side fabric 2 probe 3",
-   "nameRu": "SoC: Шина у CPU 2, датчик 3",
+   "nameRu": "SoC: Шина у ЦП 2, датчик 3",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -1989,7 +1985,7 @@
   {
    "key": "Tf4B",
    "name": "SoC CPU-side fabric 2 probe 4",
-   "nameRu": "SoC: Шина у CPU 2, датчик 4",
+   "nameRu": "SoC: Шина у ЦП 2, датчик 4",
    "group": "socFabric",
    "role": "probe",
    "visible": false
@@ -2749,7 +2745,7 @@
   {
    "key": "Ts0P",
    "name": "Palm rest",
-   "nameRu": "Подставка для рук",
+   "nameRu": "Упор для запястий",
    "group": "enclosure",
    "role": "probe",
    "visible": true
@@ -2757,7 +2753,7 @@
   {
    "key": "Ts1P",
    "name": "Palm rest 2",
-   "nameRu": "Подставка для рук 2",
+   "nameRu": "Упор для запястий 2",
    "group": "enclosure",
    "role": "probe",
    "visible": true
@@ -3429,7 +3425,7 @@
   {
    "key": "hid:PMU tdev1",
    "name": "PMU tdev1 (= SMC TMVR)",
-   "nameRu": "PMU tdev1 (= SMC TMVR)",
+   "nameRu": "Датчик PMU 1 (HID, = SMC TMVR)",
    "group": "powerDelivery",
    "role": "duplicate",
    "visible": false
@@ -3437,7 +3433,7 @@
   {
    "key": "hid:PMU tdev2",
    "name": "PMU tdev2 (= SMC TPMP)",
-   "nameRu": "PMU tdev2 (= SMC TPMP)",
+   "nameRu": "Датчик PMU 2 (HID, = SMC TPMP)",
    "group": "powerDelivery",
    "role": "duplicate",
    "visible": false
@@ -3445,7 +3441,7 @@
   {
    "key": "hid:PMU tdev3",
    "name": "PMU tdev3 (= SMC TaLW)",
-   "nameRu": "PMU tdev3 (= SMC TaLW)",
+   "nameRu": "Датчик PMU 3 (HID, = SMC TaLW)",
    "group": "powerDelivery",
    "role": "duplicate",
    "visible": false
@@ -3453,7 +3449,7 @@
   {
    "key": "hid:PMU tdev4",
    "name": "PMU tdev4 (= SMC TaRW)",
-   "nameRu": "PMU tdev4 (= SMC TaRW)",
+   "nameRu": "Датчик PMU 4 (HID, = SMC TaRW)",
    "group": "powerDelivery",
    "role": "duplicate",
    "visible": false
@@ -3461,7 +3457,7 @@
   {
    "key": "hid:PMU tdev5",
    "name": "PMU tdev5 (= SMC TaRT)",
-   "nameRu": "PMU tdev5 (= SMC TaRT)",
+   "nameRu": "Датчик PMU 5 (HID, = SMC TaRT)",
    "group": "powerDelivery",
    "role": "duplicate",
    "visible": false
@@ -3469,7 +3465,7 @@
   {
    "key": "hid:PMU tdev6",
    "name": "PMU tdev6 (= SMC TCHP)",
-   "nameRu": "PMU tdev6 (= SMC TCHP)",
+   "nameRu": "Датчик PMU 6 (HID, = SMC TCHP)",
    "group": "powerDelivery",
    "role": "duplicate",
    "visible": false
@@ -3477,7 +3473,7 @@
   {
    "key": "hid:PMU tdev7",
    "name": "PMU tdev7 (= SMC TS0P)",
-   "nameRu": "PMU tdev7 (= SMC TS0P)",
+   "nameRu": "Датчик PMU 7 (HID, = SMC TS0P)",
    "group": "powerDelivery",
    "role": "duplicate",
    "visible": false
@@ -3485,23 +3481,23 @@
   {
    "key": "hid:PMU tdev8",
    "name": "PMU tdev8 (= SMC TaLT)",
-   "nameRu": "PMU tdev8 (= SMC TaLT)",
+   "nameRu": "Датчик PMU 8 (HID, = SMC TaLT)",
    "group": "powerDelivery",
    "role": "duplicate",
    "visible": false
   },
   {
    "key": "hid:PMU tcal",
-   "name": "PMU tcal (= SMC TR0Z)",
-   "nameRu": "PMU tcal (= SMC TR0Z)",
+   "name": "PMU calibration reference (= SMC TR0Z)",
+   "nameRu": "PMU, эталон (= SMC TR0Z)",
    "group": "powerDelivery",
-   "role": "duplicate",
+   "role": "reference",
    "visible": false
   },
   {
    "key": "hid:gas gauge battery",
    "name": "gas gauge battery (= SMC TB0T)",
-   "nameRu": "gas gauge battery (= SMC TB0T)",
+   "nameRu": "Контроллер АКБ (HID, = SMC TB0T)",
    "group": "battery",
    "role": "duplicate",
    "visible": false

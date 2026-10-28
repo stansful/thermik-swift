@@ -45,6 +45,9 @@ public protocol FanControlling: AnyObject {
     func foreignControlSuspected() -> Bool
     /// Last-resort thermal check over die sensors (call once per watchdog tick, 1 Hz).
     func evaluateSafety() -> SafetyVerdict
+    /// Hottest die sensor right now, without touching the override state (fan-stop decisions; works while not
+    /// controlling). nil = nothing readable: callers must treat that as hot.
+    func currentHottestDieC() -> Double?
 }
 
 /// Errors thrown by the write layer; mapped to HelperErrorCode on the wire.

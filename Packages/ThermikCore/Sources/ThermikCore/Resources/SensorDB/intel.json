@@ -1,0 +1,634 @@
+{
+ "schema": 1,
+ "platform": "intel",
+ "chip": "Intel",
+ "verified": false,
+ "observedOn": [],
+ "note": "Best effort (P2), not yet load-tested on an Intel Mac. Key meanings from VirtualSMC SMCSensorKeys.txt (BSD-3-Clause) and exelban/Stats (MIT), facts only. Headline lists use fallback tiers separated by \"|\" and wildcards (? = any character, # = digit). sp78 rails -128 / 127.996 are invalid.",
+ "headline": {
+  "cpu": [
+   "TC#C",
+   "|",
+   "TC0P",
+   "|",
+   "TC0D"
+  ],
+  "cpuHotspot": [
+   "TCXC",
+   "|",
+   "TC#C",
+   "|",
+   "TC0D"
+  ],
+  "gpu": [
+   "TG0P",
+   "|",
+   "TG0D",
+   "|",
+   "TCGC"
+  ],
+  "memory": [
+   "TM0P"
+  ],
+  "ssd": [
+   "TH0P",
+   "|",
+   "TH0x",
+   "|",
+   "TH0A"
+  ],
+  "battery": [
+   "TB0T"
+  ],
+  "safety": [
+   "TC??",
+   "TG??"
+  ]
+ },
+ "sensors": [
+  {
+   "key": "TC0P",
+   "name": "CPU proximity",
+   "nameRu": "ЦП, рядом с процессором",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC0D",
+   "name": "CPU die",
+   "nameRu": "ЦП, кристалл",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC0E",
+   "name": "CPU die (filtered)",
+   "nameRu": "ЦП, кристалл (фильтр)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC0F",
+   "name": "CPU die (filtered, adjusted)",
+   "nameRu": "ЦП, кристалл (фильтр, поправка)",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TCXC",
+   "name": "CPU package max (PECI)",
+   "nameRu": "ЦП, максимум (PECI)",
+   "group": "cpuAggregate",
+   "role": "maximum",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TCAD",
+   "name": "CPU package",
+   "nameRu": "ЦП, корпус",
+   "group": "cpuAggregate",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC0C",
+   "name": "CPU core 0",
+   "nameRu": "ЦП, ядро 0",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC1C",
+   "name": "CPU core 1",
+   "nameRu": "ЦП, ядро 1",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC2C",
+   "name": "CPU core 2",
+   "nameRu": "ЦП, ядро 2",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC3C",
+   "name": "CPU core 3",
+   "nameRu": "ЦП, ядро 3",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC4C",
+   "name": "CPU core 4",
+   "nameRu": "ЦП, ядро 4",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC5C",
+   "name": "CPU core 5",
+   "nameRu": "ЦП, ядро 5",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC6C",
+   "name": "CPU core 6",
+   "nameRu": "ЦП, ядро 6",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC7C",
+   "name": "CPU core 7",
+   "nameRu": "ЦП, ядро 7",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC8C",
+   "name": "CPU core 8",
+   "nameRu": "ЦП, ядро 8",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC9C",
+   "name": "CPU core 9",
+   "nameRu": "ЦП, ядро 9",
+   "group": "cpuPerformance",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC0c",
+   "name": "CPU core 0 (raw)",
+   "nameRu": "ЦП, ядро 0 (сырой)",
+   "group": "cpuPerformance",
+   "role": "duplicate",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC1c",
+   "name": "CPU core 1 (raw)",
+   "nameRu": "ЦП, ядро 1 (сырой)",
+   "group": "cpuPerformance",
+   "role": "duplicate",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC2c",
+   "name": "CPU core 2 (raw)",
+   "nameRu": "ЦП, ядро 2 (сырой)",
+   "group": "cpuPerformance",
+   "role": "duplicate",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC3c",
+   "name": "CPU core 3 (raw)",
+   "nameRu": "ЦП, ядро 3 (сырой)",
+   "group": "cpuPerformance",
+   "role": "duplicate",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC4c",
+   "name": "CPU core 4 (raw)",
+   "nameRu": "ЦП, ядро 4 (сырой)",
+   "group": "cpuPerformance",
+   "role": "duplicate",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC5c",
+   "name": "CPU core 5 (raw)",
+   "nameRu": "ЦП, ядро 5 (сырой)",
+   "group": "cpuPerformance",
+   "role": "duplicate",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC6c",
+   "name": "CPU core 6 (raw)",
+   "nameRu": "ЦП, ядро 6 (сырой)",
+   "group": "cpuPerformance",
+   "role": "duplicate",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC7c",
+   "name": "CPU core 7 (raw)",
+   "nameRu": "ЦП, ядро 7 (сырой)",
+   "group": "cpuPerformance",
+   "role": "duplicate",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC8c",
+   "name": "CPU core 8 (raw)",
+   "nameRu": "ЦП, ядро 8 (сырой)",
+   "group": "cpuPerformance",
+   "role": "duplicate",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TC9c",
+   "name": "CPU core 9 (raw)",
+   "nameRu": "ЦП, ядро 9 (сырой)",
+   "group": "cpuPerformance",
+   "role": "duplicate",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TCGC",
+   "name": "Integrated GPU (PECI)",
+   "nameRu": "Встроенный ГП (PECI)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TG0P",
+   "name": "GPU proximity",
+   "nameRu": "ГП, рядом",
+   "group": "gpu",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TG0D",
+   "name": "GPU die",
+   "nameRu": "ГП, кристалл",
+   "group": "gpu",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TG0H",
+   "name": "GPU heatsink",
+   "nameRu": "ГП, радиатор",
+   "group": "gpu",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TGDD",
+   "name": "GPU die (digital)",
+   "nameRu": "ГП, кристалл (цифровой)",
+   "group": "gpu",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TM0P",
+   "name": "Memory proximity",
+   "nameRu": "Память, рядом",
+   "group": "memory",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TM0S",
+   "name": "Memory slot",
+   "nameRu": "Память, слот",
+   "group": "memory",
+   "role": "probe",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TMA1",
+   "name": "Memory module A1",
+   "nameRu": "Память, модуль A1",
+   "group": "memory",
+   "role": "probe",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TMA2",
+   "name": "Memory module A2",
+   "nameRu": "Память, модуль A2",
+   "group": "memory",
+   "role": "probe",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TMB1",
+   "name": "Memory module B1",
+   "nameRu": "Память, модуль B1",
+   "group": "memory",
+   "role": "probe",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TMB2",
+   "name": "Memory module B2",
+   "nameRu": "Память, модуль B2",
+   "group": "memory",
+   "role": "probe",
+   "visible": false,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TB0T",
+   "name": "Battery",
+   "nameRu": "Аккумулятор",
+   "group": "battery",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TB1T",
+   "name": "Battery cell 1",
+   "nameRu": "Аккумулятор, ячейка 1",
+   "group": "battery",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TB2T",
+   "name": "Battery cell 2",
+   "nameRu": "Аккумулятор, ячейка 2",
+   "group": "battery",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TH0P",
+   "name": "Drive proximity",
+   "nameRu": "Рядом с накопителем",
+   "group": "storage",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TH0x",
+   "name": "SSD",
+   "nameRu": "SSD",
+   "group": "storage",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TH0A",
+   "name": "Drive A",
+   "nameRu": "Накопитель A",
+   "group": "storage",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TH0B",
+   "name": "Drive B",
+   "nameRu": "Накопитель B",
+   "group": "storage",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "TW0P",
+   "name": "Wi-Fi / Bluetooth",
+   "nameRu": "Wi-Fi / Bluetooth",
+   "group": "wireless",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts0P",
+   "name": "Palm rest",
+   "nameRu": "Упор для запястий",
+   "group": "enclosure",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Ts0S",
+   "name": "Palm rest 2",
+   "nameRu": "Упор для запястий 2",
+   "group": "enclosure",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TA0P",
+   "name": "Ambient",
+   "nameRu": "Окружающая среда",
+   "group": "enclosure",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TA0V",
+   "name": "Ambient (virtual)",
+   "nameRu": "Окружающая среда (виртуальный)",
+   "group": "enclosure",
+   "role": "probe",
+   "visible": false
+  },
+  {
+   "key": "Tp0P",
+   "name": "Power supply proximity",
+   "nameRu": "Рядом с блоком питания",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Tp0C",
+   "name": "Power supply",
+   "nameRu": "Блок питания",
+   "group": "powerDelivery",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TN0P",
+   "name": "MCP proximity",
+   "nameRu": "Чипсет (MCP), рядом",
+   "group": "soc",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TN0D",
+   "name": "MCP die",
+   "nameRu": "Чипсет (MCP), кристалл",
+   "group": "soc",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TPCD",
+   "name": "PCH die",
+   "nameRu": "Кристалл PCH",
+   "group": "soc",
+   "role": "probe",
+   "visible": true,
+   "invalidValues": [
+    127.99609375
+   ]
+  },
+  {
+   "key": "TI0P",
+   "name": "Thunderbolt",
+   "nameRu": "Thunderbolt",
+   "group": "ports",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "TL0P",
+   "name": "Display",
+   "nameRu": "Дисплей",
+   "group": "board",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Tm0P",
+   "name": "Mainboard",
+   "nameRu": "Материнская плата",
+   "group": "board",
+   "role": "probe",
+   "visible": true
+  },
+  {
+   "key": "Th0H",
+   "name": "Heatpipe",
+   "nameRu": "Тепловая трубка",
+   "group": "board",
+   "role": "probe",
+   "visible": true
+  }
+ ]
+}

@@ -41,6 +41,16 @@ public struct Slew: Codable, Sendable, Hashable {
     }
 }
 
+/// What a curve does below its first point.
+public enum BelowFirstPoint: String, Codable, Sendable, CaseIterable {
+    /// Hold the first point's speed (0 % is the slowest spinning speed, not off).
+    case minimum
+    /// Hand the fans back to macOS (which may or may not stop them at idle).
+    case system
+    /// Stop the fans (0 rpm, Apple Silicon); they restart at the first point. Elsewhere this acts as `minimum`.
+    case stop
+}
+
 /// Engine strategy per fan (FANS §11.2). New cases may be APPENDED later (Codable stays compatible).
 public enum FanStrategy: Codable, Sendable, Hashable {
     case system
@@ -51,9 +61,9 @@ public enum FanStrategy: Codable, Sendable, Hashable {
     /// System below lowC; linear lowC…highC → min…max %; changes slewed so 0→100 % takes gradualSeconds.
     case autoBoost(sensor: TemperatureSource, lowC: Double, highC: Double, minPercent: Double, maxPercent: Double,
                    gradualSeconds: Double, hysteresisC: Double)
-    /// Piecewise-linear curve; below the first point: System if releaseBelowFirstPoint, else first percent.
+    /// Piecewise-linear curve; below the first point: `below` (first percent, System, or stopped).
     case curve(sensor: TemperatureSource, points: [CurvePoint], hysteresisC: Double,
-               releaseBelowFirstPoint: Bool, smoothing: Smoothing, slew: Slew)
+               below: BelowFirstPoint, smoothing: Smoothing, slew: Slew)
 }
 
 /// App-engine safety (FANS §11.3). Helper has its own, higher thresholds (ThermikHelper.Safety).
@@ -73,6 +83,7 @@ public struct ThermalGuardConfig: Codable, Sendable, Hashable {
     public var engageAfterSeconds: Double = 5
     public var releaseAfterSeconds: Double = 30
     /// Also take control while the user is in System mode (default off: never take control unasked).
+    /// Ignored since v0.1: in Auto (System) only macOS controls the fans. Kept so saved configurations decode.
     public var applyInSystemMode = false
     public init() {}
 }
@@ -116,6 +127,8 @@ public struct FanCurve: Codable, Sendable, Hashable {
     public var points: [CurvePoint]
     public var hysteresisC: Double
     public var releaseBelowFirstPoint: Bool
+    /// Fans stop below the first point (wins over `releaseBelowFirstPoint`). Optional: older configurations decode.
+    public var stopBelowFirstPoint: Bool?
     public var smoothing: Smoothing
     public var slew: Slew
     public var presetID: FanPresetID?            // nil = custom (edited)
@@ -124,9 +137,13 @@ public struct FanCurve: Codable, Sendable, Hashable {
         self.input = input; self.points = points; self.hysteresisC = hysteresisC
         self.releaseBelowFirstPoint = releaseBelowFirstPoint; self.smoothing = smoothing; self.slew = slew; self.presetID = presetID
     }
+    /// Below the first point, as one choice (stored as the two flags above).
+    public var below: BelowFirstPoint {
+        get { stopBelowFirstPoint == true ? .stop : (releaseBelowFirstPoint ? .system : .minimum) }
+        set { stopBelowFirstPoint = newValue == .stop ? true : nil; releaseBelowFirstPoint = newValue == .system }
+    }
     public var strategy: FanStrategy {
-        .curve(sensor: input, points: points, hysteresisC: hysteresisC, releaseBelowFirstPoint: releaseBelowFirstPoint,
-               smoothing: smoothing, slew: slew)
+        .curve(sensor: input, points: points, hysteresisC: hysteresisC, below: below, smoothing: smoothing, slew: slew)
     }
 }
 
@@ -138,22 +155,22 @@ public enum FanPresets {
         switch id {
         case .quiet:
             return FanCurve(input: .aggregate(.cpuAverage),
-                            points: [CurvePoint(68, 0), CurvePoint(80, 20), CurvePoint(90, 55), CurvePoint(97, 100)],
+                            points: [CurvePoint(72, 0), CurvePoint(82, 25), CurvePoint(90, 55), CurvePoint(97, 100)],
                             hysteresisC: 4, releaseBelowFirstPoint: true, smoothing: Smoothing(riseTau: 3, fallTau: 15),
                             slew: Slew(up: 100.0 / 6, down: 100.0 / 60, hold: 30), presetID: .quiet)
         case .balanced:
             return FanCurve(input: .aggregate(.socHottest),
-                            points: [CurvePoint(62, 0), CurvePoint(75, 30), CurvePoint(85, 65), CurvePoint(94, 100)],
+                            points: [CurvePoint(70, 0), CurvePoint(80, 30), CurvePoint(88, 65), CurvePoint(95, 100)],
                             hysteresisC: 3, releaseBelowFirstPoint: true, smoothing: Smoothing(riseTau: 2, fallTau: 12),
                             slew: Slew(up: 25, down: 2, hold: 30), presetID: .balanced)
         case .cool:
             return FanCurve(input: .aggregate(.socHottest),
-                            points: [CurvePoint(55, 10), CurvePoint(68, 40), CurvePoint(78, 75), CurvePoint(88, 100)],
+                            points: [CurvePoint(58, 10), CurvePoint(68, 35), CurvePoint(78, 70), CurvePoint(88, 100)],
                             hysteresisC: 3, releaseBelowFirstPoint: false, smoothing: Smoothing(riseTau: 1.5, fallTau: 10),
                             slew: Slew(up: 100.0 / 3, down: 100.0 / 40, hold: 20), presetID: .cool)
         case .performance:
             return FanCurve(input: .aggregate(.safetyTop4),
-                            points: [CurvePoint(50, 25), CurvePoint(62, 55), CurvePoint(72, 85), CurvePoint(82, 100)],
+                            points: [CurvePoint(55, 25), CurvePoint(70, 50), CurvePoint(82, 80), CurvePoint(92, 100)],
                             hysteresisC: 2, releaseBelowFirstPoint: false, smoothing: Smoothing(riseTau: 1, fallTau: 8),
                             slew: Slew(up: 50, down: 100.0 / 30, hold: 20), presetID: .performance)
         }

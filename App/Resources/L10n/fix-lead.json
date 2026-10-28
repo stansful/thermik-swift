@@ -1,0 +1,298 @@
+{
+ "fanSide.left": {
+  "en": "Left",
+  "ru": "Левый",
+  "comment": "Popover fan row under the Fans header"
+ },
+ "fanSide.right": {
+  "en": "Right",
+  "ru": "Правый",
+  "comment": "Popover fan row under the Fans header"
+ },
+ "Chip and temperature": {
+  "ru": "Чип и температура",
+  "comment": "Menu bar label style: CPU chip symbol + temperature"
+ },
+ "Badge": {
+  "ru": "Плашка",
+  "comment": "Menu bar label style: temperature knocked out of a rounded badge, like the input-source badge"
+ },
+ "Ring and temperature": {
+  "ru": "Кольцо и температура",
+  "comment": "Menu bar label style: small progress ring + temperature"
+ },
+ "Level and temperature": {
+  "ru": "Шкала и температура",
+  "comment": "Menu bar label style: vertical level bar + temperature"
+ },
+ "Mini graph": {
+  "ru": "Мини-график",
+  "comment": "Menu bar label style: 5-minute trend line + temperature"
+ },
+ "CPU and GPU": {
+  "ru": "ЦП и ГП",
+  "comment": "Colour-scale editor: sensor class of CPU/GPU/SoC dies"
+ },
+ "Reset scale": {
+  "ru": "Сбросить шкалу",
+  "comment": "Colour-scale editor: restore the default stops of the selected sensor class"
+ },
+ "Sensor, menu bar and chart colours follow these temperatures. Notification thresholds are set separately in Alerts.": {
+  "ru": "По этим температурам окрашиваются датчики, значок в строке меню и графики. Пороги уведомлений задаются отдельно, в разделе «Оповещения».",
+  "comment": "Settings › Appearance, footer of the colour scale"
+ },
+ "Icons: temperature and fan": {
+  "ru": "Термометр и вентилятор",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Chip and fan": {
+  "ru": "Чип и вентилятор",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Flame and blades": {
+  "ru": "Пламя и лопасти",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Two rows with icons": {
+  "ru": "Две строки со значками",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Two rows with units": {
+  "ru": "Две строки с единицами",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Temperature and rpm": {
+  "ru": "Температура и обороты",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Badge and fan": {
+  "ru": "Плашка и вентилятор",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Ring and fan": {
+  "ru": "Кольцо и вентилятор",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "CPU over GPU": {
+  "ru": "ЦП над ГП",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Fan only": {
+  "ru": "Только вентилятор",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Automatic": {
+  "ru": "Автоматически",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "No icon": {
+  "ru": "Без значка",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Thermometer": {
+  "ru": "Термометр",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Drive": {
+  "ru": "Накопитель",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Flame": {
+  "ru": "Пламя",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Heat waves": {
+  "ru": "Тепловые волны",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Fan blades": {
+  "ru": "Лопасти",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Wind": {
+  "ru": "Ветер",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Bolt": {
+  "ru": "Молния",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Ring": {
+  "ru": "Кольцо",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Level": {
+  "ru": "Шкала",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "One row": {
+  "ru": "В одну строку",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Two rows": {
+  "ru": "В две строки",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Small": {
+  "ru": "Мелкий",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Medium": {
+  "ru": "Средний",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Large": {
+  "ru": "Крупный",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Space": {
+  "ru": "Пробел",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Dot": {
+  "ru": "Точка",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "Line": {
+  "ru": "Черта",
+  "comment": "Menu bar label: style name or «Custom» builder option"
+ },
+ "menuBarStyle.compact": {
+  "en": "Compact",
+  "ru": "Компактно",
+  "comment": "Menu bar label style"
+ },
+ "menuBarStyle.custom": {
+  "en": "Custom",
+  "ru": "Свой вариант",
+  "comment": "Menu bar label style built by the user"
+ },
+ "Add value": {
+  "ru": "Добавить значение",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Badge around the label": {
+  "ru": "Плашка вокруг метки",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Between values": {
+  "ru": "Между значениями",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Bold digits": {
+  "ru": "Жирные цифры",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Caption": {
+  "ru": "Подпись",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Change the values, icons and layout of this style in your own variant.": {
+  "ru": "Значения, значки и расположение этого стиля можно изменить в своём варианте.",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Customise…": {
+  "ru": "Настроить…",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Icon": {
+  "ru": "Значок",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Icons in the value’s colour": {
+  "ru": "Значки в цвет значения",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "In two rows, values 1 and 2 form the first column and 3 and 4 the second. Ring, level and mini graph are drawn in one row only.": {
+  "ru": "В две строки значения 1 и 2 образуют первый столбец, 3 и 4 — второй. Кольцо, шкала и мини-график рисуются только в одну строку.",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Layout": {
+  "ru": "Расположение",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Move down": {
+  "ru": "Ниже",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Move up": {
+  "ru": "Выше",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Pick any sensor with “Specific sensor…”. Captions are short labels such as GPU or SSD.": {
+  "ru": "Любой датчик можно выбрать через «Конкретный датчик…». Подпись — короткая метка, например ГП или SSD.",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Remove": {
+  "ru": "Удалить",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Short text before the value, e.g. GPU (up to 4 characters)": {
+  "ru": "Короткий текст перед значением, например ГП (до 4 символов)",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Text size": {
+  "ru": "Размер текста",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "The primary value is the temperature every style shows; the secondary one is the second value of the two-value styles. Your own variant chooses its values itself.": {
+  "ru": "Основное значение — температура, которую показывает любой стиль; дополнительное — второе значение стилей с двумя значениями. В своём варианте значения выбираются отдельно.",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Unit": {
+  "ru": "Ед.",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Value %lld": {
+  "ru": "Значение %lld",
+  "comment": "Settings › Menu Bar, custom label editor"
+ },
+ "Settings": {
+  "ru": "Настройки",
+  "comment": "Main window sidebar: the Settings page"
+ },
+ "In Auto, macOS alone controls the fans.": {
+  "ru": "В режиме «Авто» вентиляторами управляет только macOS.",
+  "comment": "Settings › Fans, thermal guard footer"
+ },
+ "a stopped fan could not be restarted": {
+  "ru": "не удалось снова запустить остановленный вентилятор",
+  "comment": "Why the helper returned the fans to Auto"
+ },
+ "Below the first point": {
+  "ru": "Ниже первой точки",
+  "comment": "Fans page, curve: what happens below the first point"
+ },
+ "Minimum": {
+  "ru": "Минимум",
+  "comment": "Fans page, curve: what happens below the first point"
+ },
+ "Stop": {
+  "ru": "Остановка",
+  "comment": "Fans page, curve: what happens below the first point"
+ },
+ "Fans stopped": {
+  "ru": "Вентиляторы остановлены",
+  "comment": "Fans page, curve: what happens below the first point"
+ },
+ "The fans keep their slowest speed (0 % on the chart) below the first point.": {
+  "ru": "Ниже первой точки вентиляторы крутятся на самой низкой скорости (0 % на графике).",
+  "comment": "Fans page, curve: what happens below the first point"
+ },
+ "Below the first point macOS controls the fans again; on many Macs it keeps them at the minimum.": {
+  "ru": "Ниже первой точки вентиляторами снова управляет macOS; на многих Mac она держит их на минимуме.",
+  "comment": "Fans page, curve: what happens below the first point"
+ },
+ "The fans stop once the temperature is the hysteresis below the first point, and start again at the first point. Thermik's safety and the helper restart them if the chip gets hot.": {
+  "ru": "Вентиляторы останавливаются, когда температура опускается ниже первой точки на величину гистерезиса, и снова запускаются на первой точке. Если чип нагреется, их перезапустят защита Thermik и помощник.",
+  "comment": "Fans page, curve: what happens below the first point"
+ },
+ "This Mac cannot stop its fans: below the first point they run at the minimum.": {
+  "ru": "Этот Mac не умеет останавливать вентиляторы: ниже первой точки они крутятся на минимуме.",
+  "comment": "Fans page, curve: fan stop notes"
+ },
+ "The chip is hot, so the fans keep their minimum; they stop once it cools below 85 °C.": {
+  "ru": "Чип горячий, поэтому вентиляторы держат минимум; они остановятся, когда он остынет ниже 85 °C.",
+  "comment": "Fans page, curve: fan stop notes"
+ }
+}

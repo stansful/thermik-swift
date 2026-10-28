@@ -1,0 +1,3 @@
+{
+  "macOS took back control of a fan": {"ru": "macOS забрал управление вентилятором", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”): macOS reclaimed one fan while the helper kept the others"}
+}

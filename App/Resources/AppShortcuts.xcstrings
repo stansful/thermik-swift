@@ -1,0 +1,54 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "${applicationName} temperature" : {
+      "comment" : "App Shortcut phrase (Siri, Spotlight, Shortcuts); keep ${applicationName}",
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Температура ${applicationName}"
+          }
+        }
+      }
+    },
+    "Change the ${applicationName} fan mode" : {
+      "comment" : "App Shortcut phrase (Siri, Spotlight, Shortcuts); keep ${applicationName}",
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сменить режим вентиляторов ${applicationName}"
+          }
+        }
+      }
+    },
+    "Get the ${applicationName} temperature" : {
+      "comment" : "App Shortcut phrase (Siri, Spotlight, Shortcuts); keep ${applicationName}",
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Узнать температуру ${applicationName}"
+          }
+        }
+      }
+    },
+    "Set the ${applicationName} fan mode" : {
+      "comment" : "App Shortcut phrase (Siri, Spotlight, Shortcuts); keep ${applicationName}",
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Задать режим вентиляторов ${applicationName}"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

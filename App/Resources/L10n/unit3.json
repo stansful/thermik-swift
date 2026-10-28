@@ -1,0 +1,13 @@
+{
+  "Fan": {"ru": "Вентилятор", "comment": "Name of the only fan of a single-fan Mac"},
+  "Fan %lld": {"ru": "Вентилятор %lld", "comment": "Fan name on Macs with more than two fans (1-based number)"},
+  "Left fan": "Левый вентилятор",
+  "Right fan": "Правый вентилятор",
+
+  "Fan control error: %@": {"ru": "Ошибка управления вентиляторами: %@", "comment": "Event log entry; %@ is the helper's technical detail"},
+  "Fan control stopped after repeated errors. The fans are back on Auto.": "Управление вентиляторами остановлено после повторяющихся ошибок. Вентиляторы снова в режиме «Авто».",
+  "The helper could not change the fan speed. Retrying…": "Помощник не смог изменить скорость вентиляторов. Повторная попытка…",
+  "This Mac's fans cannot be controlled.": "Вентиляторами этого Mac нельзя управлять.",
+  "macOS did not hand over fan control yet. Retrying in 30 s.": "macOS пока не передал управление вентиляторами. Повтор через 30 с.",
+  "macOS did not hand over fan control. The fans are back on Auto.": "macOS не передал управление вентиляторами. Вентиляторы снова в режиме «Авто»."
+}

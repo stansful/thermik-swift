@@ -59,6 +59,11 @@ public enum ThermikHelper {
         public static let releaseTop4MeanC: Double = 95
         public static let sensorFailureTicks = 3
         public static let staticKeySeconds: Double = 30
+        /// Fan stop (0 rpm) is refused while the hottest die sensor is at or above this…
+        public static let stopRefusedHottestC: Double = 90
+        /// …and a stopped fan is restarted at its minimum when it reaches this (the app restarts it much earlier,
+        /// at the first point of its curve; this only covers an app that stopped deciding).
+        public static let stopRestartHottestC: Double = 95
     }
 }
 
@@ -157,6 +162,10 @@ public struct RecoveryMarker: Codable, Sendable, Equatable {
     public var ftstSetByUs: Bool
     public var fans: [Int]
     public var createdAt: Date
+    /// intelMinimumOnly only: the ORIGINAL raw F%dMn bytes per fan index, written before the minimum is raised, so a
+    /// relaunched helper can write them back (raising F%dMn is the only "manual mode" there). nil everywhere else;
+    /// absent in markers of older helpers (decoded as nil).
+    public var savedMinimumBytes: [Int: [UInt8]]?
     public init(pid: Int32, ftstSetByUs: Bool, fans: [Int], createdAt: Date) {
         self.pid = pid; self.ftstSetByUs = ftstSetByUs; self.fans = fans; self.createdAt = createdAt
     }
@@ -167,7 +176,8 @@ public struct RecoveryMarker: Codable, Sendable, Equatable {
     /// Version handshake. Error `unsupportedProtocol` if versions differ → the app upgrades the helper.
     func hello(clientProtocolVersion: Int, reply: @escaping @Sendable (Data?, NSError?) -> Void)        // HelperInfo
     func getState(reply: @escaping @Sendable (Data?, NSError?) -> Void)                                  // HelperState
-    /// Manual mode for one fan at `rpm` (helper clamps to the SMC's own [Mn, Mx]). Runs the Ftst unlock on M3/M4
+    /// Manual mode for one fan at `rpm` (helper clamps to the SMC's own [Mn, Mx]; exactly 0 stops the fan on Apple
+    /// Silicon unless the dies are hot, see `Safety.stopRefusedHottestC`). Runs the Ftst unlock on M3/M4
     /// (may block several seconds). Renews the lease (clamped to Limits). Replies with the rpm actually written.
     func setFanTarget(fanIndex: Int, rpm: Double, leaseSeconds: Double,
                       reply: @escaping @Sendable (Double, NSError?) -> Void)

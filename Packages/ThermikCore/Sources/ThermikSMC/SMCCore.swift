@@ -110,7 +110,7 @@ public enum SMCError: Error, Sendable, CustomStringConvertible {
     case serviceNotFound
     case openFailed(kern_return_t)
     case ioKit(kern_return_t, key: FourCC)          // IOConnectCallStructMethod failed (e.g. kIOReturnNotOpen after wake)
-    case notPrivileged(key: FourCC)                 // kIOReturnNotPrivileged (0xE00002C2): root required (writes)
+    case notPrivileged(key: FourCC)                 // kIOReturnNotPrivileged (0xE00002C1): root required (writes)
     case firmware(UInt8, key: FourCC)               // non-zero SMC result byte
     case keyNotFound(FourCC)                        // result 0x84 (also: wrong mode-key casing on M5!)
     case typeMismatch(key: FourCC, expected: [SMCDataType], actual: SMCDataType)
@@ -125,9 +125,10 @@ public enum SMCError: Error, Sendable, CustomStringConvertible {
         return nil
     }
 
-    /// The connection should be reopened (sleep/wake, SMC restart).
+    /// The SMC is unreachable right now (sleep/wake, SMC restart, terminated user client, dead port), as opposed to
+    /// one key failing. `SMCConnection` reopens on its own; a call that still throws this found no usable client.
     public var isConnectionLost: Bool {
-        if case .ioKit(let kr, _) = self { return kr == kIOReturnNotOpen || kr == kIOReturnNoDevice || kr == kIOReturnAborted }
+        if case .ioKit(let kr, _) = self { return SMCConnection.isLinkError(kr) }
         return false
     }
 
@@ -204,17 +205,48 @@ public protocol SMCReading: Sendable {
 
 // MARK: - Connection
 
-/// Thread-safe AppleSMC user-client connection (one per process is enough; reopen after wake on error).
+/// Thread-safe AppleSMC user-client connection (one per process is enough).
 /// Apple Silicon: matches AppleSMCKeysEndpoint (conforms to "AppleSMC"); Intel: AppleSMC.
+///
+/// Self-healing: a call that finds the user client stale (`isLinkError`: wake, SMC restart, terminated client, dead
+/// port) closes it, opens a fresh one and retries once. If that open fails the connection stays closed: calls then
+/// fail at once with `.ioKit(kIOReturnNotOpen)` (still `isConnectionLost`, never a call on port 0) and the first call
+/// after a backoff (1 s doubling to 15 s, reset by a successful open) tries again, so the app's reader and the helper
+/// recover on their own once AppleSMC is back.
 public final class SMCConnection: SMCReading, @unchecked Sendable {
-    private var conn: io_connect_t = 0
+    private var conn: io_connect_t = 0                // 0 = closed: the last open failed
     private let lock = NSLock()
     private var infoCache: [FourCC: SMCKeyInfo] = [:]
     private var missing: Set<FourCC> = []             // cache "key not found" (a miss costs a full round trip)
     private static let selector: UInt32 = 2           // kSMCHandleYPCEvent
+    private static let firstBackoff: Duration = .seconds(1), maxBackoff: Duration = .seconds(15)
+    private var openFailures = 0                      // consecutive; sets the backoff
+    private var nextOpenAttempt: ContinuousClock.Instant?   // nil: an open may be tried now (continues across sleep)
+    private var lastOpenError: SMCError?
+    private var reopens = 0
+    private var failedCalls = 0
 
     public init() throws { conn = try Self.open() }
     deinit { if conn != 0 { IOServiceClose(conn) } }
+
+    /// False while closed (a reopen failed), until a later attempt succeeds.
+    public var isOpen: Bool { lock.withLock { conn != 0 } }
+    /// Successful reopens since `init` (each one replaced a stale or closed client).
+    public var reopenCount: Int { lock.withLock { reopens } }
+    /// Calls that failed because no usable client could be had (monotonic). Two readings tell whether anything in
+    /// between failed for that reason rather than for its key.
+    public var connectionFailureCount: Int { lock.withLock { failedCalls } }
+
+    /// IOKit / Mach results that mean the user client itself is unusable, not that one call failed: not open, no
+    /// device, aborted, not attached, IPC error (driver restart, terminated client), a dead send right and a dead
+    /// MIG server.
+    static func isLinkError(_ kr: kern_return_t) -> Bool {
+        switch kr {
+        case kIOReturnNotOpen, kIOReturnNoDevice, kIOReturnAborted, kIOReturnNotAttached, kIOReturnIPCError,
+             MACH_SEND_INVALID_DEST, MIG_SERVER_DIED: return true
+        default: return false
+        }
+    }
 
     private static func open() throws -> io_connect_t {
         var service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"))
@@ -227,11 +259,49 @@ public final class SMCConnection: SMCReading, @unchecked Sendable {
         return c
     }
 
-    /// Re-open after `SMCError.isConnectionLost` (e.g. after wake). Keeps the key-info cache.
+    /// Re-open now (e.g. after `SMCError.isConnectionLost`). Keeps the key-info cache. Calls already reopen a stale
+    /// client themselves, so this is only a nudge: while the backoff after a failed open is pending it throws the
+    /// last open error without trying (the first call after the backoff retries by itself).
     public func reconnect() throws {
         lock.lock(); defer { lock.unlock() }
+        if let t = nextOpenAttempt, ContinuousClock.now < t { throw lastOpenError ?? SMCError.serviceNotFound }
+        closeLocked()
+        try openLocked()
+    }
+
+    private func closeLocked() {
         if conn != 0 { IOServiceClose(conn); conn = 0 }
-        conn = try Self.open()
+    }
+
+    /// A fresh user client; on failure the connection stays closed and the backoff is armed.
+    private func openLocked() throws {
+        do {
+            conn = try Self.open()
+        } catch {
+            armBackoffLocked(error as? SMCError ?? .serviceNotFound)
+            throw error
+        }
+        reopens += 1
+        openFailures = 0; nextOpenAttempt = nil; lastOpenError = nil
+    }
+
+    private func armBackoffLocked(_ error: SMCError) {
+        openFailures += 1
+        lastOpenError = error
+        nextOpenAttempt = ContinuousClock.now + min(Self.firstBackoff * (1 << min(openFailures - 1, 4)), Self.maxBackoff)
+    }
+
+    /// Before a call on a closed connection: open now unless the backoff is pending. Either way out, the call fails
+    /// as "not open" (`isConnectionLost`), so callers keep treating the SMC as unreachable rather than the key as bad.
+    private func reopenIfDueLocked(_ key: FourCC) throws {
+        if let t = nextOpenAttempt, ContinuousClock.now < t {
+            failedCalls += 1
+            throw SMCError.ioKit(kIOReturnNotOpen, key: key)
+        }
+        do { try openLocked() } catch {
+            failedCalls += 1
+            throw SMCError.ioKit(kIOReturnNotOpen, key: key)
+        }
     }
 
     /// One round trip. Package-visible so ThermikSMCWriter can issue command 6. Takes the lock.
@@ -240,7 +310,27 @@ public final class SMCConnection: SMCReading, @unchecked Sendable {
         return try callLocked(input)
     }
 
+    /// Reopens a stale client and retries the call once (safe even if the failed call did reach the SMC: a key read
+    /// or write is idempotent).
     private func callLocked(_ input: SMCParamBlock) throws -> SMCParamBlock {
+        if conn == 0 { try reopenIfDueLocked(input.key) }
+        var (kr, outBlock) = sendLocked(input)
+        if Self.isLinkError(kr) {
+            closeLocked()
+            try reopenIfDueLocked(input.key)
+            (kr, outBlock) = sendLocked(input)
+            if Self.isLinkError(kr) {                 // a fresh client fails the same way: down until the backoff passes
+                closeLocked()
+                armBackoffLocked(.ioKit(kr, key: input.key))
+                failedCalls += 1
+            }
+        }
+        if kr == kIOReturnNotPrivileged { throw SMCError.notPrivileged(key: input.key) }
+        guard kr == kIOReturnSuccess else { throw SMCError.ioKit(kr, key: input.key) }
+        return outBlock
+    }
+
+    private func sendLocked(_ input: SMCParamBlock) -> (kern_return_t, SMCParamBlock) {
         var inBlock = input
         var outBlock = SMCParamBlock()
         var outSize = SMCParamBlock.size
@@ -249,9 +339,7 @@ public final class SMCConnection: SMCReading, @unchecked Sendable {
                 IOConnectCallStructMethod(conn, Self.selector, ip.baseAddress, SMCParamBlock.size, op.baseAddress, &outSize)
             }
         }
-        if kr == kIOReturnNotPrivileged { throw SMCError.notPrivileged(key: input.key) }
-        guard kr == kIOReturnSuccess else { throw SMCError.ioKit(kr, key: input.key) }
-        return outBlock
+        return (kr, outBlock)
     }
 
     private func keyInfoLocked(_ key: FourCC) throws -> SMCKeyInfo {

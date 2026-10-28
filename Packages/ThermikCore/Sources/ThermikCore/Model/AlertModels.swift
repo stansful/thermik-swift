@@ -38,22 +38,23 @@ public struct AlertRule: Codable, Identifiable, Hashable, Sendable {
         self.soundName = soundName; self.action = action; self.enabled = enabled
     }
 
-    /// Defaults mirror TG Pro (FEAT §8.1). Stable ids so "reset to defaults" is idempotent.
+    /// The rule set mirrors TG Pro (FEAT §8.1), but every rule starts OFF: Thermik never notifies (or asks for
+    /// notification permission) until the user turns a rule on. Stable ids so "reset to defaults" is idempotent.
     public static let defaultRules: [AlertRule] = [
         AlertRule(id: UUID(uuidString: "6F1C0001-0000-4000-8000-000000000001")!, subject: .anySensor,
-                  thresholdC: 100, forSeconds: 10, enabled: true),
+                  thresholdC: 100, forSeconds: 10, enabled: false),
         AlertRule(id: UUID(uuidString: "6F1C0001-0000-4000-8000-000000000002")!, subject: .aggregate(.cpuHottest),
                   thresholdC: 95, forSeconds: 30, enabled: false),
         AlertRule(id: UUID(uuidString: "6F1C0001-0000-4000-8000-000000000003")!, subject: .abnormalShutdown,
-                  forSeconds: 0, cooldownSeconds: 0, enabled: true),
+                  forSeconds: 0, cooldownSeconds: 0, enabled: false),
         AlertRule(id: UUID(uuidString: "6F1C0001-0000-4000-8000-000000000004")!, subject: .batteryService,
-                  forSeconds: 0, cooldownSeconds: 86_400, enabled: true),
+                  forSeconds: 0, cooldownSeconds: 86_400, enabled: false),
         AlertRule(id: UUID(uuidString: "6F1C0001-0000-4000-8000-000000000005")!, subject: .fanModeChanged,
                   forSeconds: 0, cooldownSeconds: 0, enabled: false),
         AlertRule(id: UUID(uuidString: "6F1C0001-0000-4000-8000-000000000006")!, subject: .fanStalled,
-                  forSeconds: 30, cooldownSeconds: 3_600, enabled: true),
+                  forSeconds: 30, cooldownSeconds: 3_600, enabled: false),
         AlertRule(id: UUID(uuidString: "6F1C0001-0000-4000-8000-000000000007")!, subject: .thermalPressure(.heavy),
-                  forSeconds: 10, cooldownSeconds: 1_800, enabled: true),
+                  forSeconds: 10, cooldownSeconds: 1_800, enabled: false),
     ]
 }
 
@@ -68,6 +69,9 @@ public struct AlertInputs: Sendable {
     public var pressure: ThermalPressure
     public var abnormalShutdown: ShutdownVerdict?        // set on the first evaluation after launch when abnormal
     public var batteryNeedsService: Bool
+    /// ADDED: smoothed values of the sensors that `.sensor` rules name, hidden ones included (`.anySensor` and `.group`
+    /// never see them); `.sensor` reads `sensorValues` first.
+    public var namedSensorValues: [SensorID: Double] = [:]
     public init(date: Date, sensorValues: [SensorID: Double], sensorGroups: [SensorID: DisplayGroup],
                 aggregates: AggregateValues, stalledFans: [Int], fanModeChange: FanModeChange?, pressure: ThermalPressure,
                 abnormalShutdown: ShutdownVerdict?, batteryNeedsService: Bool) {

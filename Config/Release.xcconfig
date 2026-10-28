@@ -1,3 +1,15 @@
 #include "Shared.xcconfig"
-SWIFT_OPTIMIZATION_LEVEL = -O
+SWIFT_OPTIMIZATION_LEVEL = -Osize
+// Xcode injects com.apple.security.get-task-allow into every non-archive build ("base entitlements"), and
+// `scripts/lib/build.sh Release` is a plain build. A Release helper refuses any client that carries it (PeerPolicy:
+// `!(entitlement["com.apple.security.get-task-allow"] /* exists */)`), so with injection on, the Release app could
+// never talk to its own helper. Neither Release binary is debuggable; build.sh verifies the app against the
+// helper's exact requirement after every build.
+CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO
+// Size. A plain build (not an archive) strips nothing unless DEPLOYMENT_POSTPROCESSING is on: without it the symbol
+// table was ~60 % of each binary. The dSYM next to the app keeps the symbols for crash reports.
+DEPLOYMENT_POSTPROCESSING = YES
+STRIP_STYLE = all
+STRINGS_FILE_OUTPUT_ENCODING = binary
+ASSETCATALOG_COMPILER_OPTIMIZATION = space
 // CI release with a paid account: CODE_SIGN_IDENTITY = Developer ID Application, OTHER_CODE_SIGN_FLAGS = --timestamp

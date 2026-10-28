@@ -1,0 +1,29 @@
+{
+  "Thermik needs administrator permission to install its fan-control helper.": {
+    "ru": "Thermik нужны права администратора, чтобы установить помощник управления вентиляторами.",
+    "comment": "Shown inside the macOS administrator password dialog (legacy helper install)"
+  },
+  "Thermik needs administrator permission to update its fan-control helper.": {
+    "ru": "Thermik нужны права администратора, чтобы обновить помощник управления вентиляторами.",
+    "comment": "Shown inside the macOS administrator password dialog (helper upgrade / re-authorization)"
+  },
+  "Thermik needs administrator permission to remove its fan-control helper.": {
+    "ru": "Thermik нужны права администратора, чтобы удалить помощник управления вентиляторами.",
+    "comment": "Shown inside the macOS administrator password dialog (helper uninstall fallback)"
+  },
+  "The administrator prompt was cancelled.": "Запрос пароля администратора отменён.",
+  "The helper is missing from the Thermik app bundle. Reinstall Thermik.": "В пакете приложения Thermik нет помощника. Переустановите Thermik.",
+  "Thermik's code signature cannot be read.": "Не удаётся прочитать подпись кода Thermik.",
+  "The helper could not be installed: %@": {
+    "ru": "Не удалось установить помощник: %@",
+    "comment": "%@ = technical error message"
+  },
+  "The helper did not respond: %@": {
+    "ru": "Помощник не отвечает: %@",
+    "comment": "%@ = technical error message"
+  },
+  "macOS refused to register the helper: %@": {
+    "ru": "macOS отказалась регистрировать помощник: %@",
+    "comment": "%@ = technical error message from SMAppService"
+  }
+}

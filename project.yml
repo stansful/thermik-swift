@@ -25,10 +25,6 @@ settings:
     SWIFT_EMIT_LOC_STRINGS: YES
     ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
     MACOSX_DEPLOYMENT_TARGET: "14.0"
-    # Thermik defines no App Intents and does not link AppIntents.framework. Without this, Xcode still runs
-    # `appintentsmetadataprocessor` for the app target, which only logs "warning: Metadata extraction skipped,
-    # no AppIntents.framework dependency found". Remove this line if App Intents / Shortcuts are ever added.
-    LM_SKIP_METADATA_EXTRACTION: YES
 
 packages:
   ThermikCore:
@@ -39,7 +35,7 @@ targets:
     type: application
     platform: macOS
     sources:
-      - path: App                        # *.swift, Shaders/*.metal (→ default.metallib), Resources/Assets.xcassets,
+      - path: App                        # *.swift, Resources/Assets.xcassets,
         excludes:                        # Resources/Localizable.xcstrings (en + ru)
           - "Info.plist"
           - "Resources/L10n/**"          # translation fragments are build INPUTS, not bundle resources
@@ -67,6 +63,9 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSUIElement: true                # menu bar agent: no Dock icon until a window opens
         LSApplicationCategoryType: public.app-category.utilities
+        CFBundleURLTypes:                # P2 `thermik://` links (App/Runtime/URLRouter.swift)
+          - CFBundleURLName: app.thermik.Thermik
+            CFBundleURLSchemes: [thermik]
         NSHumanReadableCopyright: "© 2026 Thermik contributors. MIT License."
     entitlements:
       path: Resources/Thermik.entitlements
@@ -79,9 +78,6 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor   # empty colour set = system accent
         ENABLE_APP_SANDBOX: NO
         ENABLE_HARDENED_RUNTIME: YES
-      configs:
-        Debug:
-          MTL_ENABLE_DEBUG_INFO: INCLUDE_SOURCE
 
   ThermikHelper:
     type: tool                           # command-line tool embedded in the app
