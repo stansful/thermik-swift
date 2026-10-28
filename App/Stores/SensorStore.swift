@@ -9,6 +9,10 @@
 // States: gated clusters keep their last value (dimmed) for 30 s; a sensor that is no longer requested (its popover
 // row closed) turns .stale WITHOUT a value after 3 intervals, so nothing acts on a frozen reading; when no frame
 // arrives at all for 3 intervals (SamplingCoordinator's watchdog) every sensor turns .stale and KEEPS its value.
+// Additive: "Hottest" exclusions (a sensor's own `excludedFromHottest` override, or its hardware block in
+// `settings.hottestExcludedGroups`, see `hottestBlock` / `isBlockExcluded`) narrow `hottest` only — the display value.
+// SensorAggregator, the aggregates (socHottest, highestAll, rawHottestDie, safety top 4), alerts, fan curves and the
+// helper keep seeing every sensor.
 import Foundation
 import Observation
 import ThermikCore
@@ -79,6 +83,9 @@ struct SpikeFilter: Sendable {
     var displayName: String
     var isHidden: Bool
     var isPinned: Bool
+    /// The sensor's own "Hottest" exclusion (its override). Its hardware block may be excluded as well: the effective
+    /// answer is `SensorStore.isExcludedFromHottest(_:)`.
+    var isExcludedFromHottest: Bool
 
     // Smoothing state (Unit 5; not observed).
     @ObservationIgnored private var ema: Double?
@@ -91,8 +98,9 @@ struct SpikeFilter: Sendable {
     @ObservationIgnored let usesSpikeFilter: Bool
     @ObservationIgnored let tau: TimeInterval
 
-    init(sensor: Sensor, displayName: String, isHidden: Bool, isPinned: Bool) {
+    init(sensor: Sensor, displayName: String, isHidden: Bool, isPinned: Bool, isExcludedFromHottest: Bool = false) {
         self.sensor = sensor; self.displayName = displayName; self.isHidden = isHidden; self.isPinned = isPinned
+        self.isExcludedFromHottest = isExcludedFromHottest
         let hotspot = sensor.role == .hotspot || sensor.role == .maximum
         usesSpikeFilter = hotspot
         tau = hotspot ? SensorSmoothing.hotspotTau : SensorSmoothing.tau
@@ -206,6 +214,9 @@ struct SpikeFilter: Sendable {
     @ObservationIgnored private var groupByID: [DisplayGroup: LiveSensorGroup] = [:]
     @ObservationIgnored private var visibleIDs: Set<SensorID> = []   // not hidden (aggregates: highestAll / averageAll)
     @ObservationIgnored private var shownIDs: Set<SensorID> = []     // listed (group stats)
+    /// Sensors left out of `hottest`: own flag or excluded hardware block. Observed, so the popover hero and Overview
+    /// follow a toggle at once; rebuilt by load(inventory:), applyOverrides() and setExcludedFromHottest(_:_:).
+    private(set) var hottestExcluded: Set<SensorID> = []
     @ObservationIgnored private var aggregateState: [AggregateKind: AggregateSmoother] = [:]
 
     private struct AggregateSmoother {
@@ -217,9 +228,10 @@ struct SpikeFilter: Sendable {
     init(settings: SettingsStore) {
         self.settings = settings
         nominalInterval = settings.updateInterval
-        // Settings UI toggles "Show hidden sensors"; resetToDefaults() clears the overrides.
+        // Settings UI toggles "Show hidden sensors" and the "Hottest" hardware blocks; resetToDefaults() clears the
+        // overrides and the blocks.
         observeContinuously({ [weak settings] in
-            _ = settings?.showHiddenSensors; _ = settings?.sensorOverrides
+            _ = settings?.showHiddenSensors; _ = settings?.sensorOverrides; _ = settings?.hottestExcludedGroups
         }) { [weak self] in
             guard let self else { return false }
             self.applyOverrides()
@@ -233,12 +245,42 @@ struct SpikeFilter: Sendable {
     var showsStaleReadings: Bool { hasReading && staleMarked }
     var pinned: [LiveSensor] { sensors.filter(\.isPinned) }
     /// Hottest visible die sensor (cpu/gpu/soc display groups) — popover header. Current readings win over
-    /// stale ones (sensors not sampled while the popover was closed).
+    /// stale ones (sensors not sampled while the popover was closed). Sensors the user left out of "Hottest"
+    /// (`hottestExcluded`) are skipped — unless that leaves no die sensor with a value: a setting must never empty
+    /// the hero, so the exclusions are then ignored.
     var hottest: LiveSensor? {
-        let dies = sensors.filter { !$0.isHidden && [.cpu, .gpu, .soc].contains($0.sensor.displayGroup) && $0.value != nil }
-        let current = dies.filter { $0.state == .ok }
-        return (current.isEmpty ? dies : current).max { ($0.value ?? 0) < ($1.value ?? 0) }
+        let dies = sensors.filter { !$0.isHidden && Self.isHottestCandidate($0.sensor) && $0.value != nil }
+        let counted = dies.filter { !hottestExcluded.contains($0.id) }
+        let pool = counted.isEmpty ? dies : counted
+        let current = pool.filter { $0.state == .ok }
+        return (current.isEmpty ? pool : current).max { ($0.value ?? 0) < ($1.value ?? 0) }
     }
+
+    /// Display groups `hottest` chooses from (die sensors). Settings › Sensors lists the hardware blocks among them.
+    nonisolated static let hottestDisplayGroups: Set<DisplayGroup> = [.cpu, .gpu, .soc]
+    /// A die sensor: one `hottest` may show, so the "Hottest" exclusion applies to it (hidden ones never count).
+    nonisolated static func isHottestCandidate(_ s: Sensor) -> Bool { hottestDisplayGroups.contains(s.displayGroup) }
+    /// The hardware block a die sensor counts under for Settings › Sensors' "Hottest" switches: its SensorGroup, except
+    /// the firmware's per-cluster summaries filed under cpuAggregate (Apple Silicon `Tpx*` = P-cluster core / fabric /
+    /// zone avg + max, `Tex*` = E-cluster die), which read their cluster's cores and so go with its block: switching
+    /// "CPU performance cores" off also takes "P-cluster 1 core max" (Tpx1, visible on M4 Max) out of "Hottest".
+    nonisolated static func hottestBlock(_ s: Sensor) -> SensorGroup {
+        guard s.group == .cpuAggregate else { return s.group }
+        if s.descriptor.key.hasPrefix("Tpx") { return .cpuPerformance }
+        if s.descriptor.key.hasPrefix("Tex") { return .cpuEfficiency }
+        return .cpuAggregate
+    }
+    /// Left out of "Hottest" by the excluded `blocks`: its own block is one of them, or it is a die-wide maximum (a
+    /// cpuAggregate maximum left after `hottestBlock`: TCMz "SoC die hotspot", TCDX, Intel's TCXC package max). Those
+    /// are ≥ every block's probes and would show an excluded block's peak under their own name, so they leave as soon
+    /// as any block does. Die-wide averages (TCMb) stay with their block.
+    nonisolated static func isBlockExcluded(_ s: Sensor, _ blocks: Set<SensorGroup>) -> Bool {
+        guard !blocks.isEmpty else { return false }
+        let block = hottestBlock(s)
+        return blocks.contains(block) || (block == .cpuAggregate && s.role == .maximum)
+    }
+    /// Left out of `hottest`, by its own flag or by its hardware block.
+    func isExcludedFromHottest(_ id: SensorID) -> Bool { hottestExcluded.contains(id) }
 
     func sensor(_ id: SensorID) -> LiveSensor? { byID[id] }
 
@@ -261,9 +303,11 @@ struct SpikeFilter: Sendable {
             if let existing = byID[s.id], existing.sensor == s { return existing }   // re-discovery keeps stats
             let o = settings.override(for: s.id)
             return LiveSensor(sensor: s, displayName: o.name ?? s.name(preferRussian: ru),
-                              isHidden: o.hidden ?? !s.isVisibleByDefault, isPinned: o.pinned ?? false)
+                              isHidden: o.hidden ?? !s.isVisibleByDefault, isPinned: o.pinned ?? false,
+                              isExcludedFromHottest: o.excludedFromHottest ?? false)
         }
         byID = Dictionary(uniqueKeysWithValues: sensors.map { ($0.id, $0) })
+        rebuildHottestExclusions()
         rebuildGroups()
     }
 
@@ -346,6 +390,14 @@ struct SpikeFilter: Sendable {
         s.isPinned = pinned
         var o = settings.override(for: id); o.pinned = pinned; settings.setOverride(o, for: id)
     }
+    /// The sensor's own "Hottest" exclusion. Stored as `true` or nil (counted is the default for every sensor), so
+    /// including it again drops an otherwise empty override entry.
+    func setExcludedFromHottest(_ id: SensorID, _ excluded: Bool) {
+        guard let s = byID[id] else { return }
+        s.isExcludedFromHottest = excluded
+        var o = settings.override(for: id); o.excludedFromHottest = excluded ? true : nil; settings.setOverride(o, for: id)
+        rebuildHottestExclusions()
+    }
     /// nil, empty or whitespace-only restores the database name.
     func rename(_ id: SensorID, to name: String?) {
         guard let s = byID[id] else { return }
@@ -368,7 +420,8 @@ struct SpikeFilter: Sendable {
 
     // MARK: Private
 
-    /// Re-applies `settings.sensorOverrides` (after "Show hidden sensors", a rename elsewhere or a settings reset).
+    /// Re-applies `settings.sensorOverrides` (after "Show hidden sensors", a rename elsewhere, a "Hottest" block
+    /// toggle or a settings reset).
     private func applyOverrides() {
         let ru = settings.preferRussian
         for s in sensors {
@@ -376,11 +429,22 @@ struct SpikeFilter: Sendable {
             let name = o.name ?? s.sensor.name(preferRussian: ru)
             let hidden = o.hidden ?? !s.sensor.isVisibleByDefault
             let pinned = o.pinned ?? false
+            let excluded = o.excludedFromHottest ?? false
             if s.displayName != name { s.displayName = name }
             if s.isHidden != hidden { s.isHidden = hidden }
             if s.isPinned != pinned { s.isPinned = pinned }
+            if s.isExcludedFromHottest != excluded { s.isExcludedFromHottest = excluded }
         }
+        rebuildHottestExclusions()
         rebuildGroups()
+    }
+
+    /// `hottestExcluded` from each sensor's own flag and Settings › Sensors' excluded hardware blocks
+    /// (`isBlockExcluded`); assigned only when it changed, so `hottest` readers re-render on a real toggle only.
+    private func rebuildHottestExclusions() {
+        let blocks = settings.hottestExcludedGroups
+        let next = Set(sensors.lazy.filter { $0.isExcludedFromHottest || Self.isBlockExcluded($0.sensor, blocks) }.map(\.id))
+        if next != hottestExcluded { hottestExcluded = next }
     }
 
     private func smoothAggregates(_ raw: AggregateValues, now: Date, nominal: TimeInterval, restart: Bool) -> AggregateValues {

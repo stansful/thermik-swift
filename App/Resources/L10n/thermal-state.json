@@ -1,0 +1,8 @@
+{
+  "Thermal state": {"ru": "Тепловое состояние", "comment": "VoiceOver label of the popover header chip that shows the hottest sensor's level (Cold … Critical) on its colour scale"},
+  "Opens Overview": {"ru": "Открывает «Обзор»", "comment": "VoiceOver hint of the popover header level chip: clicking it opens the Overview page of the main window"},
+  "Click to open Overview.": {"ru": "Нажмите, чтобы открыть «Обзор».", "comment": "Tooltip line of the popover header level chip; «Обзор» is the main window's Overview page"},
+  "Level of the hottest sensor on its colour scale.": {"ru": "Уровень самого горячего датчика по его цветовой шкале.", "comment": "Tooltip of the popover level chip and of Overview's “Thermal pressure” tile: the word shown (Cold … Critical) comes from Settings › Appearance › Colour scale"},
+  "macOS thermal pressure: %@": {"ru": "Тепловая нагрузка macOS: %@", "comment": "Tooltip / VoiceOver line next to the hottest sensor's level; %@ is the macOS pressure level (Nominal, Moderate, Heavy, Throttling)"},
+  "Each level starts at the temperature under it.": {"ru": "Каждый уровень начинается с температуры, указанной под ним.", "comment": "Settings › Appearance, footer of the colour-scale editor (each level name has a temperature field under it)"}
+}

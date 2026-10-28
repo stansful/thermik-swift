@@ -74,8 +74,11 @@ struct SettingsAppearanceTab: View {
             } header: {
                 Text("Colour scale")
             } footer: {
-                Text("Sensor, menu bar and chart colours follow these temperatures. Notification thresholds are set separately in Alerts.")
-                    .font(ThermikFont.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Each level starts at the temperature under it.")
+                    Text("Sensor, menu bar and chart colours follow these temperatures. Notification thresholds are set separately in Alerts.")
+                }
+                .font(ThermikFont.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -83,7 +86,8 @@ struct SettingsAppearanceTab: View {
     }
 }
 
-/// Editable colour scale: per sensor class, the temperature at which each of the seven level colours is reached.
+/// Editable colour scale: per sensor class, the temperature at which each of the seven level colours is reached, which
+/// is also where that level begins (ThermalScale.level: popover chip, badges, Overview, VoiceOver).
 /// Values stay strictly increasing (each at least 1° above the previous one); the strip shows the resulting ramp.
 private struct ColorScaleEditor: View {
     @Environment(SettingsStore.self) private var settings
@@ -93,8 +97,11 @@ private struct ColorScaleEditor: View {
     var body: some View {
         let unit = settings.effectiveUnit
         // Reading `colorScales` here makes the editor redraw when it changes (the scale itself is not observable).
-        let isCustom = settings.colorScales[thermalClass.rawValue] != nil
+        let stored = settings.colorScales[thermalClass.rawValue]
         let temps = ThermalScale.scale(for: thermalClass).temps
+        // Nothing to reset when the scale in effect is the default one: also for a stored entry equal to the defaults
+        // (someone who had tuned exactly today's defaults by hand) or an invalid one (ignored by ThermalScaleOverrides).
+        let isCustom = stored != nil && temps != thermalClass.stops
         VStack(alignment: .leading, spacing: 14) {
             Picker(selection: $thermalClass) {
                 ForEach(ThermalClass.allCases, id: \.self) { Text(verbatim: $0.title).tag($0) }

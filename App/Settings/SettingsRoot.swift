@@ -353,6 +353,7 @@ private struct SensorSettings: View {
 
     var body: some View {
         @Bindable var s = settings
+        let blocks = hottestBlocks
         Form {
             Section {
                 Toggle(isOn: $s.showHiddenSensors) { Text("Show hidden sensors") }
@@ -361,6 +362,24 @@ private struct SensorSettings: View {
             } footer: {
                 Text("Hidden sensors include raw, duplicate and firmware-summary keys. They are never used for alerts.")
                     .font(ThermikFont.caption).foregroundStyle(.secondary)
+            }
+            if !blocks.isEmpty {
+                // One switch per hardware block of this Mac's die sensors; ON = counted in "Hottest". Display only:
+                // SensorStore.hottest skips the block, every aggregate and the safety path still read it. Not titled
+                // "Hottest sensor": that is AggregateKind.highestAll (menu bar, Shortcuts), which these never narrow.
+                Section {
+                    ForEach(blocks, id: \.self) { g in
+                        Toggle(isOn: countsInHottest(g)) { Text(verbatim: g.title) }
+                    }
+                } header: {
+                    Text("Hottest value")
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Turn a block off to leave its sensors out of the Hottest value in the popover, on Overview and next to Sensors in the window’s sidebar. Excluded sensors are still shown and logged, and still count for alerts, fan curves and the safety override. To leave out a single sensor, use its menu on the Sensors page or the inspector.")
+                        Text("A cluster’s firmware summaries, such as “P-cluster 1 core max”, go with its cores’ block. Die-wide maxima, such as the SoC die hotspot, span every block, so they are left out as soon as any block is off. The “Hottest sensor” metric of the menu bar and Shortcuts always reads every sensor.")
+                    }
+                    .font(ThermikFont.caption).foregroundStyle(.secondary)
+                }
             }
             Section {
                 Button { confirmReset = true } label: { Text("Reset Statistics") }
@@ -406,6 +425,7 @@ private struct SensorSettings: View {
             if o.hidden == true { parts.append(String(localized: "hidden")) }
             if o.hidden == false, let s = sensors.sensor(id), !s.sensor.isVisibleByDefault { parts.append(String(localized: "shown")) }
             if o.pinned == true { parts.append(String(localized: "pinned")) }
+            if o.excludedFromHottest == true { parts.append(String(localized: "excluded from Hottest")) }
             guard !parts.isEmpty else { return nil }
             let name = sensors.sensor(id).map { $0.sensor.name(preferRussian: settings.preferRussian) } ?? id.description
             return (id, name, parts.joined(separator: ", "))
@@ -413,14 +433,35 @@ private struct SensorSettings: View {
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
-    /// Back to the catalog defaults for one sensor (name, visibility, pin) and drop its override entry.
+    /// Back to the catalog defaults for one sensor (name, visibility, pin, counted in "Hottest") and drop its
+    /// override entry.
     private func restore(_ id: SensorID) {
         if let s = sensors.sensor(id) {
             sensors.rename(id, to: nil)
             sensors.setHidden(id, !s.sensor.isVisibleByDefault)
             sensors.setPinned(id, false)
+            sensors.setExcludedFromHottest(id, false)
         }
         settings.sensorOverrides[id.description] = nil
+    }
+
+    /// Hardware blocks (`SensorStore.hottestBlock`) of this Mac's visible die sensors (the ones "Hottest" is chosen
+    /// from; a block of hidden keys only, like M4 Max's CPU fabric, would get a switch that changes nothing), in
+    /// SensorGroup order, plus any block still excluded but no longer listed, so it can always be switched back on.
+    private var hottestBlocks: [SensorGroup] {
+        let present = Set(sensors.sensors.lazy.filter { !$0.isHidden && SensorStore.isHottestCandidate($0.sensor) }
+                                             .map { SensorStore.hottestBlock($0.sensor) })
+        return SensorGroup.allCases.filter { present.contains($0) || settings.hottestExcludedGroups.contains($0) }
+    }
+
+    /// ON = the block counts in "Hottest"; the setting stores the excluded blocks.
+    private func countsInHottest(_ g: SensorGroup) -> Binding<Bool> {
+        Binding(get: { !settings.hottestExcludedGroups.contains(g) },
+                set: { counted in
+                    var excluded = settings.hottestExcludedGroups
+                    if counted { excluded.remove(g) } else { excluded.insert(g) }
+                    settings.hottestExcludedGroups = excluded
+                })
     }
 }
 

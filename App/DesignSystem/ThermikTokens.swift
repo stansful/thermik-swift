@@ -42,9 +42,10 @@ enum ThermalLevel: Int, CaseIterable, Sendable, Comparable {
     var stopT: Double { ThermalScale.stopT[rawValue] }
 }
 
-/// Maps °C → normalised t ∈ 0…1 on the shared colour ramp, per sensor class.
+/// Maps °C → normalised t ∈ 0…1 on the shared colour ramp, per sensor class, and °C → level.
 struct ThermalScale: Sendable, Hashable {
-    /// °C at the 7 ramp stops (t = 0, .2, .4, .6, .75, .88, 1.0)
+    /// °C at the 7 ramp stops (t = 0, .2, .4, .6, .75, .88, 1.0). Stop i is also where level i begins: the values the
+    /// colour-scale editor shows under each level name.
     let temps: [Double]
     static let stopT: [Double] = [0, 0.20, 0.40, 0.60, 0.75, 0.88, 1.0]
 
@@ -75,20 +76,24 @@ struct ThermalScale: Sendable, Hashable {
         return 1
     }
 
-    func level(_ celsius: Double) -> ThermalLevel { Self.level(normalized: normalized(celsius)) }
+    /// frost < temps[1] ≤ cool < temps[2] ≤ normal < temps[3] ≤ warm < temps[4] ≤ hot < temps[5] ≤ very hot
+    /// < temps[6] ≤ critical, graded at display precision: the value rounded to whole degrees in `unit` the way
+    /// ThermikFormat.temp draws it (half to even) against each stop rounded the way the colour-scale editor shows it.
+    /// So a value shown as "85°" is critical whenever the editor shows 85 under "Critical" (84.6 °C included), and one
+    /// shown as "84°" is very hot; in °F the same holds for the °F numbers. Pass the unit the value is shown in.
+    func level(_ celsius: Double, unit: UnitTemperature = .celsius) -> ThermalLevel {
+        guard celsius.isFinite else { return .frost }
+        let shown = ThermikFormat.convert(celsius, to: unit).rounded(.toNearestOrEven)
+        let i = temps.lastIndex { shown >= ThermikFormat.convert($0, to: unit).rounded() } ?? 0
+        return ThermalLevel(rawValue: i) ?? .critical
+    }
 
-    /// Level thresholds on t (SPEC §4.2.1): frost < 0.10 ≤ cool < 0.30 ≤ normal < 0.55 ≤ warm < 0.70 ≤ hot < 0.84
-    /// ≤ very hot < 0.97 ≤ critical.
+    /// Level thresholds on t are the ramp stops themselves (SPEC §4.2.1): frost < 0.20 ≤ cool < 0.40 ≤ normal < 0.60
+    /// ≤ warm < 0.75 ≤ hot < 0.88 ≤ very hot < 1.0 ≤ critical. Thresholds between the stops (0.10 / 0.30 / … / 0.97)
+    /// made a level begin part-way between two editor values (e.g. "Critical" 2.5° below the critical stop).
+    /// Exact (unrounded) form of `level(_:unit:)`, for a t that is not shown as a number. Non-finite t is frost.
     static func level(normalized t: Double) -> ThermalLevel {
-        switch t {
-        case ..<0.10: return .frost
-        case ..<0.30: return .cool
-        case ..<0.55: return .normal
-        case ..<0.70: return .warm
-        case ..<0.84: return .hot
-        case ..<0.97: return .veryHot
-        default:      return .critical
-        }
+        ThermalLevel(rawValue: stopT.lastIndex { t >= $0 } ?? 0) ?? .critical
     }
 }
 

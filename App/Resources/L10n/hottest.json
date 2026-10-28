@@ -1,0 +1,42 @@
+{
+  "Turn a block off to leave its sensors out of the Hottest value in the popover, on Overview and next to Sensors in the window’s sidebar. Excluded sensors are still shown and logged, and still count for alerts, fan curves and the safety override. To leave out a single sensor, use its menu on the Sensors page or the inspector.": {
+    "ru": "Выключите блок, чтобы его датчики не учитывались в значении «Самый горячий» во всплывающей панели, на «Обзоре» и рядом с «Датчиками» в боковой панели окна. Исключённые датчики по-прежнему показываются и записываются в журнал, а также учитываются в оповещениях, кривых вентиляторов и защите от перегрева. Чтобы исключить один датчик, воспользуйтесь его меню на странице «Датчики» или инспектором.",
+    "comment": "Settings › Sensors, footer of the “Hottest sensor” section (one switch per hardware block, ON = counted)"
+  },
+  "Hottest value": {
+    "ru": "Значение «Самый горячий»",
+    "comment": "Settings › Sensors, header of the section with one switch per hardware block (ON = counted in the popover/Overview “Hottest” value); deliberately not “Hottest sensor”, the menu bar metric"
+  },
+  "A cluster’s firmware summaries, such as “P-cluster 1 core max”, go with its cores’ block. Die-wide maxima, such as the SoC die hotspot, span every block, so they are left out as soon as any block is off. The “Hottest sensor” metric of the menu bar and Shortcuts always reads every sensor.": {
+    "ru": "Сводки кластера от прошивки, например «P-кластер 1: макс. ядер», относятся к блоку его ядер. Максимумы всего кристалла, например «Кристалл SoC, пик», охватывают все блоки, поэтому не учитываются, как только выключен любой блок. Показатель «Самый горячий датчик» в строке меню и Командах всегда учитывает все датчики.",
+    "comment": "Settings › Sensors, second paragraph of the “Hottest value” section footer; quoted names are sensor names (keep them as the Russian sensor names), “Shortcuts” is the macOS app (Команды)"
+  },
+  "It spans every hardware block, so it is left out of Hottest while any block is off in Settings › Sensors.": {
+    "ru": "Он охватывает все аппаратные блоки, поэтому не учитывается в «Самом горячем», пока в Настройках › Датчики выключен любой блок.",
+    "comment": "Sensors page inspector, shown instead of the Exclude/Include button for a die-wide maximum (e.g. SoC die hotspot) while any hardware block is switched off"
+  },
+  "excluded from Hottest": {
+    "ru": "не учитывается в «Самом горячем»",
+    "comment": "Settings › Sensors › Customized sensors: summary part, joined with “hidden”, “pinned”… by commas"
+  },
+  "Exclude from Hottest": {
+    "ru": "Не учитывать в «Самом горячем»",
+    "comment": "Sensors page: inspector button and table context menu; leaves the sensor out of the “Hottest” value"
+  },
+  "Include in Hottest": {
+    "ru": "Учитывать в «Самом горячем»",
+    "comment": "Sensors page: inspector button and table context menu; counts the sensor in the “Hottest” value again"
+  },
+  "Its hardware block is excluded from Hottest in Settings › Sensors.": {
+    "ru": "Его аппаратный блок не учитывается в «Самом горячем» (Настройки › Датчики).",
+    "comment": "Sensors page inspector, shown instead of the Exclude/Include button when the sensor’s whole hardware block is switched off"
+  },
+  "Hardware block excluded from Hottest": {
+    "ru": "Аппаратный блок не учитывается в «Самом горячем»",
+    "comment": "Sensors page table context menu: disabled item shown when the sensor’s whole hardware block is switched off in Settings › Sensors"
+  },
+  "Only the Hottest value ignores an excluded sensor; alerts, fan curves and the safety override still use it.": {
+    "ru": "Исключённый датчик не учитывается только в значении «Самый горячий»; оповещения, кривые вентиляторов и защита от перегрева по-прежнему его используют.",
+    "comment": "Sensors page inspector: tooltip of the Exclude/Include from Hottest button"
+  }
+}

@@ -1,8 +1,8 @@
 // SensorsPage.swift — Thermik (MIT). Unit 8. Sensors page (SPEC §4.6 W3): group filter chips, a sortable / searchable
 // SwiftUI Table (☆ pin, name, group, value, session min / avg / max, 5-minute sparkline, raw key hidden unless
-// "Show raw SMC keys"), a context menu (pin, hide, rename, set alert, copy) and the inspector (SensorInspector.swift).
-// Rows observe their own LiveSensor, so a value change re-renders only that row's cells (§2.14). Pin / hide / rename go
-// through SensorStore, which persists them in `sensors.overrides`.
+// "Show raw SMC keys"), a context menu (pin, hide, exclude from Hottest, rename, set alert, copy) and the inspector
+// (SensorInspector.swift). Rows observe their own LiveSensor, so a value change re-renders only that row's cells (§2.14).
+// Pin / hide / exclude / rename go through SensorStore, which persists them in `sensors.overrides`.
 import AppKit
 import SwiftUI
 import ThermikCore
@@ -127,6 +127,17 @@ struct SensorsPage: View {
     @ViewBuilder private func contextMenu(_ s: LiveSensor) -> some View {
         Button { sensors.setPinned(s.id, !s.isPinned) } label: { s.isPinned ? Text("Unpin") : Text("Pin") }
         Button { sensors.setHidden(s.id, !s.isHidden) } label: { s.isHidden ? Text("Show") : Text("Hide") }
+        if SensorStore.isHottestCandidate(s.sensor) {
+            // A block excluded in Settings › Sensors wins over the sensor's own switch (SensorStore.isBlockExcluded:
+            // its block, or any block for a die-wide maximum): say so instead of a toggle.
+            if SensorStore.isBlockExcluded(s.sensor, settings.hottestExcludedGroups) {
+                Button {} label: { Text("Hardware block excluded from Hottest") }.disabled(true)
+            } else {
+                Button { sensors.setExcludedFromHottest(s.id, !s.isExcludedFromHottest) } label: {
+                    s.isExcludedFromHottest ? Text("Include in Hottest") : Text("Exclude from Hottest")
+                }
+            }
+        }
         Button { beginRename(s) } label: { Text("Rename…") }
         Divider()
         Button { model.createAlert(for: .sensor(s.id)) } label: { Text("Set alert…") }

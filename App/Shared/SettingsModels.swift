@@ -206,4 +206,8 @@ struct SensorOverride: Codable, Hashable, Sendable {
     var name: String?
     var hidden: Bool?
     var pinned: Bool?
+    /// Additive: left out of the "Hottest" value (popover hero, Overview, the Sensors sidebar badge) — display only,
+    /// aggregates, alerts, fan curves and the safety override still see it. `true` or nil (nil = counted); optional,
+    /// so overrides saved before it existed still decode.
+    var excludedFromHottest: Bool?
 }

@@ -634,6 +634,18 @@
         }
       }
     },
+    "A cluster’s firmware summaries, such as “P-cluster 1 core max”, go with its cores’ block. Die-wide maxima, such as the SoC die hotspot, span every block, so they are left out as soon as any block is off. The “Hottest sensor” metric of the menu bar and Shortcuts always reads every sensor.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сводки кластера от прошивки, например «P-кластер 1: макс. ядер», относятся к блоку его ядер. Максимумы всего кристалла, например «Кристалл SoC, пик», охватывают все блоки, поэтому не учитываются, как только выключен любой блок. Показатель «Самый горячий датчик» в строке меню и Командах всегда учитывает все датчики."
+          }
+        }
+      },
+      "comment": "Settings › Sensors, second paragraph of the “Hottest value” section footer; quoted names are sensor names (keep them as the Russian sensor names), “Shortcuts” is the macOS app (Команды)"
+    },
     "A fan is not spinning": {
       "extractionState": "manual",
       "localizations": {
@@ -2196,6 +2208,18 @@
         }
       }
     },
+    "Click to open Overview.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нажмите, чтобы открыть «Обзор»."
+          }
+        }
+      },
+      "comment": "Tooltip line of the popover header level chip; «Обзор» is the main window's Overview page"
+    },
     "Close": {
       "extractionState": "manual",
       "localizations": {
@@ -2963,6 +2987,18 @@
       },
       "comment": "Popover, Fixed mode with 'Same speed for all fans' off; %@ lists the fans, e.g. 'Left fan 30 % · Right fan 60 %'"
     },
+    "Each level starts at the temperature under it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Каждый уровень начинается с температуры, указанной под ним."
+          }
+        }
+      },
+      "comment": "Settings › Appearance, footer of the colour-scale editor (each level name has a temperature field under it)"
+    },
     "Edit": {
       "extractionState": "manual",
       "localizations": {
@@ -3161,6 +3197,18 @@
           }
         }
       }
+    },
+    "Exclude from Hottest": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не учитывать в «Самом горячем»"
+          }
+        }
+      },
+      "comment": "Sensors page: inspector button and table context menu; leaves the sensor out of the “Hottest” value"
     },
     "Expanded": {
       "extractionState": "manual",
@@ -4022,6 +4070,18 @@
         }
       }
     },
+    "Hardware block excluded from Hottest": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Аппаратный блок не учитывается в «Самом горячем»"
+          }
+        }
+      },
+      "comment": "Sensors page table context menu: disabled item shown when the sensor’s whole hardware block is switched off in Settings › Sensors"
+    },
     "Hardware checks are free and run locally. Nothing leaves this Mac.": {
       "extractionState": "manual",
       "localizations": {
@@ -4343,6 +4403,18 @@
         }
       }
     },
+    "Hottest value": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Значение «Самый горячий»"
+          }
+        }
+      },
+      "comment": "Settings › Sensors, header of the section with one switch per hardware block (ON = counted in the popover/Overview “Hottest” value); deliberately not “Hottest sensor”, the menu bar metric"
+    },
     "Hottest · %@": {
       "extractionState": "manual",
       "localizations": {
@@ -4481,6 +4553,18 @@
       },
       "comment": "Settings › Menu Bar, custom label editor"
     },
+    "Include in Hottest": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Учитывать в «Самом горячем»"
+          }
+        }
+      },
+      "comment": "Sensors page: inspector button and table context menu; counts the sensor in the “Hottest” value again"
+    },
     "Incorrect current from the battery": {
       "extractionState": "manual",
       "localizations": {
@@ -4593,6 +4677,18 @@
         }
       }
     },
+    "It spans every hardware block, so it is left out of Hottest while any block is off in Settings › Sensors.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Он охватывает все аппаратные блоки, поэтому не учитывается в «Самом горячем», пока в Настройках › Датчики выключен любой блок."
+          }
+        }
+      },
+      "comment": "Sensors page inspector, shown instead of the Exclude/Include button for a die-wide maximum (e.g. SoC die hotspot) while any hardware block is switched off"
+    },
     "It was removed from the menu bar, or it is turned off in System Settings › Menu Bar.": {
       "extractionState": "manual",
       "localizations": {
@@ -4603,6 +4699,18 @@
           }
         }
       }
+    },
+    "Its hardware block is excluded from Hottest in Settings › Sensors.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Его аппаратный блок не учитывается в «Самом горячем» (Настройки › Датчики)."
+          }
+        }
+      },
+      "comment": "Sensors page inspector, shown instead of the Exclude/Include button when the sensor’s whole hardware block is switched off"
     },
     "Keep all files": {
       "extractionState": "manual",
@@ -4807,6 +4915,18 @@
         }
       },
       "comment": "Menu bar label style: vertical level bar + temperature"
+    },
+    "Level of the hottest sensor on its colour scale.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Уровень самого горячего датчика по его цветовой шкале."
+          }
+        }
+      },
+      "comment": "Tooltip of the popover level chip and of Overview's “Thermal pressure” tile: the word shown (Cold … Critical) comes from Settings › Appearance › Colour scale"
     },
     "Line": {
       "extractionState": "manual",
@@ -5739,6 +5859,18 @@
       },
       "comment": "Menu bar label: style name or «Custom» builder option"
     },
+    "Only the Hottest value ignores an excluded sensor; alerts, fan curves and the safety override still use it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Исключённый датчик не учитывается только в значении «Самый горячий»; оповещения, кривые вентиляторов и защита от перегрева по-прежнему его используют."
+          }
+        }
+      },
+      "comment": "Sensors page inspector: tooltip of the Exclude/Include from Hottest button"
+    },
     "Open Console": {
       "extractionState": "manual",
       "localizations": {
@@ -5815,6 +5947,18 @@
           }
         }
       }
+    },
+    "Opens Overview": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Открывает «Обзор»"
+          }
+        }
+      },
+      "comment": "VoiceOver hint of the popover header level chip: clicking it opens the Overview page of the main window"
     },
     "Other": {
       "extractionState": "manual",
@@ -8571,6 +8715,18 @@
       },
       "comment": "Intel shutdown cause code -81"
     },
+    "Thermal state": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Тепловое состояние"
+          }
+        }
+      },
+      "comment": "VoiceOver label of the popover header chip that shows the hottest sensor's level (Cold … Critical) on its colour scale"
+    },
     "Thermik": {
       "extractionState": "manual",
       "localizations": {
@@ -9007,6 +9163,18 @@
           }
         }
       }
+    },
+    "Turn a block off to leave its sensors out of the Hottest value in the popover, on Overview and next to Sensors in the window’s sidebar. Excluded sensors are still shown and logged, and still count for alerts, fan curves and the safety override. To leave out a single sensor, use its menu on the Sensors page or the inspector.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выключите блок, чтобы его датчики не учитывались в значении «Самый горячий» во всплывающей панели, на «Обзоре» и рядом с «Датчиками» в боковой панели окна. Исключённые датчики по-прежнему показываются и записываются в журнал, а также учитываются в оповещениях, кривых вентиляторов и защите от перегрева. Чтобы исключить один датчик, воспользуйтесь его меню на странице «Датчики» или инспектором."
+          }
+        }
+      },
+      "comment": "Settings › Sensors, footer of the “Hottest sensor” section (one switch per hardware block, ON = counted)"
     },
     "Turned off in System Settings": {
       "extractionState": "manual",
@@ -9874,6 +10042,18 @@
         }
       }
     },
+    "excluded from Hottest": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "не учитывается в «Самом горячем»"
+          }
+        }
+      },
+      "comment": "Settings › Sensors › Customized sensors: summary part, joined with “hidden”, “pinned”… by commas"
+    },
     "fanPreset.cool": {
       "extractionState": "manual",
       "localizations": {
@@ -10152,6 +10332,18 @@
           }
         }
       }
+    },
+    "macOS thermal pressure: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Тепловая нагрузка macOS: %@"
+          }
+        }
+      },
+      "comment": "Tooltip / VoiceOver line next to the hottest sensor's level; %@ is the macOS pressure level (Nominal, Moderate, Heavy, Throttling)"
     },
     "macOS took back control of a fan": {
       "extractionState": "manual",

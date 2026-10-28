@@ -78,13 +78,15 @@ public enum SensorRole: String, Codable, Sendable, CaseIterable {
     public var isNeverShown: Bool { self == .peakHold || self == .reference || self == .unused }
 }
 
-/// Colour-scale class (DES §7.3.2): °C at the 7 ramp stops frost…critical.
+/// Colour-scale class (DES §7.3.2): °C at the 7 ramp stops frost…critical. Each stop is also where its level begins
+/// (the app's ThermalScale.level): with the CPU/GPU defaults "Hot" starts at 65 °C and "Critical" at 85 °C.
+/// Users retune them in Settings › Appearance › Colour scale.
 public enum ThermalClass: String, Codable, Sendable, CaseIterable {
     case soc, power, storage, battery, ambient
     public var stops: [Double] {
         switch self {
-        case .soc, .power: return [30, 45, 60, 75, 85, 95, 105]
-        case .storage:     return [25, 35, 45, 55, 65, 72, 80]
+        case .soc, .power: return [30, 45, 50, 55, 65, 75, 85]
+        case .storage:     return [25, 35, 50, 55, 65, 75, 85]
         case .battery:     return [20, 28, 33, 38, 42, 46, 50]
         case .ambient:     return [15, 22, 28, 34, 38, 42, 46]
         }

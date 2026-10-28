@@ -105,10 +105,10 @@ struct TemperatureText: View {
             .accessibilityLabel(Text(Self.spoken(celsius, scale: scale, unit: unit)))
     }
 
-    /// VoiceOver form "83 degrees, Hot" / «83 градуса, Горячо» (SPEC §4.13).
+    /// VoiceOver form "70 degrees, Hot" / «70 градусов, Горячо» (SPEC §4.13; default CPU/GPU scale).
     static func spoken(_ celsius: Double, scale: ThermalScale, unit: UnitTemperature = .celsius) -> String {
         let n = ThermikFormat.degrees(celsius, unit: unit)
-        return String(localized: "\(n) degrees") + ", " + scale.level(celsius).localizedTitle
+        return String(localized: "\(n) degrees") + ", " + scale.level(celsius, unit: unit).localizedTitle
     }
 }
 
@@ -144,7 +144,7 @@ enum PressureLevel: Int, Sendable { case nominal, fair, serious, critical
         switch self { case .nominal: "gauge.with.dots.needle.0percent"; case .fair: "gauge.with.dots.needle.33percent"
         case .serious: "gauge.with.dots.needle.67percent"; case .critical: "gauge.with.dots.needle.100percent" }
     }
-    /// Ramp position used for the chip ink/tint (DES §7.3.3: warm / hot / critical inks).
+    /// Ramp position used for the chip ink/tint (DES §7.3.3: warm / hot / critical inks). A colour only, not a level.
     var t: Double { [0.35, 0.62, 0.8, 1.0][rawValue] }
 }
 
@@ -169,8 +169,60 @@ struct PressureChip: View {
 }
 
 extension PressureChip {
-    /// Chip for the macOS thermal pressure level (popover header, Overview).
+    /// Chip for the macOS thermal pressure level (LevelChip's fallback before the first reading).
     init(pressure: ThermalPressure) { self.init(level: PressureLevel(pressure), title: pressure.title) }
+}
+
+/// The hottest sensor's level on its own colour scale (Settings › Appearance) as a glass chip, PressureChip's look with
+/// the level's ink and tint. The popover header shows it instead of the macOS pressure, which stays "Nominal" long
+/// after a die passes the user's "Critical" stop (macOS raises it only once it has to throttle); the tooltip and the
+/// VoiceOver value still name the macOS pressure. A plain button: `action` opens Overview. Before the first reading
+/// (`level == nil`) it shows the macOS PressureChip instead, still clickable. `dimmed`: stale readings (SPEC §4.14),
+/// secondary text without a tint, like the dimmed hero value.
+struct LevelChip: View {
+    var level: ThermalLevel?
+    var pressure: ThermalPressure
+    var dimmed = false
+    var action: () -> Void
+    @Environment(\.thermikRamp) private var ramp
+
+    init(level: ThermalLevel?, pressure: ThermalPressure, dimmed: Bool = false, action: @escaping () -> Void) {
+        self.level = level; self.pressure = pressure; self.dimmed = dimmed; self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            if let level {
+                let t = level.stopT
+                Label { Text(level.title) } icon: { Image(systemName: level.symbol) }
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(dimmed ? AnyShapeStyle(.secondary) : AnyShapeStyle(ramp.ink(t)))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    // Not interactive glass: the click closes the panel and drops its content tree mid press-animation,
+                    // and the first build that had it crashed in a SwiftUI layout pass right after that click.
+                    .thermikGlass(Capsule(), tint: dimmed ? nil : ramp.vivid(t))
+                    .help(Text(verbatim: Self.explanation(pressure) + "\n" + String(localized: "Click to open Overview.")))
+            } else {
+                PressureChip(pressure: pressure)       // keeps its own "macOS thermal pressure" tooltip
+            }
+        }
+        .buttonStyle(.plain)
+        .fixedSize()                                    // the caption beside it truncates, never the chip
+        .accessibilityLabel(level == nil ? Text("Thermal pressure") : Text("Thermal state"))
+        .accessibilityValue(Text(verbatim: level.map { $0.localizedTitle + ", " + Self.pressureLine(pressure) } ?? pressure.title))
+        .accessibilityHint(Text("Opens Overview"))
+    }
+
+    /// "macOS thermal pressure: Nominal" (tooltips, VoiceOver).
+    static func pressureLine(_ pressure: ThermalPressure) -> String {
+        String(localized: "macOS thermal pressure: \(pressure.title)")
+    }
+
+    /// What the level stands for, next to the macOS pressure (this chip's and Overview's "Thermal pressure" tooltips).
+    static func explanation(_ pressure: ThermalPressure) -> String {
+        String(localized: "Level of the hottest sensor on its colour scale.") + "\n" + pressureLine(pressure)
+    }
 }
 
 /// Small capsule chip ("Paused", "Max · returns to Auto in 28:41"). Not glass: it sits inside content.

@@ -1,7 +1,9 @@
 // OverviewPage.swift — Thermik (MIT). Unit 8. Overview (SPEC §4.6, DES §7.8): KPI tiles (Hottest with HeatGlow,
-// thermal pressure, fans, power) on an aurora band, chip thermal map (only when the catalog has a die layout) or
-// per-group bars, top-5 sensors with sparklines, live history (CPU / GPU / SoC hottest + fan rpm strip, hover callout
-// in a separate overlay layer), diagnostics summary chips and a basic battery card.
+// thermal pressure = the hottest sensor's level on its colour scale, fans, power) on an aurora band, chip thermal map
+// (only when the catalog has a die layout) or per-group bars, top-5 sensors with sparklines, live history (CPU / GPU /
+// SoC hottest + fan rpm strip, hover callout in a separate overlay layer), diagnostics summary chips and a basic
+// battery card. Every view that colours or grades a value by ThermalScale reads `settings.colorScales` (the scale
+// overrides are not observable), so a retuned colour scale shows at once, not on the next tick.
 import SwiftUI
 import ThermikCore
 import ThermikSMC
@@ -73,14 +75,20 @@ private struct KPIRow: View {
     @Environment(\.thermikRamp) private var ramp
 
     var body: some View {
+        let _ = settings.colorScales                    // the band's tint and the level
+        // One `hottest` scan per tick for the band and the pressure tile; the tile gets the level as a plain value, so
+        // its body re-runs only when the level crosses a stop, not on every die reading.
+        let hottest = sensors.hottest
+        let level = hottest.flatMap { s in s.value.map { s.colorScale.level($0, unit: settings.effectiveUnit) } }
+        let t = hottest.flatMap { s in s.value.map { s.colorScale.normalized($0) } } ?? 0.3
         HStack(alignment: .top, spacing: ThermikMetrics.gutter) {
             HottestTile(model: model, glowAnimates: !auroraAnimates)
-            PressureTile()
+            PressureTile(level: level)
             FansTile(model: model)
             PowerTile()
         }
         .padding(10)
-        .background { band.clipShape(RoundedRectangle(cornerRadius: ThermikMetrics.cardRadius + 4, style: .continuous)) }
+        .background { band(t).clipShape(RoundedRectangle(cornerRadius: ThermikMetrics.cardRadius + 4, style: .continuous)) }
     }
 
     /// Aurora at pressure > nominal (12 fps, only with animated effects and without Reduce Motion); otherwise a static
@@ -88,8 +96,8 @@ private struct KPIRow: View {
     /// effect animates at a time (ThermikEffects policy, as in the popover header).
     private var auroraAnimates: Bool { system.pressure > .nominal && settings.animatedEffects && !reduceMotion }
 
-    @ViewBuilder private var band: some View {
-        let t = sensors.hottest.flatMap { s in s.value.map { s.colorScale.normalized($0) } } ?? 0.3
+    /// `t`: the hottest value on its colour scale (0.3 before the first reading).
+    @ViewBuilder private func band(_ t: Double) -> some View {
         if auroraAnimates {
             AuroraBackground(normalized: t, energy: PressureLevel(system.pressure).energy)
         } else {
@@ -107,15 +115,17 @@ private struct HottestTile: View {
     @Environment(\.thermikRamp) private var ramp
 
     var body: some View {
+        let _ = settings.colorScales
         let hottest = sensors.hottest
         let value = hottest?.value
         let scale = hottest?.colorScale ?? .soc
         let t = value.map(scale.normalized) ?? 0
+        let level = value.map { scale.level($0, unit: settings.effectiveUnit) }   // graded as the tile shows it
         MetricTile(title: String(localized: "Hottest"), symbol: "flame") {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if let value {
+                if let value, let level {
                     TemperatureText(celsius: value, scale: scale, font: ThermikFont.display, unit: settings.effectiveUnit)
-                    LevelBadge(level: scale.level(value), compact: true)
+                    LevelBadge(level: level, compact: true)
                 } else {
                     Text(verbatim: "—").font(ThermikFont.display).foregroundStyle(.tertiary)
                 }
@@ -125,7 +135,8 @@ private struct HottestTile: View {
                  ?? (sensors.isUnavailable ? String(localized: "Sensors unavailable") : String(localized: "Collecting data…")))
         }
         .background {
-            if settings.animatedEffects, t >= 0.70 {
+            // Same gate as the popover hero: glow from the level "Hot" on (its stop on the user's scale).
+            if settings.animatedEffects, (level ?? .frost) >= .hot {
                 HeatGlow(intensity: HeatGlow.intensity(forNormalized: t), tint: ramp.vivid(t), animated: glowAnimates)
             }
         }
@@ -135,21 +146,35 @@ private struct HottestTile: View {
     }
 }
 
+/// The hottest sensor's level on its own colour scale (the popover chip's word), not the macOS pressure: macOS stays
+/// "Nominal" until it has to throttle, which read as «Норма» next to a 106° "Critical" value. The macOS pressure moves
+/// to the footer while it is above nominal, and to the tooltip. `level` comes from KPIRow (nil before a reading).
 private struct PressureTile: View {
+    var level: ThermalLevel?
     @Environment(SystemStore.self) private var system
 
     var body: some View {
         MetricTile(title: String(localized: "Thermal pressure"), symbol: "gauge.with.dots.needle.50percent") {
             HStack(spacing: 8) {
-                Text(verbatim: system.pressure.title).font(ThermikFont.value).lineLimit(1).minimumScaleFactor(0.8)
-                PressureChip(level: PressureLevel(system.pressure))
-                    .labelStyle(.iconOnly)
+                if let level {
+                    // 0.7: «Очень горячо» plus the badge still fits a tile at the window's minimum width.
+                    Text(level.title).font(ThermikFont.value).lineLimit(1).minimumScaleFactor(0.7)
+                    LevelBadge(level: level, compact: true)
+                        .accessibilityHidden(true)       // the tile is one combined element; the title already says it
+                } else {
+                    Text(verbatim: "—").font(ThermikFont.value).foregroundStyle(.tertiary)
+                }
             }
             .frame(minHeight: 34, alignment: .leading)
         } footer: {
-            let n = system.pressureEventsToday
-            if n == 0 { Text("No pressure events today") } else { Text("\(n) pressure events today") }
+            if system.pressure > .nominal {
+                Text("macOS: \(system.pressure.title)")
+            } else {
+                let n = system.pressureEventsToday
+                if n == 0 { Text("No pressure events today") } else { Text("\(n) pressure events today") }
+            }
         }
+        .help(Text(verbatim: LevelChip.explanation(system.pressure)))
     }
 }
 
@@ -225,6 +250,7 @@ private struct ChipMapCard: View {
     @State private var hovered: DieSensor.ID?
 
     var body: some View {
+        let _ = settings.colorScales
         let points: [DieSensor] = layout.compactMap { p in
             guard let s = sensors.sensor(SensorID(databaseKey: p.key)), let v = s.value else { return nil }
             return DieSensor(id: s.id.description, label: s.displayName, position: CGPoint(x: p.x, y: p.y), celsius: v,
@@ -270,9 +296,11 @@ private struct GroupBarRow: View {
     var group: LiveSensorGroup
     var unit: UnitTemperature
     var onOpen: () -> Void
+    @Environment(SettingsStore.self) private var settings
     @Environment(\.thermikRamp) private var ramp
 
     var body: some View {
+        let _ = settings.colorScales
         let hottest = group.hottest
         let value = hottest?.value
         let scale = hottest?.colorScale ?? .soc
@@ -333,9 +361,11 @@ private struct TopSensorRow: View {
     var unit: UnitTemperature
     var onOpen: () -> Void
     @Environment(HistoryStore.self) private var history
+    @Environment(SettingsStore.self) private var settings
 
     var body: some View {
         let _ = history.sparklineRevision
+        let _ = settings.colorScales
         Button(action: onOpen) {
             HStack(spacing: 8) {
                 Text(verbatim: sensor.displayName).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
@@ -442,6 +472,7 @@ private struct BatterySummaryCard: View {
     @Environment(SettingsStore.self) private var settings
 
     var body: some View {
+        let _ = settings.colorScales                    // the battery temperature's colour
         PageCard(title: String(localized: "Battery"), symbol: "battery.75percent") {
             Button { model.page = .battery } label: { Text("Details") }
                 .buttonStyle(.link).font(.system(size: 11))

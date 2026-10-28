@@ -28,6 +28,7 @@ struct HistoryChartPanel: View {
 
     var body: some View {
         let _ = history.chartRevision(for: window)   // observation hook: refresh as often as this window can show
+        let _ = settings.colorScales                 // the threshold rules follow the colour scale
         let unit = settings.effectiveUnit
         let now = Date()
         let envelope = window.rawValue >= HistoryWindow.h6.rawValue
@@ -46,10 +47,14 @@ struct HistoryChartPanel: View {
                 ChartSeries(id: "\(d.spec.id)", name: d.spec.name, color: d.spec.color,
                             samples: d.samples.map { Sample(time: $0.time, value: Float(WindowFormat.chartValue(Double($0.value), unit))) })
             }
-            let thresholds: [(label: String, celsius: Double, t: Double)] = showsThresholds ? [
-                (String(localized: "Hot"), WindowFormat.chartValue(85, unit), 0.75),
-                (String(localized: "Critical"), WindowFormat.chartValue(100, unit), 1.0),
-            ].filter { domain.contains($0.1) } : []
+            // "Hot" and "Critical" rules at the CPU/GPU colour scale's own stops (every series shown with them is a die
+            // value), so they move with Settings › Appearance › Colour scale; `colorScales` above redraws the chart.
+            let soc = ThermalScale.soc
+            let thresholds: [(label: String, celsius: Double, t: Double)] = showsThresholds
+                ? [ThermalLevel.hot, .critical]
+                    .map { (label: $0.localizedTitle, celsius: WindowFormat.chartValue(soc.temps[$0.rawValue], unit), t: $0.stopT) }
+                    .filter { domain.contains($0.celsius) }
+                : []
             Group {
                 if envelope {
                     EnvelopeHistoryChart(series: chartSeries,

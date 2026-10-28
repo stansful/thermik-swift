@@ -1,7 +1,9 @@
 // PopoverHeader.swift — Thermik (MIT). OWNER: Unit 7. Popover header (SPEC §4.5): aurora background, "Hottest · <sensor>"
-// caption + pressure chip, hero temperature + level badge (heat glow behind it when ≥ hot), summary line
-// (CPU average · GPU average · system power · battery). Decorative budget: the aurora animates (12 fps) only at
-// pressure > nominal, the glow (15 fps) only for a hottest value ≥ hot, and never both at once.
+// caption + level chip (the hottest sensor's level on its own colour scale; a click opens Overview, the tooltip names
+// the macOS pressure), hero temperature + icon-only level badge (the chip already says the word; heat glow behind the
+// value when ≥ hot), summary line (CPU average · GPU average · system power · battery). Decorative budget: the aurora
+// animates (12 fps) only at macOS pressure > nominal, the glow (15 fps) only for a hottest value ≥ hot, and never both
+// at once.
 import SwiftUI
 import ThermikCore
 
@@ -19,11 +21,13 @@ struct PopoverHeader: View {
 
     @ViewBuilder var body: some View {
         let unit = settings.effectiveUnit
+        // Reading `colorScales` redraws the header when the scale is retuned (ThermalScaleOverrides is not observable).
+        let _ = settings.colorScales
         let hottest = sensors.hottest
         let value = hottest?.value
         let scale = hottest.map { ThermalScale($0.sensor.thermalClass) } ?? .soc
         let t = value.map(scale.normalized) ?? 0
-        let level = value.map(scale.level)
+        let level = value.map { scale.level($0, unit: unit) }   // graded as the hero shows it
         let pressure = debug?.pressure ?? system.pressure
         let stale = isStale
         let auroraAnimates = pressure > .nominal && !stale
@@ -46,7 +50,7 @@ struct PopoverHeader: View {
                     InfoChip { Label("Paused", systemImage: "pause.circle") }
                         .help(Text("No new readings for a while. The values shown are the last ones received."))
                 }
-                PressureChip(pressure: pressure)
+                LevelChip(level: level, pressure: pressure, dimmed: stale, action: openOverview)
             }
 
             HStack(alignment: .center, spacing: 10) {
@@ -59,7 +63,8 @@ struct PopoverHeader: View {
                                          cornerRadius: ThermikMetrics.innerRadius, spread: 18, animated: !auroraAnimates)
                             }
                         }
-                    if let level { LevelBadge(level: level) }
+                    // Icon only: the level chip above names it. Grey while stale, like the dimmed value and chip.
+                    if let level { LevelBadge(level: level, compact: true).saturation(stale ? 0 : 1) }
                 } else {
                     Text(verbatim: "—").font(ThermikFont.hero).foregroundStyle(.tertiary)
                     Group {
@@ -105,6 +110,8 @@ struct PopoverHeader: View {
     }
 
     private func openDiagnostics() { panel.closeThen { router.showMain(.diagnostics) } }
+
+    private func openOverview() { panel.closeThen { router.showMain(.overview) } }
 
     private func heroSpoken(hottest: LiveSensor?, value: Double?, scale: ThermalScale, unit: UnitTemperature,
                             unavailable: Bool) -> String {

@@ -36,10 +36,13 @@ import ThermikCore
         static let allowFanControlFromLinks = "general.urlScheme.allowFanControl"
         // Additive: user-tuned colour-scale stops per sensor class (Settings › Appearance).
         static let colorScales = "appearance.colorScales"
+        // Additive: hardware blocks left out of the "Hottest" value (Settings › Sensors), `SensorGroup` raw values.
+        static let hottestExcludedGroups = "sensors.hottestExcludedGroups"
         static let all = [launchAtLogin, updateInterval, showDockIcon, temperatureUnit, language, animatedEffects, colorBlindScale,
                           popoverDensity, menuBar, sensorOverrides, showHiddenSensors, showRawKeys, driveTemperatures, fans,
                           alertsEnabled, alertRules, alertSoundName, alertsSnoozedUntil, log, onboardingCompleted, helperWanted,
-                          suppressHelperPrompt, menuBarHintShown, hotKeys, allowFanControlFromLinks, colorScales]
+                          suppressHelperPrompt, menuBarHintShown, hotKeys, allowFanControlFromLinks, colorScales,
+                          hottestExcludedGroups]
     }
 
     /// Allowed update intervals (s). TG range 1…60, default 2.
@@ -84,6 +87,14 @@ import ThermikCore
     var showHiddenSensors: Bool { didSet { store(showHiddenSensors, Key.showHiddenSensors) } }
     var showRawKeys: Bool { didSet { store(showRawKeys, Key.showRawKeys) } }
     var driveTemperatures: Bool { didSet { store(driveTemperatures, Key.driveTemperatures) } }
+    /// Hardware blocks whose sensors never become `SensorStore.hottest` (display only; aggregates, alerts, fan curves
+    /// and the safety override still see them). Stored as a sorted array of raw values; empty removes the key and
+    /// unknown raw values (a later build's blocks) are dropped on read.
+    var hottestExcludedGroups: Set<SensorGroup> {
+        didSet {
+            store(hottestExcludedGroups.isEmpty ? nil : hottestExcludedGroups.map(\.rawValue).sorted(), Key.hottestExcludedGroups)
+        }
+    }
     // Fans
     var fans: FanUserConfig { didSet { encode(fans, Key.fans) } }
     // Alerts
@@ -118,6 +129,7 @@ import ThermikCore
         showHiddenSensors = defaults.bool(forKey: Key.showHiddenSensors)
         showRawKeys = defaults.bool(forKey: Key.showRawKeys)
         driveTemperatures = defaults.object(forKey: Key.driveTemperatures) as? Bool ?? true
+        hottestExcludedGroups = Set((defaults.stringArray(forKey: Key.hottestExcludedGroups) ?? []).compactMap(SensorGroup.init(rawValue:)))
         fans = Self.decode(FanUserConfig.self, defaults, Key.fans) ?? FanUserConfig()
         alertsEnabled = defaults.object(forKey: Key.alertsEnabled) as? Bool ?? true
         alertRules = Self.decode([AlertRule].self, defaults, Key.alertRules) ?? AlertRule.defaultRules
@@ -152,7 +164,8 @@ import ThermikCore
     func override(for id: SensorID) -> SensorOverride { sensorOverrides[id.description] ?? SensorOverride() }
     func setOverride(_ o: SensorOverride, for id: SensorID) {
         // An override with every field nil is the same as none: drop it so the plist does not grow forever.
-        sensorOverrides[id.description] = (o.name == nil && o.hidden == nil && o.pinned == nil) ? nil : o
+        let empty = o.name == nil && o.hidden == nil && o.pinned == nil && o.excludedFromHottest == nil
+        sensorOverrides[id.description] = empty ? nil : o
     }
 
     /// Keys that views keep through @AppStorage outside this store (the popover's expanded groups, Unit 7; the
@@ -176,7 +189,8 @@ import ThermikCore
         animatedEffects = fresh.animatedEffects; colorBlindScale = fresh.colorBlindScale
         popoverDensity = fresh.popoverDensity; colorScales = fresh.colorScales; menuBar = fresh.menuBar; menuBarHintShown = fresh.menuBarHintShown
         sensorOverrides = fresh.sensorOverrides; showHiddenSensors = fresh.showHiddenSensors; showRawKeys = fresh.showRawKeys
-        driveTemperatures = fresh.driveTemperatures; fans = fresh.fans; alertsEnabled = fresh.alertsEnabled
+        driveTemperatures = fresh.driveTemperatures; hottestExcludedGroups = fresh.hottestExcludedGroups
+        fans = fresh.fans; alertsEnabled = fresh.alertsEnabled
         alertRules = fresh.alertRules; alertSoundName = fresh.alertSoundName; alertsSnoozedUntil = fresh.alertsSnoozedUntil
         log = fresh.log; onboardingCompleted = fresh.onboardingCompleted; helperWanted = fresh.helperWanted
         suppressHelperPrompt = fresh.suppressHelperPrompt
