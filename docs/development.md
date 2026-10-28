@@ -212,7 +212,7 @@ The version is `MARKETING_VERSION` in `Config/Shared.xcconfig`: X.Y.Z without "v
 `CURRENT_PROJECT_VERSION` next to it is the build number (`CFBundleVersion`), one higher with every version.
 
 - **New version:** `scripts/make-release.sh` shows the current version and the last release tag and asks for the
-  new version (Enter takes the next minor one). The new version must be higher than the current one and every release
+  new version (Enter takes the next patch one). The new version must be higher than the current one and every release
   tag, local or on `origin`. The script writes it and the next build number into `Config/Shared.xcconfig` and commits
   that file alone as `feat: release - version X.Y.Z`. `X.Y.Z`, `patch`, `minor` or `major` as the argument skips the
   question.

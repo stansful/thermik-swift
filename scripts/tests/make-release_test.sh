@@ -190,7 +190,7 @@ release_commit() {
     [ "$(g show "HEAD:$XC")" = "$("$fixture" "$3" "$4")" ]
 }
 
-# --- Enter takes the suggestion, the next minor version; the build number goes up by one
+# --- Enter takes the suggestion, the next patch version; the build number goes up by one
 new_case enter
 before=$(count) head=$(g rev-parse HEAD) origin=$(origin_ref master) tags=$(all_tags)
 mr '\n\n'
@@ -199,22 +199,22 @@ check "prints the current version and its build number" \
 check "prints the last release tag" 'has "Последний релизный тег: 0.1.0"'
 check "...and no 'not released yet' note for a released version" '! has "Тега 0.1.0 ещё нет"'
 check "prints the next patch, minor and major versions" 'has "Следующая: 0.1.1 (patch), 0.2.0 (minor), 1.0.0 (major)."'
-check "suggests the next minor version" 'has "Новая версия [0.2.0]: "'
+check "suggests the next patch version" 'has "Новая версия [0.1.1]: "'
 check "shows the diff, the version line and the build line, and asks to commit" \
-  '[ "$(shown_diff)" = "$(lines 0.1.0 1 0.2.0 2)" ] && has "Закоммитить Config/Shared.xcconfig как «feat: release - version 0.2.0»? [Y/n] "'
-check "Enter takes 0.2.0 and build 2, Enter commits (run from outside the repository)" \
-  '[ $RC = 0 ] && [ "$(ver)" = 0.2.0 ] && [ "$(bld)" = 2 ] && xcconfig_is 0.2.0 2'
+  '[ "$(shown_diff)" = "$(lines 0.1.0 1 0.1.1 2)" ] && has "Закоммитить Config/Shared.xcconfig как «feat: release - version 0.1.1»? [Y/n] "'
+check "Enter takes 0.1.1 and build 2, Enter commits (run from outside the repository)" \
+  '[ $RC = 0 ] && [ "$(ver)" = 0.1.1 ] && [ "$(bld)" = 2 ] && xcconfig_is 0.1.1 2'
 check "...exactly one new commit, on the old HEAD" '[ "$(count)" = $((before + 1)) ] && [ "$(g rev-parse HEAD^)" = "$head" ]'
-check "...'feat: release - version 0.2.0': the version line and the build line + 1 of Config/Shared.xcconfig, nothing else" \
-  'release_commit 0.1.0 1 0.2.0 2 && clean'
+check "...'feat: release - version 0.1.1': the version line and the build line + 1 of Config/Shared.xcconfig, nothing else" \
+  'release_commit 0.1.0 1 0.1.1 2 && clean'
 check "...prints the commit with its build number, and when the release comes out" \
-  'has "Коммит $(g rev-parse --short HEAD): feat: release - version 0.2.0 (сборка 2)" && has "Релиз 0.2.0 выйдет, когда этот коммит окажется в master на GitHub (.github/workflows/release.yml)."'
+  'has "Коммит $(g rev-parse --short HEAD): feat: release - version 0.1.1 (сборка 2)" && has "Релиз 0.1.1 выйдет, когда этот коммит окажется в master на GitHub (.github/workflows/release.yml)."'
 check "...never pushes and never asks to: origin and tags untouched" \
   '[ "$(origin_ref master)" = "$origin" ] && [ "$(all_tags)" = "$tags" ] && ! has "Запуш" && ! has "запуш" && ! has "git push"'
 
 new_case 'with space'
 mr '' --yes
-check "a repository path with a space works" '[ $RC = 0 ] && release_commit 0.1.0 1 0.2.0 2 && clean'
+check "a repository path with a space works" '[ $RC = 0 ] && release_commit 0.1.0 1 0.1.1 2 && clean'
 
 # --- bump words at the prompt
 for c in 'patch|0.1.1' 'патч|0.1.1' 'minor|0.2.0' 'Минор|0.2.0' 'major|1.0.0' 'мажор|1.0.0' 'MAJOR|1.0.0' '  патч  |0.1.1'; do
@@ -254,11 +254,11 @@ mr '0.0.9\n0.1.0\n1.2\nv0.2.0\nV0.2.0\n01.2.3\n0.2.0-rc1\n1234567890.0.0\n0.1000
 check "prompt: a lower version is refused" 'has "  версия 0.0.9 не выше текущей 0.1.0. Введите другую версию."'
 check "prompt: an existing tag is refused" 'has "  тег 0.1.0 уже есть: версия 0.1.0 уже выпускалась. Введите другую версию."'
 check "prompt: a malformed version is refused" \
-  'has "  «1.2» — не версия X.Y.Z (три числа до 9 цифр без ведущих нулей, например 0.2.0). Введите другую версию." && has "«01.2.3» — не версия X.Y.Z" && has "«0.2.0-rc1» — не версия X.Y.Z" && has "«бамп» — не версия X.Y.Z"'
+  'has "  «1.2» — не версия X.Y.Z (три числа до 9 цифр без ведущих нулей, например 0.1.1). Введите другую версию." && has "«01.2.3» — не версия X.Y.Z" && has "«0.2.0-rc1» — не версия X.Y.Z" && has "«бамп» — не версия X.Y.Z"'
 check "prompt: a version with v or V is refused" \
   'has "  «v0.2.0»: нужна версия без «v», например 0.2.0. Введите другую версию." && has "«V0.2.0»: нужна версия без «v», например 0.2.0"'
 check "prompt: a number of 10 digits is refused" \
-  'has "  «1234567890.0.0» — не версия X.Y.Z (три числа до 9 цифр без ведущих нулей, например 0.2.0). Введите другую версию." && has "«0.1000000000.0» — не версия X.Y.Z" && has "«0.2.1234567890» — не версия X.Y.Z"'
+  'has "  «1234567890.0.0» — не версия X.Y.Z (три числа до 9 цифр без ведущих нулей, например 0.1.1). Введите другую версию." && has "«0.1000000000.0» — не версия X.Y.Z" && has "«0.2.1234567890» — не версия X.Y.Z"'
 check "prompt: then 0.3.0 (spaces trimmed) is committed" \
   '[ $RC = 0 ] && [ "$(ver)" = 0.3.0 ] && [ "$(count)" = $((before + 1)) ] && release_commit 0.1.0 1 0.3.0 2 && clean'
 
@@ -273,7 +273,7 @@ check "end of input at the prompt changes nothing" \
 new_case refuse
 before=$(count)
 for c in "0.0.9|версия 0.0.9 не выше текущей 0.1.0." "0.1.0|тег 0.1.0 уже есть: версия 0.1.0 уже выпускалась." \
-  "1.2|«1.2» — не версия X.Y.Z (три числа до 9 цифр без ведущих нулей, например 0.2.0)." \
+  "1.2|«1.2» — не версия X.Y.Z (три числа до 9 цифр без ведущих нулей, например 0.1.1)." \
   "1.2.3.4|«1.2.3.4» — не версия X.Y.Z" "v0.2.0|«v0.2.0»: нужна версия без «v», например 0.2.0." \
   "V1.0.0|«V1.0.0»: нужна версия без «v», например 1.0.0." "01.2.3|«01.2.3» — не версия X.Y.Z" \
   "1.02.3|«1.02.3» — не версия X.Y.Z" "0.2.0-rc1|«0.2.0-rc1» — не версия X.Y.Z" " 0.2.0|« 0.2.0» — не версия X.Y.Z" \
@@ -308,14 +308,14 @@ check "a version below the highest tag is refused" '[ $RC = 1 ] && has "верс
 check "...nothing changed" 'xcconfig_is 0.1.0 1 && [ "$(count)" = "$before" ] && clean'
 mr ''
 check "the last tag and the suggestions come from all tags" \
-  'has "Последний релизный тег: v0.8.0" && has "Следующая: 0.8.1 (patch), 0.9.0 (minor), 1.0.0 (major)." && has "Новая версия [0.9.0]: " && [ $RC = 1 ]'
+  'has "Последний релизный тег: v0.8.0" && has "Следующая: 0.8.1 (patch), 0.9.0 (minor), 1.0.0 (major)." && has "Новая версия [0.8.1]: " && [ $RC = 1 ]'
 mr '' патч --no-commit
 check "a bump word bumps the highest tag, not the current version; the build number is the file's + 1" \
   '[ $RC = 0 ] && has "Новая версия: 0.8.1 (сборка 2)" && xcconfig_is 0.8.1 2'
 g checkout -q -- "$XC"
 mr '' --yes
-check "--yes takes the suggested 0.9.0 and commits without a question" \
-  '[ $RC = 0 ] && has "Новая версия: 0.9.0 (сборка 2)" && ! has "Закоммитить" && release_commit 0.1.0 1 0.9.0 2 && [ "$(count)" = $((before + 1)) ] && clean'
+check "--yes takes the suggested 0.8.1 and commits without a question" \
+  '[ $RC = 0 ] && has "Новая версия: 0.8.1 (сборка 2)" && ! has "Закоммитить" && release_commit 0.1.0 1 0.8.1 2 && [ "$(count)" = $((before + 1)) ] && clean'
 check "--yes does not push" '[ "$(origin_ref master)" = "$origin" ] && ! has "Запуш"'
 
 # --- origin's tags cannot be read: a warning, then the local tags only
@@ -326,7 +326,7 @@ git -C "$CASE/other" push -q origin 0.7.0
 g remote set-url origin "$CASE/missing.git"
 mr '' -y
 check "unreadable origin tags: a warning, the local tags only, the commit is made" \
-  '[ $RC = 0 ] && has "Внимание: не удалось прочитать теги origin ($CASE/missing.git): сравниваю только с локальными тегами." && has "Последний релизный тег: 0.1.0 (из локальных тегов)" && release_commit 0.1.0 1 0.2.0 2'
+  '[ $RC = 0 ] && has "Внимание: не удалось прочитать теги origin ($CASE/missing.git): сравниваю только с локальными тегами." && has "Последний релизный тег: 0.1.0 (из локальных тегов)" && release_commit 0.1.0 1 0.1.1 2'
 
 # --- no release tags at all
 new_case notags
@@ -334,7 +334,7 @@ g tag -d 0.1.0 >/dev/null
 git -C "$CASE/origin.git" tag -d 0.1.0 >/dev/null
 mr ''
 check "no tags: says so, and that the current version is not released yet" \
-  'has "Релизных тегов пока нет." && has "Тега 0.1.0 ещё нет: если коммит с этой версией уже в master на GitHub, релиз 0.1.0 выйдет и без новой версии." && has "Новая версия [0.2.0]: "'
+  'has "Релизных тегов пока нет." && has "Тега 0.1.0 ещё нет: если коммит с этой версией уже в master на GitHub, релиз 0.1.0 выйдет и без новой версии." && has "Новая версия [0.1.1]: "'
 mr '' 0.1.0 --yes
 check "no tags: the current version itself is still refused" '[ $RC = 1 ] && has "версия 0.1.0 не выше текущей 0.1.0"'
 
@@ -440,7 +440,7 @@ new_case nopush
 origin=$(origin_ref master) tags=$(all_tags)
 mr '\nд\n'
 check "the commit stays local: no push question, origin and tags untouched" \
-  '[ $RC = 0 ] && release_commit 0.1.0 1 0.2.0 2 && [ "$(origin_ref master)" = "$origin" ] && [ "$(all_tags)" = "$tags" ] && ! has "Запуш"'
+  '[ $RC = 0 ] && release_commit 0.1.0 1 0.1.1 2 && [ "$(origin_ref master)" = "$origin" ] && [ "$(all_tags)" = "$tags" ] && ! has "Запуш"'
 mr '' 0.3.0 --push
 check "--push is not an option" '[ $RC = 2 ] && has "неизвестный параметр --push"'
 
@@ -458,8 +458,8 @@ check "'да' confirms" '[ $RC = 0 ] && release_commit 0.1.0 1 0.2.0 2 && clean'
 new_case nocommit
 before=$(count)
 mr '\n' --no-commit
-check "--no-commit at the prompt: Enter writes 0.2.0 and build 2, no confirmation" \
-  '[ $RC = 0 ] && xcconfig_is 0.2.0 2 && ! has "Закоммитить" && [ "$(count)" = "$before" ]'
+check "--no-commit at the prompt: Enter writes 0.1.1 and build 2, no confirmation" \
+  '[ $RC = 0 ] && xcconfig_is 0.1.1 2 && ! has "Закоммитить" && [ "$(count)" = "$before" ]'
 g checkout -q -- "$XC"
 mr '' --bogus
 check "an unknown option is a usage error" \
@@ -511,39 +511,39 @@ g remote remove origin
 before=$(count)
 mr '' --yes
 check "without origin: local tags count, the commit is made" \
-  '[ $RC = 0 ] && ! has "Внимание" && has "Последний релизный тег: 0.1.0" && release_commit 0.1.0 1 0.2.0 2 && [ "$(count)" = $((before + 1)) ]'
+  '[ $RC = 0 ] && ! has "Внимание" && has "Последний релизный тег: 0.1.0" && release_commit 0.1.0 1 0.1.1 2 && [ "$(count)" = $((before + 1)) ]'
 g branch -q -m master dev
 mr '' --yes
 check "neither origin nor master/main: a warning, the commit is made with the next build number" \
-  '[ $RC = 0 ] && has "Внимание: не удалось определить ветку по умолчанию; релиз выходит только из master." && has "Новая версия: 0.3.0 (сборка 3)" && release_commit 0.2.0 2 0.3.0 3'
+  '[ $RC = 0 ] && has "Внимание: не удалось определить ветку по умолчанию; релиз выходит только из master." && has "Новая версия: 0.1.2 (сборка 3)" && release_commit 0.1.1 2 0.1.2 3'
 
-# --- every number has up to 9 digits: the next minor version of 0.999999999.0, 0.1000000000.0, is not X.Y.Z, so the
-# suggestion is 1.0.0
+# --- every number has up to 9 digits: the next minor version of 0.999999999.0, 0.1000000000.0, is not X.Y.Z and is
+# not offered; Enter takes the patch one
 new_case nines
 xcconfig 0.999999999.0 5 >"$REPO/$XC"
 g commit -q -am 'feat: release - version 0.999999999.0'
 before=$(count) head=$(g rev-parse HEAD)
 mr '\n\n'
-check "prompt: only the bumps that are X.Y.Z are offered, Enter takes the major one" \
-  'has "Следующая: 0.999999999.1 (patch), 1.0.0 (major)." && has "Новая версия [1.0.0]: " && ! has "0.1000000000.0" && [ $RC = 0 ] && release_commit 0.999999999.0 5 1.0.0 6'
+check "prompt: only the bumps that are X.Y.Z are offered, Enter takes the patch one" \
+  'has "Следующая: 0.999999999.1 (patch), 1.0.0 (major)." && has "Новая версия [0.999999999.1]: " && ! has "0.1000000000.0" && [ $RC = 0 ] && release_commit 0.999999999.0 5 0.999999999.1 6'
 g reset -q --hard "$head"
 mr '0.1000000000.0\nminor\n1.0.0\nn\n'
 check "prompt: 0.1000000000.0, typed or as minor, is refused" \
-  '[ $RC = 1 ] && [ "$(printf "%s\n" "$OUT" | grep -cF "  «0.1000000000.0» — не версия X.Y.Z (три числа до 9 цифр без ведущих нулей, например 1.0.0). Введите другую версию.")" = 2 ] && xcconfig_is 0.999999999.0 5 && clean'
+  '[ $RC = 1 ] && [ "$(printf "%s\n" "$OUT" | grep -cF "  «0.1000000000.0» — не версия X.Y.Z (три числа до 9 цифр без ведущих нулей, например 0.999999999.1). Введите другую версию.")" = 2 ] && xcconfig_is 0.999999999.0 5 && clean'
 mr '' --yes
-check "--yes takes 1.0.0" '[ $RC = 0 ] && has "Новая версия: 1.0.0 (сборка 6)" && release_commit 0.999999999.0 5 1.0.0 6'
+check "--yes takes 0.999999999.1" '[ $RC = 0 ] && has "Новая версия: 0.999999999.1 (сборка 6)" && release_commit 0.999999999.0 5 0.999999999.1 6'
 g reset -q --hard "$head"
-mr '' patch --yes
-check "...while patch, 0.999999999.1, is X.Y.Z and is committed" '[ $RC = 0 ] && release_commit 0.999999999.0 5 0.999999999.1 6'
+mr '' major --yes
+check "...while major, 1.0.0, is X.Y.Z and is committed" '[ $RC = 0 ] && release_commit 0.999999999.0 5 1.0.0 6'
 g reset -q --hard "$head"
 xcconfig 999999999.5.0 7 >"$REPO/$XC"
 g commit -q -am 'feat: release - version 999999999.5.0'
 mr ''
-check "at 999999999.5.0 the major version cannot grow: patch and minor are offered, the minor one suggested" \
-  'has "Следующая: 999999999.5.1 (patch), 999999999.6.0 (minor)." && has "Новая версия [999999999.6.0]: " && [ $RC = 1 ]'
+check "at 999999999.5.0 the major version cannot grow: patch and minor are offered, the patch one suggested" \
+  'has "Следующая: 999999999.5.1 (patch), 999999999.6.0 (minor)." && has "Новая версия [999999999.5.1]: " && [ $RC = 1 ]'
 mr '' major --yes
 check "...major, 1000000000.0.0, is refused" \
-  '[ $RC = 1 ] && has "Ошибка: «1000000000.0.0» — не версия X.Y.Z (три числа до 9 цифр без ведущих нулей, например 999999999.6.0)." && xcconfig_is 999999999.5.0 7 && clean'
+  '[ $RC = 1 ] && has "Ошибка: «1000000000.0.0» — не версия X.Y.Z (три числа до 9 цифр без ведущих нулей, например 999999999.5.1)." && xcconfig_is 999999999.5.0 7 && clean'
 mr '' 999999999.999999999.999999999 --yes
 check "the highest version, 999999999.999999999.999999999, is committed" \
   '[ $RC = 0 ] && release_commit 999999999.5.0 7 999999999.999999999.999999999 8 && clean'
@@ -606,8 +606,8 @@ new_case ahead
 xcconfig 0.3.0 4 >"$REPO/$XC"
 g commit -q -am 'feat: release - version 0.3.0'
 mr ''
-check "a version above every tag: says it is not released yet and suggests the next minor version" \
-  'has "Текущая версия:         0.3.0 (Config/Shared.xcconfig, сборка 4)" && has "Тега 0.3.0 ещё нет" && has "Новая версия [0.4.0]: "'
+check "a version above every tag: says it is not released yet and suggests the next patch version" \
+  'has "Текущая версия:         0.3.0 (Config/Shared.xcconfig, сборка 4)" && has "Тега 0.3.0 ещё нет" && has "Новая версия [0.3.1]: "'
 for c in 'x|«x»' '0.1000000000.0|«0.1000000000.0»' '1.2|«1.2»' 'v0.3.0|«v0.3.0»' '|«»'; do
   xcconfig "${c%|*}" 4 >"$REPO/$XC"
   g commit -q -am "Broken version ${c%|*}"

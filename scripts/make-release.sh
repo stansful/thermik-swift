@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prepares a release: shows the current version (MARKETING_VERSION in Config/Shared.xcconfig) with its build number
-# (CURRENT_PROJECT_VERSION) and the last release tag, asks for the new version (Enter takes the next minor version),
+# (CURRENT_PROJECT_VERSION) and the last release tag, asks for the new version (Enter takes the next patch version),
 # checks that it is higher than the current version and every release tag (local ones and origin's), writes it and
 # the next build number into Config/Shared.xcconfig and commits only that file as "feat: release - version X.Y.Z". It
 # never pushes: the release starts when that commit reaches master on GitHub (.github/workflows/release.yml: the CI
@@ -25,10 +25,10 @@ CURRENT_PROJECT_VERSION — на единицу больше) и коммит «
 
   scripts/make-release.sh [X.Y.Z|patch|minor|major] [--yes] [--no-commit]
 
-  X.Y.Z         новая версия; без неё скрипт покажет текущую и спросит (Enter — следующая минорная версия)
+  X.Y.Z         новая версия; без неё скрипт покажет текущую и спросит (Enter — следующая патч-версия)
   patch, minor, major
                 следующая патч-, минорная или мажорная версия (можно и по-русски: патч, минор, мажор)
-  -y, --yes     без вопросов: версия — следующая минорная (если не указана), коммит без подтверждения
+  -y, --yes     без вопросов: версия — следующая патч-версия (если не указана), коммит без подтверждения
   --no-commit   только записать версию в Config/Shared.xcconfig, без коммита
   -h, --help    эта справка
 
@@ -186,17 +186,15 @@ fi
 base=$current
 [ -z "$highest" ] || ! version_gt "$highest_version" "$base" || base=$highest_version
 # The bumps of the base that are versions (above the current version and every tag they always are); Enter and
-# --yes take the minor one, or the major one when the minor number cannot grow, or the patch one when neither can
-choices='' suggested='' first=''
+# --yes take the patch one, or the next bump that is a version when the patch number cannot grow
+choices='' suggested=''
 for kind in patch minor major; do
   v="$(version_bump "$base" "$kind")"
   version_valid "$v" || continue
   choices="$choices${choices:+, }$v ($kind)"
-  [ -n "$first" ] || first=$v
-  [ "$kind" = patch ] || [ -n "$suggested" ] || suggested=$v
+  [ -n "$suggested" ] || suggested=$v
 done
 [ -n "$choices" ] || die "после $base нет версии X.Y.Z с числами до 9 цифр: дальше выпускать некуда."
-[ -n "$suggested" ] || suggested=$first
 
 # check_version <v>: prints why v cannot be the new version, and fails
 check_version() {
