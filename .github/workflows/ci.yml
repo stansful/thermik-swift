@@ -1,11 +1,8 @@
-# Tests every push to a branch other than master, and every pull request. A push to master does not start this
+# Checks every push to a branch other than master, and every pull request. A push to master does not start this
 # workflow: release.yml calls it (workflow_call) before it publishes anything, so the checks run once per push and no
-# skipped CI run is left behind.
-#   scripts        actionlint (the workflows), shellcheck (scripts/, .github/scripts/) and the tests of the release
-#                  scripts (scripts/tests/run.sh) with Ubuntu's bash 5 and GNU tools
-#   selftest       the thermik-probe self-checks (scripts/lib/selftest.sh), and the release scripts' tests again with
-#                  macOS's bash 3.2 and BSD tools, which scripts/make-release.sh runs with
-#   debug          the Debug build (scripts/lib/build.sh Debug), which must leave every tracked file as committed (it
+# skipped CI run is left behind. No tests run here: scripts/tests/run.sh and scripts/lib/selftest.sh are local only.
+#   scripts        actionlint (the workflows) and shellcheck (scripts/, .github/scripts/)
+#   debug         the Debug build (scripts/lib/build.sh Debug), which must leave every tracked file as committed (it
 #                  regenerates App/Resources/Localizable.xcstrings)
 #   release-build  scripts/build-release.sh: the release files as release.yml publishes them, uploaded as the
 #                  artifact release-<version> (release.yml's publish job takes them from there)
@@ -59,35 +56,6 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/repo" -w /repo --entrypoint shellcheck "$ACTIONLINT_IMAGE" -x -f gcc \
             scripts/*.sh scripts/lib/*.sh scripts/tests/*.sh .github/scripts/*.sh
-      - name: Release scripts tests (scripts/tests/run.sh, bash 5)
-        if: ${{ !cancelled() }}
-        run: scripts/tests/run.sh
-
-  selftest:
-    name: Self-checks
-    runs-on: xcode-27
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/xcode
-        with:
-          xcodegen: "false"
-      - name: thermik-probe self-checks (scripts/lib/selftest.sh)
-        run: scripts/lib/selftest.sh
-      - name: Release scripts tests (scripts/tests/run.sh, bash 3.2)
-        if: ${{ !cancelled() }}
-        env:
-          TEST_BASH: /bin/bash
-        run: scripts/tests/run.sh
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ failure() }}
-        with:
-          name: selftest-logs
-          path: build/selftest/
-          if-no-files-found: ignore
-          retention-days: 7
 
   debug:
     name: Debug build

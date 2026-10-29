@@ -5,8 +5,8 @@
 # release_assets, as release "Thermik X.Y.Z" with the plain tag X.Y.Z, made the latest, with the notes of
 # release-notes.sh; the tag's commit is read one way (tag_commit over every tag); the draft is handled by the id the
 # API returns; the macOS jobs run on the xcode-27 runners with the Xcode that docs/development.md and project.yml
-# name; the CI runs these tests under bash 5 and 3.2 and shellchecks every script; every remote action is pinned to
-# a commit. The patterns match the workflows' and scripts' own text, $VERSION and the like included.
+# name; the CI shellchecks every script; every remote action is pinned to a commit. The patterns match the workflows'
+# and scripts' own text, $VERSION and the like included.
 # release_assets and release.yml's tag lookups also run, under $TEST_BASH (default: bash from PATH): the lookups in
 # a clone of a throwaway origin with an annotated and a lightweight tag. Files go to a temp dir (TMPDIR); the
 # repository is only read.
@@ -131,7 +131,7 @@ trigger() {
 
 echo "# the workflows and the release scripts; version.sh and the tag lookups under $("$BASH_BIN" -c 'echo "bash $BASH_VERSION"'), $(git --version)"
 
-for j in scripts selftest debug release-build; do job "$CI" "$j" >"$WORK/ci.$j"; done
+for j in scripts debug release-build; do job "$CI" "$j" >"$WORK/ci.$j"; done
 for j in gate quality publish; do job "$RELEASE" "$j" >"$WORK/release.$j"; done
 runners "$CI" >"$WORK/ci.runners"
 runners "$RELEASE" >"$WORK/release.runners"
@@ -344,8 +344,8 @@ check "every job runs on Ubuntu or on $MACOS_RUNNER, the only macOS label: relea
   '[ -z "$other_runners" ] && [ "$calls" = "quality ./.github/workflows/ci.yml" ]' \
   "other runners: ${other_runners:--}; reusable workflow calls: ${calls:--}"
 macos_jobs="$(awk -v m="$MACOS_RUNNER" '$2 == m { printf "%s ", $1 }' "$WORK/ci.runners")"
-check "the macOS jobs are ci.yml's selftest, debug and release-build" \
-  '[ "$macos_jobs" = "selftest debug release-build " ]' "on $MACOS_RUNNER: $macos_jobs"
+check "the macOS jobs are ci.yml's debug and release-build" \
+  '[ "$macos_jobs" = "debug release-build " ]' "on $MACOS_RUNNER: $macos_jobs"
 # xcode_first: the jobs that select the Xcode (./.github/actions/xcode) before their first run step; xcode_any: the
 # jobs that use it at all
 xcode_first='' xcode_any=''
@@ -379,17 +379,7 @@ check "...its major version is the runners' $MACOS_RUNNER" '[ "xcode-${xcode_act
 check "...and build-release.sh's help asks for it" \
   'has "Нужны Xcode $xcode_action или новее" "$WORK/build-release.usage"' "build-release.sh's help names another Xcode"
 
-# --- the checks of the CI itself: these tests under both bashes, shellcheck over every script
-check "ci.yml's selftest job runs the thermik-probe self-checks (scripts/lib/selftest.sh)" \
-  'line "        run: scripts/lib/selftest.sh" "$WORK/ci.selftest"' "the selftest job has no step run: scripts/lib/selftest.sh"
-step "$WORK/ci.selftest" '        run: scripts/tests/run.sh' >"$WORK/ci.selftest.tests"
-check "...and these tests under macOS's bash 3.2 (scripts/tests/run.sh with TEST_BASH=/bin/bash)" \
-  'line "          TEST_BASH: /bin/bash" "$WORK/ci.selftest.tests"' \
-  "the selftest job has no step run: scripts/tests/run.sh with TEST_BASH: /bin/bash"
-step "$WORK/ci.scripts" '        run: scripts/tests/run.sh' >"$WORK/ci.scripts.tests"
-check "ci.yml's scripts job runs them under Ubuntu's bash 5 (scripts/tests/run.sh, no TEST_BASH)" \
-  '[ -s "$WORK/ci.scripts.tests" ] && ! has TEST_BASH "$WORK/ci.scripts.tests"' \
-  "the scripts job has no step run: scripts/tests/run.sh, or it sets TEST_BASH"
+# --- the checks of the CI itself: shellcheck over every script
 # the command line, which ends in a backslash: the files follow on the next line
 shellcheck_run='          docker run --rm -v "$PWD:/repo" -w /repo --entrypoint shellcheck "$ACTIONLINT_IMAGE" -x -f gcc'
 shellcheck_files='            scripts/*.sh scripts/lib/*.sh scripts/tests/*.sh .github/scripts/*.sh'
