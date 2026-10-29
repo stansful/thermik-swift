@@ -4070,18 +4070,6 @@
         }
       }
     },
-    "Hardware block excluded from Hottest": {
-      "extractionState": "manual",
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Аппаратный блок не учитывается в «Самом горячем»"
-          }
-        }
-      },
-      "comment": "Sensors page table context menu: disabled item shown when the sensor’s whole hardware block is switched off in Settings › Sensors"
-    },
     "Hardware checks are free and run locally. Nothing leaves this Mac.": {
       "extractionState": "manual",
       "localizations": {
@@ -4553,6 +4541,30 @@
       },
       "comment": "Settings › Menu Bar, custom label editor"
     },
+    "Include every block": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Учитывать все блоки"
+          }
+        }
+      },
+      "comment": "Sensors page inspector: button shown for a die-wide maximum (e.g. SoC die hotspot) while any hardware block is switched off; switches every block back on for the “Hottest” value (keep short, the inspector is narrow)"
+    },
+    "Include every block in Hottest": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Учитывать все блоки в «Самом горячем»"
+          }
+        }
+      },
+      "comment": "Sensors page table context menu, for a die-wide maximum (e.g. SoC die hotspot) while several hardware blocks are switched off in Settings › Sensors; switches them all back on"
+    },
     "Include in Hottest": {
       "extractionState": "manual",
       "localizations": {
@@ -4564,6 +4576,30 @@
         }
       },
       "comment": "Sensors page: inspector button and table context menu; counts the sensor in the “Hottest” value again"
+    },
+    "Include the “%@” block in Hottest": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Учитывать блок «%@» в «Самом горячем»"
+          }
+        }
+      },
+      "comment": "Sensors page table context menu, shown instead of the Exclude/Include item when the sensor’s hardware block is switched off in Settings › Sensors; %@ = the block’s name (e.g. “CPU performance cores”); switches it back on"
+    },
+    "Include this block": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Учитывать этот блок"
+          }
+        }
+      },
+      "comment": "Sensors page inspector: button under the caption that names the sensor’s excluded hardware block; switches that block back on for the “Hottest” value (keep short, the inspector is narrow)"
     },
     "Incorrect current from the battery": {
       "extractionState": "manual",
@@ -4666,6 +4702,18 @@
         }
       }
     },
+    "It goes with the “%@” block, which is excluded from Hottest in Settings › Sensors.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Он относится к блоку «%@», который не учитывается в «Самом горячем» (Настройки › Датчики)."
+          }
+        }
+      },
+      "comment": "Sensors page inspector, shown above the “Include this block” button when the sensor’s hardware block is switched off in Settings › Sensors; %@ = the block’s name from that list (e.g. “CPU performance cores”), which can differ from the “Hardware block” detail row for cluster summaries"
+    },
     "It is behind the camera notch. A narrower style or fewer menu bar items make room for it.": {
       "extractionState": "manual",
       "localizations": {
@@ -4699,18 +4747,6 @@
           }
         }
       }
-    },
-    "Its hardware block is excluded from Hottest in Settings › Sensors.": {
-      "extractionState": "manual",
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Его аппаратный блок не учитывается в «Самом горячем» (Настройки › Датчики)."
-          }
-        }
-      },
-      "comment": "Sensors page inspector, shown instead of the Exclude/Include button when the sensor’s whole hardware block is switched off"
     },
     "Keep all files": {
       "extractionState": "manual",
@@ -8121,6 +8157,30 @@
           }
         }
       }
+    },
+    "Switches every block back on in Settings › Sensors.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Снова включает все блоки (Настройки › Датчики)."
+          }
+        }
+      },
+      "comment": "Sensors page inspector: tooltip of the “Include every block” button"
+    },
+    "Switches the block back on in Settings › Sensors: all of its sensors count in Hottest again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Снова включает блок (Настройки › Датчики): все его датчики опять учитываются в «Самом горячем»."
+          }
+        }
+      },
+      "comment": "Sensors page inspector: tooltip of the “Include this block” button"
     },
     "System": {
       "extractionState": "manual",

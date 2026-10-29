@@ -128,10 +128,14 @@ struct SensorsPage: View {
         Button { sensors.setPinned(s.id, !s.isPinned) } label: { s.isPinned ? Text("Unpin") : Text("Pin") }
         Button { sensors.setHidden(s.id, !s.isHidden) } label: { s.isHidden ? Text("Show") : Text("Hide") }
         if SensorStore.isHottestCandidate(s.sensor) {
-            // A block excluded in Settings › Sensors wins over the sensor's own switch (SensorStore.isBlockExcluded:
-            // its block, or any block for a die-wide maximum): say so instead of a toggle.
-            if SensorStore.isBlockExcluded(s.sensor, settings.hottestExcludedGroups) {
-                Button {} label: { Text("Hardware block excluded from Hottest") }.disabled(true)
+            // A block excluded in Settings › Sensors wins over the sensor's own switch (SensorStore.excludingBlocks:
+            // its block, or every excluded block for a die-wide maximum): offer to switch those back on instead.
+            let blocks = SensorStore.excludingBlocks(s.sensor, settings.hottestExcludedGroups)
+            if !blocks.isEmpty {
+                let single = blocks.count == 1 ? blocks.first : nil
+                Button { settings.hottestExcludedGroups.subtract(blocks) } label: {
+                    single.map { Text("Include the “\($0.title)” block in Hottest") } ?? Text("Include every block in Hottest")
+                }
             } else {
                 Button { sensors.setExcludedFromHottest(s.id, !s.isExcludedFromHottest) } label: {
                     s.isExcludedFromHottest ? Text("Include in Hottest") : Text("Exclude from Hottest")

@@ -275,10 +275,17 @@ struct SpikeFilter: Sendable {
     /// are ≥ every block's probes and would show an excluded block's peak under their own name, so they leave as soon
     /// as any block does. Die-wide averages (TCMb) stay with their block.
     nonisolated static func isBlockExcluded(_ s: Sensor, _ blocks: Set<SensorGroup>) -> Bool {
-        guard !blocks.isEmpty else { return false }
-        let block = hottestBlock(s)
-        return blocks.contains(block) || (block == .cpuAggregate && s.role == .maximum)
+        !excludingBlocks(s, blocks).isEmpty
     }
+    /// The excluded `blocks` that leave `s` out of "Hottest": its own block, or all of them for a die-wide maximum.
+    /// Switching these back on in Settings › Sensors counts it again (its own flag aside). Empty = no block excludes it.
+    nonisolated static func excludingBlocks(_ s: Sensor, _ blocks: Set<SensorGroup>) -> Set<SensorGroup> {
+        if isDieWideMaximum(s) { return blocks }
+        let block = hottestBlock(s)
+        return blocks.contains(block) ? [block] : []
+    }
+    /// A cpuAggregate maximum left after `hottestBlock` (see `isBlockExcluded`): it spans every block.
+    nonisolated static func isDieWideMaximum(_ s: Sensor) -> Bool { hottestBlock(s) == .cpuAggregate && s.role == .maximum }
     /// Left out of `hottest`, by its own flag or by its hardware block.
     func isExcludedFromHottest(_ id: SensorID) -> Bool { hottestExcluded.contains(id) }
 
