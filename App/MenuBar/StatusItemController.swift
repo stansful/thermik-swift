@@ -57,6 +57,9 @@ final class StatusItemController: NSObject {
     var onAppearanceChange: (() -> Void)?
     private var lastSessionEnd = Date.distantPast
     private var openedAt = Date.distantPast
+    /// True while the right-click menu tracks (performClick runs it modally). On 27+ the menu bar starts an
+    /// expanded-interface session for that menu as well; it belongs to the menu (cancelling it closes the menu at once).
+    private var showingMenu = false
 
     init<Content: View>(autosaveName: String, @ViewBuilder content: () -> Content) {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -134,7 +137,12 @@ final class StatusItemController: NSObject {
 
     @objc private func clicked(_ sender: NSStatusBarButton) {
         let event = NSApp.currentEvent
-        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true { showContextMenu(); return }
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+            // 27+: a secondary click on the item while our menu is open dismisses it, and its mouse-up arrives while
+            // the menu's session is still ending; a new menu now would be closed by that ending session at once.
+            if sessionActive, !panelState.isOpen { return }
+            showContextMenu(); return
+        }
         if event?.modifierFlags.contains(.option) == true, let alt = onAlternateClick { close(); alt(); return }
         debugLog?("clicked; session=\(sessionActive)")
         if #available(macOS 27.0, *) {
@@ -271,7 +279,9 @@ final class StatusItemController: NSObject {
         close()
         guard let m = menuProvider?() else { return }
         item.menu = m
-        item.button?.performClick(nil)   // shows the menu, attached to the status item
+        showingMenu = true
+        item.button?.performClick(nil)   // shows the menu, attached to the status item; returns once it closed
+        showingMenu = false
         item.menu = nil                  // restore left-click → panel
     }
 }
@@ -280,7 +290,10 @@ final class StatusItemController: NSObject {
 extension StatusItemController: NSStatusItemExpandedInterfaceDelegate {
     nonisolated func statusItem(_ statusItem: NSStatusItem, didBegin session: NSStatusItemExpandedInterfaceSession) {
         MainActor.assumeIsolated {
-            debugLog?("didBegin session")
+            debugLog?("didBegin session; menu=\(showingMenu)")
+            // The session of our own right-click menu (showContextMenu): leave it to the menu. NSApp.currentEvent is
+            // no help here: it is whatever event came last (often the right mouse-up, sometimes a stale key-down).
+            if showingMenu { return }
             // A secondary click must still show the context menu, not the panel.
             if let e = NSApp.currentEvent, e.type == .rightMouseDown || e.type == .rightMouseUp || e.modifierFlags.contains(.control) {
                 item.expandedInterfaceSession?.cancel()
