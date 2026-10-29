@@ -55,11 +55,11 @@ lines() {
 }
 # install_line <X.Y.Z>: the install paragraph of the notes of X.Y.Z, one line (without its newline)
 install_line() {
-  printf '%s' "**Install:** unzip \`Thermik-$1.zip\` and move \`Thermik.app\` to Applications. The app is ad-hoc" \
+  printf '%s' "**Install:** open \`Thermik-$1.dmg\` and drag \`Thermik.app\` to Applications, or unzip" \
+    " \`Thermik-$1.zip\` and move \`Thermik.app\` there. The app is ad-hoc" \
     " signed and not notarized, so macOS blocks its first launch: open it once, then allow it in System Settings ›" \
     " Privacy & Security › Open Anyway, or run \`xattr -dr com.apple.quarantine /Applications/Thermik.app\`." \
-    " \`Thermik-$1-dSYMs.zip\`" \
-    " holds the debug symbols for crash reports, \`SHA256SUMS\` the checksums."
+    " \`Thermik-$1.sha256\` holds the checksums."
 }
 # notes <X.Y.Z> <line...>: the output is exactly these lines, a blank line and the install paragraph of X.Y.Z
 notes() {

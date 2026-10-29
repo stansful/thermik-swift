@@ -28,9 +28,10 @@ changes="$(git -C "$ROOT_DIR" log --no-merges --max-count=200 --pretty=format:'-
 
 printf '%s\n' "${changes:-- Release $VERSION}"
 # One line: GitHub shows every newline of a release body as a line break
-printf '\n%s%s%s%s%s\n' \
-  "**Install:** unzip \`Thermik-$VERSION.zip\` and move \`Thermik.app\` to Applications. " \
+printf '\n%s%s%s%s%s%s\n' \
+  "**Install:** open \`Thermik-$VERSION.dmg\` and drag \`Thermik.app\` to Applications, " \
+  "or unzip \`Thermik-$VERSION.zip\` and move \`Thermik.app\` there. " \
   "The app is ad-hoc signed and not notarized, so macOS blocks its first launch: open it once, then allow it in " \
   "System Settings › Privacy & Security › Open Anyway, " \
   "or run \`xattr -dr com.apple.quarantine /Applications/Thermik.app\`. " \
-  "\`Thermik-$VERSION-dSYMs.zip\` holds the debug symbols for crash reports, \`SHA256SUMS\` the checksums."
+  "\`Thermik-$VERSION.sha256\` holds the checksums."

@@ -131,11 +131,11 @@ app_version_set() {
 }
 
 # release_assets <X.Y.Z>: prints the names of the files release X.Y.Z publishes, one per line, in upload order: the
-# app (universal, zipped), its debug symbols (the dSYMs of the app and the helper, zipped), SHA256SUMS over the others
+# app (universal) zipped, the app on a disk image, then the SHA-256 sums of both
 release_assets() {
   echo "Thermik-$1.zip"
-  echo "Thermik-$1-dSYMs.zip"
-  echo SHA256SUMS
+  echo "Thermik-$1.dmg"
+  echo "Thermik-$1.sha256"
 }
 
 # release_tags: reads tag names, or the lines of `git ls-remote --tags` (refs/tags/<tag>, <tag>^{}), on stdin

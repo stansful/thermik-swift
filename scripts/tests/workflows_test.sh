@@ -4,9 +4,9 @@
 # runs on every push to master, calls ci.yml (which skips those pushes) and publishes that artifact, checked against
 # release_assets, as release "Thermik X.Y.Z" with the plain tag X.Y.Z, made the latest, with the notes of
 # release-notes.sh; the tag's commit is read one way (tag_commit over every tag); the draft is handled by the id the
-# API returns; the macOS jobs run on the xcode-27 runners with the Xcode that docs/development.md and project.yml
-# name; the CI shellchecks every script; every remote action is pinned to a commit. The patterns match the workflows'
-# and scripts' own text, $VERSION and the like included.
+# API returns; the release build, the only macOS job, runs on the xcode-27 runners with the Xcode that
+# docs/development.md and project.yml name; the CI shellchecks every script; every remote action is pinned to a
+# commit. The patterns match the workflows' and scripts' own text, $VERSION and the like included.
 # release_assets and release.yml's tag lookups also run, under $TEST_BASH (default: bash from PATH): the lookups in
 # a clone of a throwaway origin with an annotated and a lightweight tag. Files go to a temp dir (TMPDIR); the
 # repository is only read.
@@ -131,7 +131,7 @@ trigger() {
 
 echo "# the workflows and the release scripts; version.sh and the tag lookups under $("$BASH_BIN" -c 'echo "bash $BASH_VERSION"'), $(git --version)"
 
-for j in scripts debug release-build; do job "$CI" "$j" >"$WORK/ci.$j"; done
+for j in scripts release-build; do job "$CI" "$j" >"$WORK/ci.$j"; done
 for j in gate quality publish; do job "$RELEASE" "$j" >"$WORK/release.$j"; done
 runners "$CI" >"$WORK/ci.runners"
 runners "$RELEASE" >"$WORK/release.runners"
@@ -140,8 +140,8 @@ awk '/^usage\(\) \{$/ { u = 1 } u { print } u && /^EOF$/ { exit }' "$BUILD" >"$W
 
 # --- the release files: release_assets, which build-release.sh builds and release.yml publishes
 fn release_assets 1.2.3
-lines Thermik-1.2.3.zip Thermik-1.2.3-dSYMs.zip SHA256SUMS >"$WORK/expected"
-check "release_assets 1.2.3 is exactly Thermik-1.2.3.zip Thermik-1.2.3-dSYMs.zip SHA256SUMS, one per line, in this order" \
+lines Thermik-1.2.3.zip Thermik-1.2.3.dmg Thermik-1.2.3.sha256 >"$WORK/expected"
+check "release_assets 1.2.3 is exactly Thermik-1.2.3.zip Thermik-1.2.3.dmg Thermik-1.2.3.sha256, one per line, in this order" \
   '[ $RC = 0 ] && cmp -s "$WORK/out" "$WORK/expected" && [ -z "$ERR" ]' "rc=$RC; stdout: '$OUT'; stderr: '$ERR'"
 assets_from='assets="$(release_assets "$version" |'
 check "build-release.sh builds the files release_assets lists" 'has "$assets_from" "$BUILD"' \
@@ -195,8 +195,8 @@ check "release.yml's publish job downloads the artifact release-\${{ env.VERSION
   "the publish job takes the release files from elsewhere"
 expected_from='expected="$(release_assets "$VERSION" | LC_ALL=C sort)"'
 actual_from='actual="$(find "$RUNNER_TEMP/release-assets" -mindepth 1 -maxdepth 1 '
-sums_checked='(cd "$RUNNER_TEMP/release-assets" && sha256sum -c SHA256SUMS)'
-check "...checks them against release_assets and their SHA256SUMS" \
+sums_checked='(cd "$RUNNER_TEMP/release-assets" && sha256sum -c "Thermik-$VERSION.sha256")'
+check "...checks them against release_assets and their sums (Thermik-\$VERSION.sha256)" \
   'has_all "$WORK/release.publish" "$expected_from" "$actual_from" "$sums_checked"' \
   "the publish job compares the artifact with another list"
 assets_read='done < <(release_assets "$VERSION")'
@@ -344,8 +344,8 @@ check "every job runs on Ubuntu or on $MACOS_RUNNER, the only macOS label: relea
   '[ -z "$other_runners" ] && [ "$calls" = "quality ./.github/workflows/ci.yml" ]' \
   "other runners: ${other_runners:--}; reusable workflow calls: ${calls:--}"
 macos_jobs="$(awk -v m="$MACOS_RUNNER" '$2 == m { printf "%s ", $1 }' "$WORK/ci.runners")"
-check "the macOS jobs are ci.yml's debug and release-build" \
-  '[ "$macos_jobs" = "debug release-build " ]' "on $MACOS_RUNNER: $macos_jobs"
+check "the only macOS job is ci.yml's release-build" \
+  '[ "$macos_jobs" = "release-build " ]' "on $MACOS_RUNNER: $macos_jobs"
 # xcode_first: the jobs that select the Xcode (./.github/actions/xcode) before their first run step; xcode_any: the
 # jobs that use it at all
 xcode_first='' xcode_any=''

@@ -3,9 +3,12 @@
 # Xcode: the fake root has the script, scripts/lib/version.sh and a Config/Shared.xcconfig (version 1.2.3, build 42),
 # plus stubs of scripts/lib/build.sh (it writes a fake Release build, as STUB_* say: Thermik.app with its Info.plist,
 # the "binaries" Thermik and thermik-helper with a UUID per architecture and a signature that seals the bundle's
-# files, and the dSYMs of both binaries) and scripts/lib/selftest.sh (for --test). plutil, lipo, dwarfdump, codesign
-# and ditto are stubs too, first on PATH, on macOS as well, so the test is the same on both systems: they read the fake
-# build, and ditto's "zip" is a tar archive. Runs the script under $TEST_BASH (default: bash from PATH).
+# files, and next to the app the dSYMs of both binaries, which the release leaves out) and scripts/lib/selftest.sh
+# (for --test). plutil, lipo, codesign, ditto, hdiutil, diskutil and sleep are stubs too, first on PATH, on macOS as
+# well, so the test is the same on both systems: they read the fake build, ditto's "zip" is a tar archive, and so is
+# the "disk image" of hdiutil and diskutil (macOS 27's `diskutil image`, or a macOS without it with STUB_OLD_MACOS=1),
+# which "mount" an image by extracting it into the mount point and keep a mount table in STUB_MOUNTS; sleep (between
+# the tries to detach a busy image) only logs. Runs the script under $TEST_BASH (default: bash from PATH).
 #
 #   scripts/tests/build-release_test.sh          KEEP=1 keeps the temp dir
 #
@@ -32,8 +35,9 @@ if [ -z "${KEEP:-}" ]; then trap 'rm -rf "$WORK"' EXIT; else echo "# work dir: $
 V=1.2.3
 BUILD=42
 APP_ZIP="Thermik-$V.zip"
-DSYMS_ZIP="Thermik-$V-dSYMs.zip"
-ASSETS="$APP_ZIP $DSYMS_ZIP SHA256SUMS"
+DMG="Thermik-$V.dmg"
+SUMS="Thermik-$V.sha256"
+ASSETS="$APP_ZIP $DMG $SUMS"
 ADHOC="ad-hoc, без нотаризации (как в релизах GitHub)"
 NL='
 '
@@ -47,12 +51,12 @@ export GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.invalid
 GIT_CEILING_DIRECTORIES="$(dirname "$WORK")"
 export GIT_CEILING_DIRECTORIES
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR CDPATH
-export STUB_LOG="$WORK/stub.log"
-unset STUB_BUILD_FAIL STUB_APP STUB_VERSION STUB_BUILD STUB_APP_ARCHS STUB_HELPER_ARCHS STUB_DSYM STUB_SIGN STUB_DITTO
-unset STUB_SELFTEST_FAIL
+export STUB_LOG="$WORK/stub.log" STUB_MOUNTS="$WORK/mounts"
+unset STUB_BUILD_FAIL STUB_APP STUB_VERSION STUB_BUILD STUB_APP_ARCHS STUB_HELPER_ARCHS STUB_SIGN STUB_DITTO
+unset STUB_SELFTEST_FAIL STUB_OLD_MACOS STUB_DMG STUB_DMG_FAIL
 mkdir -p "$HOME"
-# the script's temp dir (and the ditto stub's) land here, an absolute path whatever the caller's TMPDIR (the script
-# runs from WORK): the test checks that none is left behind
+# the script's temp dir (and those of the ditto, hdiutil and diskutil stubs) land here, an absolute path whatever the
+# caller's TMPDIR (the script runs from WORK): the test checks that none is left behind
 mkdir -p "$WORK/tmp"
 export TMPDIR="$WORK/tmp"
 
@@ -74,6 +78,15 @@ $(cat "$STUB_LOG" 2>/dev/null)"; fi
 has() { case $OUT in *"$1"*) return 0 ;; esac; return 1; }
 # line <s>: a line of the output is exactly s
 line() { case "$NL$OUT$NL" in *"$NL$1$NL"*) return 0 ;; esac; return 1; }
+# line_like <pattern>: a line of the output matches the shell pattern
+line_like() {
+  local l
+  while IFS= read -r l; do
+    # shellcheck disable=SC2254 # a pattern on purpose
+    case $l in $1) return 0 ;; esac
+  done <<<"$OUT"
+  return 1
+}
 # ends <s>: the output ends with s
 ends() { case $OUT in *"$1") return 0 ;; esac; return 1; }
 # in_order <s...>: the output has these strings, in this order
@@ -97,25 +110,45 @@ ran() { grep -q "^$1" "$STUB_LOG" 2>/dev/null; }
 # nothing_ran: no stub ran in the last run; untouched: nor did it write anything to the fake root's build/
 nothing_ran() { [ ! -s "$STUB_LOG" ]; }
 untouched() { nothing_ran && [ ! -e "$ROOT/build" ]; }
-# no_temp: TMPDIR is empty again (the script removed its temp dir, the ditto stub its own)
+# no_temp: TMPDIR is empty again (the script removed its temp dir, the ditto, hdiutil and diskutil stubs their own)
 no_temp() { [ -z "$(ls -A "$TMPDIR")" ]; }
+# unmounted: no disk image is attached in the view of the hdiutil and diskutil stubs (their mount table is empty)
+unmounted() { [ ! -s "$STUB_MOUNTS" ]; }
+# dmg_log: the hdiutil and diskutil lines of the stub log, in order, with the script's temp dir written as $work
+dmg_log() {
+  grep -E '^(hdiutil|diskutil) ' "$STUB_LOG" | sed "s|$TMPDIR/thermik-release\\.[A-Za-z0-9]*/|\$work/|g"
+}
+# dmg_calls diskutil|hdiutil: the dmg_log of a release build of ROOT, on a macOS with `diskutil image` (27) or without
+dmg_calls() {
+  echo "diskutil image create from --help"
+  if [ "$1" = diskutil ]; then
+    printf '%s\n' "diskutil image create from --format UDZO --volumeName Thermik $V \$work/dmg $REL/$DMG" \
+      "hdiutil verify $REL/$DMG" "diskutil image attach --readOnly --nobrowse --mountPoint \$work/mnt $REL/$DMG" \
+      "diskutil eject \$work/mnt"
+  else
+    printf '%s\n' "hdiutil create -volname Thermik $V -srcfolder \$work/dmg -fs APFS -format UDZO -ov $REL/$DMG" \
+      "hdiutil verify $REL/$DMG" "hdiutil attach -readonly -nobrowse -noautoopen -mountpoint \$work/mnt $REL/$DMG" \
+      "hdiutil detach \$work/mnt"
+  fi
+}
 sha256() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi
 }
-# sums_ok <dir> <file...>: SHA256SUMS in dir lists exactly these files, in this order, with their right sums
+# sums_ok <dir> <file...>: Thermik-X.Y.Z.sha256 in dir lists exactly these files, in this order, with their right sums
 sums_ok() {
   local dir="$1" f want=''
   shift
   for f; do want="$want$(cd "$dir" && sha256 "$f")
 "; done
-  [ "$(cat "$dir/SHA256SUMS")" = "${want%
-}" ] && (cd "$dir" && sha256 -c SHA256SUMS >/dev/null 2>&1)
+  [ "$(cat "$dir/$SUMS")" = "${want%
+}" ] && (cd "$dir" && sha256 -c "$SUMS" >/dev/null 2>&1)
 }
 # listing <dir>: the names in dir, hidden ones too, sorted, one line
 # shellcheck disable=SC2012 # the release files have plain names
 listing() { (cd "$1" && ls -A | LC_ALL=C sort | tr '\n' ' '); }
 sorted() { printf '%s\n' "$@" | LC_ALL=C sort | tr '\n' ' '; }
-# unpack <archive> <dir>: what an archive of the ditto stub (a tar archive) holds, into a new dir
+# unpack <archive> <dir>: what an archive of the ditto stub or a disk image of the hdiutil and diskutil stubs (tar
+# archives both) holds, into a new dir
 unpack() { rm -rf "$2" && mkdir -p "$2" && tar -xf "$1" -C "$2"; }
 
 echo "# scripts/build-release.sh under $("$BASH_BIN" -c 'echo "bash $BASH_VERSION"')"
@@ -135,6 +168,91 @@ seal() {
 }
 EOF
 }
+# older_fn: the function with which the ditto, hdiutil and diskutil stubs put an older build of the app in what they
+# make (after seal_fn)
+older_fn() {
+  cat <<'EOF'
+# older <app>: makes the app version 0.9.0, sealed as such (an older build, say)
+older() {
+  plist=$(awk '{ print } /<key>CFBundleShortVersionString<\/key>/ { getline; print "\t<string>0.9.0</string>" }' \
+    "$1/Contents/Info.plist")
+  printf '%s\n' "$plist" >"$1/Contents/Info.plist"
+  cr="$1/Contents/_CodeSignature/CodeResources"
+  signer=$(sed -n 1p "$cr")
+  sealed=$(seal "$1")
+  printf '%s\n%s\n' "$signer" "$sealed" >"$cr"
+}
+EOF
+}
+# dmg_fn: the functions with which the hdiutil and diskutil stubs make, attach and detach the same "disk images" (after
+# seal_fn, older_fn and the stub's failed <reason>, which fails as that tool does)
+dmg_fn() {
+  cat <<'EOF'
+# A disk image is a tar archive of what its volume holds; an attached one is extracted at its mount point, which is a
+# line of the mount table STUB_MOUNTS. STUB_DMG changes what an image holds: corrupt (no image at all: verify and
+# attach do not take it), nolink (no Applications), nested (the folder itself at the top, not what it holds), extra (a
+# Thermik.app.dSYM at the top too), hidden (also the volume's hidden .fseventsd and .DS_Store), copy (Applications is
+# a folder), elsewhere (Applications links to /System/Applications), lossy (no
+# Thermik.app/Contents/Resources/AppIcon.icns), otherversion (the app on it is version 0.9.0, sealed as such).
+# STUB_DMG_FAIL makes a step fail as the tool does: create (writing nothing), attach, detach-once (only the first
+# detach of the run: a volume still busy for a moment), detach (every plain detach; a forced one works), detach-force
+# (every detach, forced ones too)
+# no AppleDouble files from macOS's tar
+COPYFILE_DISABLE=1
+export COPYFILE_DISABLE
+# image_create <folder> <image>: an image of what the folder holds
+image_create() {
+  [ -d "$1" ] || failed "Source path not found: $1"
+  [ "${STUB_DMG_FAIL:-}" != create ] || failed "No space left on device"
+  stage=$(mktemp -d "${TMPDIR:-/tmp}/dmg-stub.XXXXXX") || exit 1
+  trap 'rm -rf "$stage"' EXIT
+  top=$stage
+  if [ "${STUB_DMG:-}" = nested ]; then
+    top="$stage/${1##*/}"
+    mkdir "$top"
+  fi
+  (cd "$1" && tar -cf - .) | (cd "$top" && tar -xf -) || exit 1
+  case ${STUB_DMG:-} in
+  nolink) rm -f "$top/Applications" ;;
+  extra) mkdir "$top/Thermik.app.dSYM" ;;
+  hidden) mkdir "$top/.fseventsd" && echo finder >"$top/.DS_Store" ;;
+  copy) rm -f "$top/Applications" && mkdir "$top/Applications" ;;
+  elsewhere) rm -f "$top/Applications" && ln -s /System/Applications "$top/Applications" ;;
+  lossy) rm -f "$top/Thermik.app/Contents/Resources/AppIcon.icns" ;;
+  otherversion) older "$top/Thermik.app" ;;
+  esac
+  if [ "${STUB_DMG:-}" = corrupt ]; then
+    echo "not a disk image" >"$2"
+  else
+    (cd "$stage" && tar -cf - .) >"$2"
+  fi
+}
+# is_image <file>: the file is an image of image_create
+is_image() { [ -f "$1" ] && tar -tf "$1" >/dev/null 2>&1; }
+# attached <mount point>: an image is attached there
+attached() { grep -qxF -- "$1" "$STUB_MOUNTS" 2>/dev/null; }
+# image_attach <image> <mount point>: extracts the image at the mount point (made when missing, as the tools do)
+image_attach() {
+  is_image "$1" || failed "image not recognized"
+  [ "${STUB_DMG_FAIL:-}" != attach ] || failed "no mountable file systems"
+  ! attached "$2" || failed "Resource busy"
+  mkdir -p "$2" && tar -xf "$1" -C "$2" || exit 1
+  echo "$2" >>"$STUB_MOUNTS"
+}
+# image_detach <mount point> [force]: the image attached there is gone: the mount point is empty again
+image_detach() {
+  attached "$1" || failed "No such file or directory"
+  case ${STUB_DMG_FAIL:-} in
+  detach) [ -n "${2:-}" ] || failed "Resource busy" ;;
+  detach-force) failed "Resource busy" ;;
+  detach-once) [ "$(grep -cE '^(hdiutil detach|diskutil eject) ' "$STUB_LOG")" -gt 1 ] || failed "Resource busy" ;;
+  esac
+  rm -rf "$1" && mkdir "$1" || exit 1
+  grep -vxF -- "$1" "$STUB_MOUNTS" >"$STUB_MOUNTS.new"
+  mv "$STUB_MOUNTS.new" "$STUB_MOUNTS"
+}
+EOF
+}
 {
   cat <<'EOF'
 #!/bin/sh
@@ -149,9 +267,6 @@ EOF
 #   STUB_VERSION       CFBundleShortVersionString instead of MARKETING_VERSION (none: no such key)
 #   STUB_BUILD         CFBundleVersion instead of CURRENT_PROJECT_VERSION (none: no such key)
 #   STUB_APP_ARCHS     the app's architectures (default: x86_64 arm64); STUB_HELPER_ARCHS the helper's
-#   STUB_DSYM          missing-app, missing-helper: no such dSYM; stale-app, stale-helper: the dSYM of another build
-#                      (other UUIDs); thin-helper: the helper's dSYM has arm64 only; nodebug-app, nodebug-helper: the
-#                      dSYM has the UUIDs but no debug information (as dsymutil makes it from a stripped binary)
 # It logs whether the products directory was there before ("products before build.sh: clean" or "stale"): Xcode
 # builds on top of what it finds.
 #   STUB_SIGN          adhoc (the default); team: an Apple Development identity with a Team ID; broken: a file of the
@@ -177,18 +292,18 @@ EOF
   cat <<'EOF'
 # setting <name>: its value in Config/Shared.xcconfig
 setting() { sed -n "s/^$1 = //p" "$root/Config/Shared.xcconfig"; }
-# uuid <binary> <arch> <build>: a made-up UUID, the same for the same three
+# uuid <binary> <arch>: a made-up UUID, the same for the same two
 uuid() {
-  printf '%s %s %s' "$1" "$2" "$3" | cksum | {
+  printf '%s %s' "$1" "$2" | cksum | {
     read -r crc size
     printf '%08X-%04X-4000-8000-%012X\n' "$crc" "$size" "$crc"
   }
 }
-# macho <file> <binary> <archs> <build>: a fake Mach-O file of the binary (or the DWARF file of its dSYM)
+# macho <file> <binary> <archs>: a fake Mach-O file of the binary (or the DWARF file of its dSYM)
 macho() {
   {
     echo "fake Mach-O file of $2"
-    for arch in $3; do echo "uuid $(uuid "$2" "$arch" "$4") $arch"; done
+    for arch in $3; do echo "uuid $(uuid "$2" "$arch") $arch"; done
   } >"$1"
 }
 plist_head() {
@@ -198,8 +313,7 @@ plist_head() {
 }
 plist_tail() { printf '%s\n' '</dict>' '</plist>'; }
 entry() { printf '\t<key>%s</key>\n\t<string>%s</string>\n' "$1" "$2"; }
-# dsym <dSYM> <binary> <archs> <build> [nodebug]: the dSYM bundle of the binary, next to the app; its DWARF file has a
-# "debug-info" line (the dwarfdump stub then finds compile units) unless nodebug
+# dsym <dSYM> <binary> <archs>: the dSYM bundle of the binary, next to the app
 dsym() {
   mkdir -p "$products/$1/Contents/Resources/DWARF"
   {
@@ -207,8 +321,7 @@ dsym() {
     entry CFBundleIdentifier "com.apple.xcode.dsym.$2"
     plist_tail
   } >"$products/$1/Contents/Info.plist"
-  macho "$products/$1/Contents/Resources/DWARF/$2" "$2" "$3" "$4"
-  [ -n "${5:-}" ] || echo debug-info >>"$products/$1/Contents/Resources/DWARF/$2"
+  macho "$products/$1/Contents/Resources/DWARF/$2" "$2" "$3"
 }
 version=${STUB_VERSION:-$(setting MARKETING_VERSION)}
 build=${STUB_BUILD:-$(setting CURRENT_PROJECT_VERSION)}
@@ -225,21 +338,10 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/_CodeSig
 } >"$app/Contents/Info.plist"
 printf 'APPL????' >"$app/Contents/PkgInfo"
 echo icon >"$app/Contents/Resources/AppIcon.icns"
-macho "$app/Contents/MacOS/Thermik" Thermik "$app_archs" this
-[ "${STUB_APP:-}" = nohelper ] || macho "$app/Contents/MacOS/thermik-helper" thermik-helper "$helper_archs" this
-case ${STUB_DSYM:-} in
-missing-app) ;;
-stale-app) dsym Thermik.app.dSYM Thermik "$app_archs" earlier ;;
-nodebug-app) dsym Thermik.app.dSYM Thermik "$app_archs" this nodebug ;;
-*) dsym Thermik.app.dSYM Thermik "$app_archs" this ;;
-esac
-case ${STUB_DSYM:-} in
-missing-helper) ;;
-stale-helper) dsym thermik-helper.dSYM thermik-helper "$helper_archs" earlier ;;
-thin-helper) dsym thermik-helper.dSYM thermik-helper arm64 this ;;
-nodebug-helper) dsym thermik-helper.dSYM thermik-helper "$helper_archs" this nodebug ;;
-*) dsym thermik-helper.dSYM thermik-helper "$helper_archs" this ;;
-esac
+macho "$app/Contents/MacOS/Thermik" Thermik "$app_archs"
+[ "${STUB_APP:-}" = nohelper ] || macho "$app/Contents/MacOS/thermik-helper" thermik-helper "$helper_archs"
+dsym Thermik.app.dSYM Thermik "$app_archs"
+dsym thermik-helper.dSYM thermik-helper "$helper_archs"
 case ${STUB_SIGN:-adhoc} in
 adhoc | broken) signer=adhoc ;;
 team) signer='ABCDE12345 Apple Development: Jane Doe (Q1W2E3R4T5)' ;;
@@ -299,45 +401,6 @@ if [ ! -f "$2" ]; then
   exit 1
 fi
 awk '$1 == "uuid" { printf "%s%s", sep, $3; sep = " " } END { print "" }' "$2"
-EOF
-cat >"$BIN/dwarfdump" <<'EOF'
-#!/bin/sh
-# dwarfdump stub, of a fake Mach-O file or the DWARF files of a dSYM bundle (PATH/Contents/Resources/DWARF/*), as
-# dwarfdump prints them. Only these forms:
-#   dwarfdump --uuid PATH                                  "UUID: <UUID> (<arch>) <file>" for every architecture
-#   dwarfdump --arch ARCH --debug-info --recurse-depth=0 PATH
-#                                                          the .debug_info header of that architecture, with two
-#                                                          DW_TAG_compile_unit lines when the file has debug-info
-printf 'dwarfdump %s\n' "$*" >>"$STUB_LOG"
-if [ $# = 2 ] && [ "$1" = --uuid ]; then
-  arch=''
-elif [ $# = 5 ] && [ "$1" = --arch ] && [ "$3 $4" = "--debug-info --recurse-depth=0" ]; then
-  arch=$2
-  shift 4
-  set -- --uuid "$1"
-else
-  echo "dwarfdump stub: unexpected arguments: $*" >&2
-  exit 2
-fi
-if [ -d "$2" ]; then set -- "$2"/Contents/Resources/DWARF/*; else set -- "$2"; fi
-for f; do
-  if [ ! -f "$f" ]; then
-    echo "error: $f: No such file or directory" >&2
-    exit 1
-  fi
-  if [ -z "$arch" ]; then
-    awk -v f="$f" '$1 == "uuid" { print "UUID: " $2 " (" $3 ") " f }' "$f"
-  else
-    awk -v f="$f" -v a="$arch" '
-      $1 == "uuid" && $3 == a { found = 1 }
-      $1 == "debug-info" { info = 1 }
-      END {
-        if (!found) exit
-        printf "%s(%s):\tfile format Mach-O %s\n\n.debug_info contents:\n", f, a, a
-        if (info) printf "0x0000000c: DW_TAG_compile_unit\n0x00000057: DW_TAG_compile_unit\n"
-      }' "$f"
-  fi
-done
 EOF
 {
   cat <<'EOF'
@@ -404,6 +467,7 @@ EOF
 printf 'ditto %s\n' "$*" >>"$STUB_LOG"
 EOF
   seal_fn
+  older_fn
   cat <<'EOF'
 args=$*
 unexpected() {
@@ -449,22 +513,126 @@ fi
 (cd "$1" && tar -cf - .) | (cd "$top" && tar -xf -) || exit 1
 case ${STUB_DITTO:-} in
 lossy) rm -f "$top/Contents/Resources/AppIcon.icns" ;;
-otherversion)
-  if [ -f "$top/Contents/Info.plist" ]; then
-    plist=$(awk '{ print } /<key>CFBundleShortVersionString<\/key>/ { getline; print "\t<string>0.9.0</string>" }' \
-      "$top/Contents/Info.plist")
-    printf '%s\n' "$plist" >"$top/Contents/Info.plist"
-    cr="$top/Contents/_CodeSignature/CodeResources"
-    signer=$(sed -n 1p "$cr")
-    sealed=$(seal "$top")
-    printf '%s\n%s\n' "$signer" "$sealed" >"$cr"
-  fi
-  ;;
+otherversion) [ ! -f "$top/Contents/Info.plist" ] || older "$top" ;;
 macosx) mkdir "$stage/__MACOSX" ;;
 esac
 (cd "$stage" && tar -cf - .) >"$2"
 EOF
 } >"$BIN/ditto"
+{
+  cat <<'EOF'
+#!/bin/sh
+# hdiutil stub; its disk images are tar archives, as are the diskutil stub's (see the image functions below, which
+# both share). Only the forms build-release.sh uses:
+#   hdiutil create -volname NAME -srcfolder SRC -fs APFS -format UDZO -ov IMAGE  an image of what the folder SRC holds
+#   hdiutil verify IMAGE                                                          checks that IMAGE is an image
+#   hdiutil attach -readonly -nobrowse -noautoopen -mountpoint MNT IMAGE          attaches it at MNT
+#   hdiutil detach [-force] MNT                                                   detaches the image at MNT
+# Each prints what hdiutil prints, and fails as it does: "hdiutil: <verb> failed - <reason>", exit 1
+printf 'hdiutil %s\n' "$*" >>"$STUB_LOG"
+EOF
+  seal_fn
+  older_fn
+  cat <<'EOF'
+args=$*
+unexpected() {
+  echo "hdiutil stub: unexpected arguments: $args" >&2
+  exit 2
+}
+verb=${1:-}
+failed() {
+  echo "hdiutil: $verb failed - $1" >&2
+  exit 1
+}
+EOF
+  dmg_fn
+  cat <<'EOF'
+if [ $# = 11 ] && [ "$1 $2" = "create -volname" ] && [ -n "$3" ] && [ "$4" = -srcfolder ] &&
+  [ "$6 $7 $8 $9 ${10}" = "-fs APFS -format UDZO -ov" ]; then
+  image_create "$5" "${11}"
+  echo "created: ${11}"
+elif [ $# = 2 ] && [ "$1" = verify ]; then
+  if ! is_image "$2"; then
+    echo "hdiutil: verify: unable to recognize \"$2\" as a disk image. (image not recognized)" >&2
+    failed "image not recognized"
+  fi
+  printf '%s\n' "Checksumming disk image (Apple_APFS : 4)..." \
+    "         disk image (Apple_APFS : 4): verified   CRC32 \$D6DD0569" "verified   CRC32 \$3332159E" \
+    "hdiutil: verify: checksum of \"$2\" is VALID"
+elif [ $# = 7 ] && [ "$1 $2 $3 $4 $5" = "attach -readonly -nobrowse -noautoopen -mountpoint" ]; then
+  image_attach "$7" "$6"
+  printf '/dev/disk8\tGUID_partition_scheme\t\n/dev/disk8s1\tApple_APFS\t\n/dev/disk9\tApple_APFS_Container\t\n'
+  printf '/dev/disk9s1\tApple_APFS_Volume\t%s\n' "$6"
+elif [ $# = 2 ] && [ "$1" = detach ]; then
+  image_detach "$2"
+  echo '"disk8" ejected.'
+elif [ $# = 3 ] && [ "$1 $2" = "detach -force" ]; then
+  image_detach "$3" force
+  echo '"disk8" ejected.'
+else
+  unexpected
+fi
+EOF
+} >"$BIN/hdiutil"
+{
+  cat <<'EOF'
+#!/bin/sh
+# diskutil stub, with the `diskutil image` of macOS 27; its disk images are the hdiutil stub's (see the image
+# functions below). Only the forms build-release.sh uses:
+#   diskutil image create from --help                                     its usage
+#   diskutil image create from --format UDZO --volumeName NAME SRC IMAGE  an image of what the folder SRC holds
+#   diskutil image attach --readOnly --nobrowse --mountPoint MNT IMAGE    attaches it at MNT
+#   diskutil eject [force] MNT                                            detaches the image at MNT
+# Each prints what diskutil prints, and fails as it does: "Error: <reason>", exit 1. STUB_OLD_MACOS=1: a macOS before
+# 27, whose diskutil has no `image` verb
+printf 'diskutil %s\n' "$*" >>"$STUB_LOG"
+EOF
+  seal_fn
+  older_fn
+  cat <<'EOF'
+args=$*
+unexpected() {
+  echo "diskutil stub: unexpected arguments: $args" >&2
+  exit 2
+}
+failed() {
+  echo "Error: $1" >&2
+  exit 1
+}
+EOF
+  dmg_fn
+  cat <<'EOF'
+if [ "${1:-}" = image ] && [ -n "${STUB_OLD_MACOS:-}" ]; then
+  echo 'diskutil: did not recognize verb "image"; type "diskutil" for a list' >&2
+  exit 1
+fi
+if [ $# = 4 ] && [ "$1 $2 $3 $4" = "image create from --help" ]; then
+  printf '%s\n' "OVERVIEW: Create a disk image from an existing source (disk, disk image or folder)." "" \
+    "USAGE: diskutil image create from [--format <format>] [--volumeName <volumeName>] <source> <destination>"
+elif [ $# = 9 ] && [ "$1 $2 $3 $4 $5 $6" = "image create from --format UDZO --volumeName" ] && [ -n "$7" ]; then
+  printf '[5 %% completed] '
+  image_create "$8" "$9"
+  printf '[100 %% completed] \n%s created\n' "$9"
+elif [ $# = 7 ] && [ "$1 $2 $3 $4 $5" = "image attach --readOnly --nobrowse --mountPoint" ]; then
+  image_attach "$7" "$6"
+  printf '/dev/disk8  \tGUID_partition_scheme\n/dev/disk8s1\tApple_APFS\n/dev/disk9  \tApple_APFS_Container\n'
+  printf '/dev/disk9s1\tApple_APFS_Volume    \t%s\n' "$6"
+elif [ $# = 2 ] && [ "$1" = eject ]; then
+  image_detach "$2"
+  echo "Disk $2 ejected"
+elif [ $# = 3 ] && [ "$1 $2" = "eject force" ]; then
+  image_detach "$3" force
+  echo "Disk $3 ejected"
+else
+  unexpected
+fi
+EOF
+} >"$BIN/diskutil"
+cat >"$BIN/sleep" <<'EOF'
+#!/bin/sh
+# sleep stub: logs, and does not wait
+printf 'sleep %s\n' "$*" >>"$STUB_LOG"
+EOF
 chmod +x "$STUBS"/* "$BIN"/*
 
 # xcconfig <version line> <build line>: a fake root's Config/Shared.xcconfig, modelled on the real one, with these
@@ -506,11 +674,17 @@ new_root() {
   cp "$TREE/scripts/lib/version.sh" "$STUBS/build.sh" "$STUBS/selftest.sh" "$ROOT/scripts/lib/"
   xcconfig "MARKETING_VERSION = $V" "CURRENT_PROJECT_VERSION = $BUILD" >"$ROOT/Config/Shared.xcconfig"
 }
-# br [args...]: build-release.sh of ROOT, run from WORK with the tool stubs first on PATH and a fresh stub log; sets
-# OUT and RC
+# br [args...]: build-release.sh of ROOT, run from WORK with the tool stubs first on PATH, a fresh stub log and an
+# empty mount table; sets OUT and RC
 br() {
-  rm -f "$STUB_LOG"
+  rm -f "$STUB_LOG" "$STUB_MOUNTS"
   OUT="$(cd "$WORK" && PATH="$BIN:$PATH" "$BASH_BIN" "$ROOT/scripts/build-release.sh" "$@" 2>&1)"
+  RC=$?
+}
+# br_stderr: br without arguments, but OUT is only what the script writes to stderr
+br_stderr() {
+  rm -f "$STUB_LOG" "$STUB_MOUNTS"
+  OUT="$(cd "$WORK" && PATH="$BIN:$PATH" "$BASH_BIN" "$ROOT/scripts/build-release.sh" 2>&1 >/dev/null)"
   RC=$?
 }
 # summary <dir> <signature> [architectures]: the summary the script ends with, for the release files in dir
@@ -518,19 +692,26 @@ summary() {
   local f
   printf '\nРелиз %s (сборка %s): %s\n' "$V" "$BUILD" "$1"
   for f in $ASSETS; do printf '  %9s  %s\n' "$(wc -c <"$1/$f" | tr -d ' ')" "$f"; done
-  printf '\nПодпись: %s\nАрхитектуры: %s\n\nSHA256SUMS:\n' "$2" "${3:-x86_64 arm64}"
-  sed 's/^/  /' "$1/SHA256SUMS" 2>/dev/null
+  printf '\nПодпись: %s\nАрхитектуры: %s\n\n%s:\n' "$2" "${3:-x86_64 arm64}" "$SUMS"
+  sed 's/^/  /' "$1/$SUMS" 2>/dev/null
 }
 # refused <name> <error>: the last run failed with "Ошибка: <error>" and wrote nothing to build/release or TMPDIR
 refused() {
   WANT=$2
   check "$1" '[ $RC = 1 ] && line "Ошибка: $WANT" && ! has "Релиз $V" && [ ! -e "$REL" ] && no_temp'
 }
+# refused_late <name> <error>: the last run failed with "Ошибка: <error>" once it was making the release files:
+# without Thermik-X.Y.Z.sha256, with no disk image left attached, nothing left in TMPDIR
+refused_late() {
+  WANT=$2
+  check "$1" '[ $RC = 1 ] && line "Ошибка: $WANT" && ! has "Релиз $V" && [ ! -e "$REL/$SUMS" ] && unmounted && no_temp'
+}
 
-# --- a release build: exactly the release files, SHA256SUMS over the two zips, the summary
+# --- a release build: exactly the release files, Thermik-X.Y.Z.sha256 over the zip and the disk image, the summary
 new_root main
 mkdir -p "$REL" "$PRODUCTS/Thermik.app.dSYM"
 echo stale >"$REL/Thermik-1.2.2.zip"
+echo stale >"$REL/SHA256SUMS"
 echo finder >"$REL/.DS_Store"
 echo stale >"$PRODUCTS/stale-product"
 br
@@ -540,38 +721,39 @@ check "...from empty products: an earlier build's are gone before build.sh runs"
 check "...scripts/lib/build.sh Release once, after saying so" \
   'logged "build.sh Release" && [ "$(grep -c "^build.sh" "$STUB_LOG")" = 1 ] &&
     in_order "== Сборка $V (сборка $BUILD): scripts/lib/build.sh Release" "Built: build/DerivedData/Build/Products/Release/Thermik.app" \
-      "== Архивы: $APP_ZIP, $DSYMS_ZIP"'
+      "== Архив и образ диска: $APP_ZIP, $DMG"'
 check "...build/release holds exactly the release files (an older build's and other files are gone)" \
   '[ "$(listing "$REL")" = "$(sorted $ASSETS)" ]'
-check "...SHA256SUMS lists the two zips, in release_assets order, with their sums" 'sums_ok "$REL" "$APP_ZIP" "$DSYMS_ZIP"'
+check "...$SUMS lists the zip, then the disk image, with their sums" 'sums_ok "$REL" "$APP_ZIP" "$DMG"'
 check "...$APP_ZIP holds Thermik.app alone, as built" \
   'unpack "$REL/$APP_ZIP" "$WORK/x-app" && [ "$(listing "$WORK/x-app")" = "Thermik.app " ] && diff -r "$APP" "$WORK/x-app/Thermik.app" >/dev/null'
-check "...$DSYMS_ZIP holds Thermik-$V-dSYMs/ alone, with the dSYMs of the app and the helper as built" \
-  'unpack "$REL/$DSYMS_ZIP" "$WORK/x-dsyms" && [ "$(listing "$WORK/x-dsyms")" = "Thermik-$V-dSYMs " ] &&
-    [ "$(listing "$WORK/x-dsyms/Thermik-$V-dSYMs")" = "Thermik.app.dSYM thermik-helper.dSYM " ] &&
-    diff -r "$PRODUCTS/Thermik.app.dSYM" "$WORK/x-dsyms/Thermik-$V-dSYMs/Thermik.app.dSYM" >/dev/null &&
-    diff -r "$PRODUCTS/thermik-helper.dSYM" "$WORK/x-dsyms/Thermik-$V-dSYMs/thermik-helper.dSYM" >/dev/null'
-check "...ditto archives with --norsrc --keepParent, copies the dSYMs with --norsrc, and unzips the app" \
-  '[ "$(grep -c "^ditto " "$STUB_LOG")" = 5 ] && logged "ditto -c -k --norsrc --keepParent $APP $REL/$APP_ZIP" &&
-    logged_like "ditto --norsrc $PRODUCTS/Thermik.app.dSYM $TMPDIR/*/Thermik-$V-dSYMs/Thermik.app.dSYM" &&
-    logged_like "ditto --norsrc $PRODUCTS/thermik-helper.dSYM $TMPDIR/*/Thermik-$V-dSYMs/thermik-helper.dSYM" &&
-    logged_like "ditto -c -k --norsrc --keepParent $TMPDIR/*/Thermik-$V-dSYMs $REL/$DSYMS_ZIP" &&
-    logged_like "ditto -x -k $REL/$APP_ZIP $TMPDIR/*"'
-check "...checks the build: Info.plist, both binaries' architectures and dSYM UUIDs, the app's signature, the app unzipped" \
+check "...$DMG holds Thermik.app, as built, and a link Applications to /Applications, nothing else" \
+  'unpack "$REL/$DMG" "$WORK/x-dmg" && [ "$(listing "$WORK/x-dmg")" = "Applications Thermik.app " ] &&
+    [ -L "$WORK/x-dmg/Applications" ] && [ "$(readlink "$WORK/x-dmg/Applications")" = /Applications ] &&
+    diff -r "$APP" "$WORK/x-dmg/Thermik.app" >/dev/null'
+check "...the dSYMs next to the app stay out of the release: nothing reads them" \
+  '[ -d "$PRODUCTS/Thermik.app.dSYM" ] && [ -d "$PRODUCTS/thermik-helper.dSYM" ] && ! logged_like "*dSYM*"'
+check "...ditto archives the app with --norsrc --keepParent, copies it for the disk image with --norsrc, and unzips it" \
+  '[ "$(grep -c "^ditto " "$STUB_LOG")" = 3 ] && logged "ditto -c -k --norsrc --keepParent $APP $REL/$APP_ZIP" &&
+    logged_like "ditto --norsrc $APP $TMPDIR/*/dmg/Thermik.app" && logged_like "ditto -x -k $REL/$APP_ZIP $TMPDIR/*"'
+check "...macOS 27: diskutil makes the disk image of the staged folder, hdiutil verifies it, diskutil attaches it read-only, out of Finder, in the temp dir, and ejects it" \
+  '[ "$(dmg_log)" = "$(dmg_calls diskutil)" ]'
+check "...checks the build: Info.plist, both binaries' architectures, the app's signature, the app unzipped and on the image" \
   'logged "plutil -extract CFBundleShortVersionString raw -o - $APP/Contents/Info.plist" &&
     logged "plutil -extract CFBundleVersion raw -o - $APP/Contents/Info.plist" &&
     logged "lipo -archs $APP/Contents/MacOS/Thermik" && logged "lipo -archs $APP/Contents/MacOS/thermik-helper" &&
-    logged "dwarfdump --uuid $APP/Contents/MacOS/Thermik" && logged "dwarfdump --uuid $PRODUCTS/Thermik.app.dSYM" &&
-    logged "dwarfdump --uuid $APP/Contents/MacOS/thermik-helper" && logged "dwarfdump --uuid $PRODUCTS/thermik-helper.dSYM" &&
-    logged "dwarfdump --arch arm64 --debug-info --recurse-depth=0 $PRODUCTS/Thermik.app.dSYM" &&
-    logged "dwarfdump --arch x86_64 --debug-info --recurse-depth=0 $PRODUCTS/Thermik.app.dSYM" &&
-    logged "dwarfdump --arch arm64 --debug-info --recurse-depth=0 $PRODUCTS/thermik-helper.dSYM" &&
-    logged "dwarfdump --arch x86_64 --debug-info --recurse-depth=0 $PRODUCTS/thermik-helper.dSYM" &&
     logged "codesign --verify --deep --strict $APP" && logged "codesign -dvv $APP" &&
-    logged_like "codesign --verify --deep --strict $TMPDIR/*/Thermik.app" &&
-    logged_like "plutil -extract CFBundleShortVersionString raw -o - $TMPDIR/*/Thermik.app/Contents/Info.plist"'
+    logged_like "codesign --verify --deep --strict $TMPDIR/*/unzipped/Thermik.app" &&
+    logged_like "plutil -extract CFBundleShortVersionString raw -o - $TMPDIR/*/unzipped/Thermik.app/Contents/Info.plist" &&
+    logged_like "codesign --verify --deep --strict $TMPDIR/*/mnt/Thermik.app" &&
+    logged_like "plutil -extract CFBundleShortVersionString raw -o - $TMPDIR/*/mnt/Thermik.app/Contents/Info.plist" &&
+    [ "$(grep -c "^codesign --verify" "$STUB_LOG")" = 3 ]'
+check "...the disk image tools say nothing on success, and the image is detached at the end" \
+  '! has "% completed" && ! has "created" && ! has "VALID" && ! has "/dev/disk" && ! has "ejected" && ! has "OVERVIEW" && unmounted'
 check "...the summary: version, build, directory, every file with its size, the signature, the architectures, the sums" \
   'ends "$(summary "$REL" "$ADHOC")" && ! has "другие файлы"'
+check "...the sums in the summary: $SUMS's two lines, the zip's, then the disk image's" \
+  'ends "$NL$SUMS:$NL  $(cd "$REL" && sha256 "$APP_ZIP")$NL  $(cd "$REL" && sha256 "$DMG")"'
 check "...no self-checks without --test" '! ran selftest && ! has "Самопроверки"'
 check "...nothing left in TMPDIR or HOME, nothing written in the root but build/release and the build" \
   'no_temp && [ -z "$(ls -A "$HOME")" ] &&
@@ -580,7 +762,21 @@ check "...nothing left in TMPDIR or HOME, nothing written in the root but build/
 new_root 'my project'
 br
 check "a root path with a space builds" \
-  '[ $RC = 0 ] && [ "$(listing "$REL")" = "$(sorted $ASSETS)" ] && sums_ok "$REL" "$APP_ZIP" "$DSYMS_ZIP" && ends "$(summary "$REL" "$ADHOC")" && no_temp'
+  '[ $RC = 0 ] && [ "$(listing "$REL")" = "$(sorted $ASSETS)" ] && sums_ok "$REL" "$APP_ZIP" "$DMG" &&
+    [ "$(dmg_log)" = "$(dmg_calls diskutil)" ] && ends "$(summary "$REL" "$ADHOC")" && unmounted && no_temp'
+
+# --- a macOS before 27 (GitHub's macOS 14 and 15 runners), whose diskutil has no `image`: hdiutil does it all
+new_root 'old macos'
+STUB_OLD_MACOS=1 br
+check "without diskutil image: hdiutil makes, verifies, attaches read-only (out of Finder, not opened) and detaches the disk image" \
+  '[ $RC = 0 ] && ! has "Ошибка" && [ "$(dmg_log)" = "$(dmg_calls hdiutil)" ] && unmounted'
+check "...the same release files: the zip, the disk image with Thermik.app and Applications, $SUMS over both" \
+  '[ "$(listing "$REL")" = "$(sorted $ASSETS)" ] && sums_ok "$REL" "$APP_ZIP" "$DMG" &&
+    unpack "$REL/$DMG" "$WORK/x-old-dmg" && [ "$(listing "$WORK/x-old-dmg")" = "Applications Thermik.app " ] &&
+    [ "$(readlink "$WORK/x-old-dmg/Applications")" = /Applications ] && diff -r "$APP" "$WORK/x-old-dmg/Thermik.app" >/dev/null'
+check "...the app on the image checked, hdiutil says nothing on success, the summary, nothing left in TMPDIR" \
+  'logged_like "codesign --verify --deep --strict $TMPDIR/*/mnt/Thermik.app" && ! has "did not recognize" &&
+    ! has "created" && ! has "VALID" && ! has "/dev/disk" && ! has "ejected" && ends "$(summary "$REL" "$ADHOC")" && no_temp'
 
 new_root team
 STUB_SIGN=team br
@@ -599,29 +795,31 @@ new_root outroot
 mkdir -p "$WORK/out"
 echo notes >"$WORK/out/README.txt"
 echo old >"$WORK/out/Thermik-1.2.2.zip"
+echo old >"$WORK/out/SHA256SUMS"
 echo finder >"$WORK/out/.DS_Store"
 echo old >"$WORK/out/$APP_ZIP"
 br --out out
 check "--out DIR (relative to the current directory): the release files are copied there (an older $APP_ZIP replaced), their sums hold" \
-  '[ $RC = 0 ] && sums_ok "$WORK/out" "$APP_ZIP" "$DSYMS_ZIP" && cmp -s "$REL/$APP_ZIP" "$WORK/out/$APP_ZIP" &&
-    cmp -s "$REL/$DSYMS_ZIP" "$WORK/out/$DSYMS_ZIP" && cmp -s "$REL/SHA256SUMS" "$WORK/out/SHA256SUMS" &&
+  '[ $RC = 0 ] && sums_ok "$WORK/out" "$APP_ZIP" "$DMG" && cmp -s "$REL/$APP_ZIP" "$WORK/out/$APP_ZIP" &&
+    cmp -s "$REL/$DMG" "$WORK/out/$DMG" && cmp -s "$REL/$SUMS" "$WORK/out/$SUMS" &&
     [ "$(listing "$REL")" = "$(sorted $ASSETS)" ]'
 check "...the summary is about DIR, and names the other files there, hidden ones too" \
   'ends "$(summary "$WORK/out" "$ADHOC")
-В $WORK/out есть и другие файлы, в релиз они не входят: README.txt Thermik-1.2.2.zip .DS_Store"'
+В $WORK/out есть и другие файлы, в релиз они не входят: README.txt SHA256SUMS Thermik-1.2.2.zip .DS_Store"'
 check "...and leaves them alone" \
-  '[ "$(cat "$WORK/out/README.txt")" = notes ] && [ "$(cat "$WORK/out/Thermik-1.2.2.zip")" = old ] && [ "$(cat "$WORK/out/.DS_Store")" = finder ] && no_temp'
+  '[ "$(cat "$WORK/out/README.txt")" = notes ] && [ "$(cat "$WORK/out/Thermik-1.2.2.zip")" = old ] &&
+    [ "$(cat "$WORK/out/SHA256SUMS")" = old ] && [ "$(cat "$WORK/out/.DS_Store")" = finder ] && no_temp'
 br "--out=$WORK/out 2/new"
 check "--out=DIR: a new DIR (a path with a space) with exactly the release files, the summary about it" \
-  '[ $RC = 0 ] && [ "$(listing "$WORK/out 2/new")" = "$(sorted $ASSETS)" ] && sums_ok "$WORK/out 2/new" "$APP_ZIP" "$DSYMS_ZIP" &&
+  '[ $RC = 0 ] && [ "$(listing "$WORK/out 2/new")" = "$(sorted $ASSETS)" ] && sums_ok "$WORK/out 2/new" "$APP_ZIP" "$DMG" &&
     ends "$(summary "$WORK/out 2/new" "$ADHOC")"'
 br --out "$REL"
 check "--out build/release itself: nothing copied, the summary is about build/release" \
-  '[ $RC = 0 ] && [ "$(listing "$REL")" = "$(sorted $ASSETS)" ] && sums_ok "$REL" "$APP_ZIP" "$DSYMS_ZIP" && ends "$(summary "$REL" "$ADHOC")"'
+  '[ $RC = 0 ] && [ "$(listing "$REL")" = "$(sorted $ASSETS)" ] && sums_ok "$REL" "$APP_ZIP" "$DMG" && ends "$(summary "$REL" "$ADHOC")"'
 ln -s "$ROOT/build" "$WORK/build-link"
 br --out build-link/release
 check "--out build/release by another path (a symlink): nothing copied, the summary is about build/release" \
-  '[ $RC = 0 ] && sums_ok "$REL" "$APP_ZIP" "$DSYMS_ZIP" && ends "$(summary "$REL" "$ADHOC")"'
+  '[ $RC = 0 ] && sums_ok "$REL" "$APP_ZIP" "$DMG" && ends "$(summary "$REL" "$ADHOC")"'
 br --out
 check "--out without DIR is a usage error" \
   '[ $RC = 2 ] && line "Ошибка: --out: укажите каталог" && has "  scripts/build-release.sh [--test] [--out DIR]" && nothing_ran'
@@ -636,7 +834,7 @@ br --test
 check "--test: the self-checks first, then the build" \
   '[ $RC = 0 ] && [ "$(head -n 2 "$STUB_LOG" | tr "\n" " ")" = "selftest build.sh Release " ] &&
     in_order "== Самопроверки: scripts/lib/selftest.sh" "All self-checks passed." "== Сборка $V (сборка $BUILD)" &&
-    sums_ok "$REL" "$APP_ZIP" "$DSYMS_ZIP"'
+    sums_ok "$REL" "$APP_ZIP" "$DMG"'
 new_root selftest-fails
 STUB_SELFTEST_FAIL=1 br --test
 check "--test: failing self-checks stop it before the build" \
@@ -737,51 +935,23 @@ new_root helper-x86_64
 STUB_HELPER_ARCHS=x86_64 br
 refused "a helper without arm64 is refused" \
   "в Contents/MacOS/thermik-helper нет архитектуры arm64 (есть: x86_64), а релиз — универсальная сборка (arm64 x86_64)."
-new_root no-app-dsym
-STUB_DSYM=missing-app br
-refused "a missing Thermik.app.dSYM is refused" "нет Thermik.app.dSYM рядом с приложением: символы для отчётов о сбоях не собраны."
-new_root no-helper-dsym
-STUB_DSYM=missing-helper br
-refused "a missing thermik-helper.dSYM is refused" \
-  "нет thermik-helper.dSYM рядом с приложением: символы для отчётов о сбоях не собраны."
-new_root stale-app-dsym
-STUB_DSYM=stale-app br
-refused "a Thermik.app.dSYM of another build (other UUIDs) is refused" \
-  "UUID в Thermik.app.dSYM не совпадают с Contents/MacOS/Thermik: символы не от этой сборки."
-new_root stale-helper-dsym
-STUB_DSYM=stale-helper br
-refused "a thermik-helper.dSYM of another build is refused" \
-  "UUID в thermik-helper.dSYM не совпадают с Contents/MacOS/thermik-helper: символы не от этой сборки."
-new_root thin-helper-dsym
-STUB_DSYM=thin-helper br
-refused "a thermik-helper.dSYM without one of the helper's architectures is refused" \
-  "UUID в thermik-helper.dSYM не совпадают с Contents/MacOS/thermik-helper: символы не от этой сборки."
-# What dsymutil makes of a binary the last build already stripped: the right UUIDs, no debug information
-new_root nodebug-app-dsym
-STUB_DSYM=nodebug-app br
-refused "a Thermik.app.dSYM without debug information is refused" \
-  "в Thermik.app.dSYM нет отладочной информации для arm64: dsymutil прочитал уже урезанный бинарник?"
-new_root nodebug-helper-dsym
-STUB_DSYM=nodebug-helper br
-refused "a thermik-helper.dSYM without debug information is refused" \
-  "в thermik-helper.dSYM нет отладочной информации для arm64: dsymutil прочитал уже урезанный бинарник?"
 new_root bad-signature
 STUB_SIGN=broken br
 refused "an app that codesign --verify does not accept is refused" "codesign не принял подпись $APP."
 check "...with codesign's own error" 'has "$APP: a sealed resource is missing or invalid" && ! logged "codesign -dvv $APP"'
 
-# --- the app as unzipped from Thermik-X.Y.Z.zip: refused without SHA256SUMS
+# --- the app as unzipped from Thermik-X.Y.Z.zip: refused without Thermik-X.Y.Z.sha256
 new_root lossy-zip
 STUB_DITTO=lossy br
 check "an archive whose app fails codesign --verify, while the built app passes, is refused" \
   '[ $RC = 1 ] && line "Ошибка: Thermik.app из $APP_ZIP не проходит codesign --verify --deep --strict." &&
     logged "codesign --verify --deep --strict $APP" && logged_like "codesign --verify --deep --strict $TMPDIR/*/Thermik.app" &&
-    has "Thermik.app: a sealed resource is missing or invalid" && ! has "Релиз $V" && [ ! -e "$REL/SHA256SUMS" ] && no_temp'
+    has "Thermik.app: a sealed resource is missing or invalid" && ! has "Релиз $V" && [ ! -e "$REL/$SUMS" ] && no_temp'
 new_root other-version-zip
 STUB_DITTO=otherversion br
 check "an archive whose app passes codesign --verify but is another version is refused" \
   '[ $RC = 1 ] && line "Ошибка: у Thermik.app из $APP_ZIP не версия $V." && [ "$(grep -c "^codesign --verify" "$STUB_LOG")" = 2 ] &&
-    ! has "Релиз $V" && [ ! -e "$REL/SHA256SUMS" ] && no_temp'
+    ! has "Релиз $V" && [ ! -e "$REL/$SUMS" ] && no_temp'
 # TOP: what the script's ls prints for a top level of Thermik.app and __MACOSX, in its order
 mkdir -p "$WORK/top/Thermik.app" "$WORK/top/__MACOSX"
 # shellcheck disable=SC2012 # plain names, in the order the script's ls gives them
@@ -789,22 +959,112 @@ TOP="$(ls -A "$WORK/top" | tr '\n' ' ')"
 new_root macosx-zip
 STUB_DITTO=macosx br
 check "an archive with more than Thermik.app at the top is refused" \
-  '[ $RC = 1 ] && line "Ошибка: в $APP_ZIP наверху «${TOP}», а должно быть только Thermik.app." && ! has "Релиз $V" && [ ! -e "$REL/SHA256SUMS" ] && no_temp'
+  '[ $RC = 1 ] && line "Ошибка: в $APP_ZIP наверху «${TOP}», а должно быть только Thermik.app." && ! has "Релиз $V" && [ ! -e "$REL/$SUMS" ] && no_temp'
 new_root parentless-zip
 STUB_DITTO=noparent br
 check "an archive without Thermik.app at the top is refused" \
-  '[ $RC = 1 ] && line "Ошибка: в $APP_ZIP наверху «Contents », а должно быть только Thermik.app." && ! has "Релиз $V" && [ ! -e "$REL/SHA256SUMS" ] && no_temp'
+  '[ $RC = 1 ] && line "Ошибка: в $APP_ZIP наверху «Contents », а должно быть только Thermik.app." && ! has "Релиз $V" && [ ! -e "$REL/$SUMS" ] && no_temp'
+
+# --- the disk image, wrong: refused without Thermik-X.Y.Z.sha256, and never left attached
+new_root dmg-create-fails
+STUB_DMG_FAIL=create br
+refused_late "a disk image diskutil fails to create is refused" "не удалось создать $DMG."
+check "...with diskutil's output, before anything is verified or attached" \
+  'has "[5 % completed]" && has "Error: No space left on device" && ! ran hdiutil && ! ran "diskutil image attach"'
+STUB_DMG_FAIL=create br_stderr
+check "...on stderr" \
+  '[ $RC = 1 ] && line "Ошибка: не удалось создать $DMG." && has "[5 % completed]" && has "Error: No space left on device" &&
+    ! has "== Архив и образ диска"'
+new_root dmg-create-fails-hdiutil
+STUB_OLD_MACOS=1 STUB_DMG_FAIL=create br
+refused_late "...and so is one hdiutil fails to create" "не удалось создать $DMG."
+check "...with hdiutil's error" 'has "hdiutil: create failed - No space left on device" && ! ran "hdiutil verify"'
+new_root dmg-corrupt
+STUB_DMG=corrupt br
+refused_late "a disk image hdiutil verify does not take is refused" "hdiutil verify не принял $DMG."
+check "...with hdiutil's error, before it is attached" \
+  'logged "hdiutil verify $REL/$DMG" && has "hdiutil: verify failed - image not recognized" && ! ran "diskutil image attach"'
+new_root dmg-attach-fails
+STUB_DMG_FAIL=attach br
+refused_late "a disk image diskutil fails to attach is refused" "не удалось подключить $DMG."
+check "...with diskutil's error, before anything on it is checked" \
+  'has "Error: no mountable file systems" && ! logged_like "codesign --verify --deep --strict $TMPDIR/*/mnt/Thermik.app"'
+new_root dmg-attach-fails-hdiutil
+STUB_OLD_MACOS=1 STUB_DMG_FAIL=attach br
+refused_late "...and so is one hdiutil fails to attach" "не удалось подключить $DMG."
+check "...with hdiutil's error" 'has "hdiutil: attach failed - no mountable file systems"'
+ONLY="а должны быть только Thermik.app и ссылка Applications."
+new_root dmg-nolink
+STUB_DMG=nolink br
+refused_late "a disk image without the link Applications is refused, and detached" "на $DMG наверху «Thermik.app », $ONLY"
+check "...by diskutil eject on the way out" 'logged_like "diskutil eject $TMPDIR/*/mnt" && ! ran "hdiutil detach"'
+new_root dmg-nested
+STUB_DMG=nested br
+refused_late "a disk image with the staged folder itself at the top is refused" "на $DMG наверху «dmg », $ONLY"
+new_root dmg-extra
+STUB_DMG=extra br
+refused_late "a disk image with more than Thermik.app and Applications at the top is refused" \
+  "на $DMG наверху «Applications Thermik.app Thermik.app.dSYM », $ONLY"
+new_root dmg-hidden
+STUB_DMG=hidden br
+check "a disk image whose volume also has hidden files (.fseventsd, .DS_Store) is fine" \
+  '[ $RC = 0 ] && sums_ok "$REL" "$APP_ZIP" "$DMG" && ends "$(summary "$REL" "$ADHOC")" && unmounted && no_temp'
+new_root dmg-copy
+STUB_DMG=copy br
+refused_late "a disk image whose Applications is a folder, not a link, is refused" "Applications на $DMG — не ссылка на /Applications."
+new_root dmg-elsewhere
+STUB_DMG=elsewhere br
+refused_late "a disk image whose Applications links elsewhere (/System/Applications) is refused" \
+  "Applications на $DMG — не ссылка на /Applications."
+new_root dmg-lossy
+STUB_DMG=lossy br
+refused_late "a disk image whose app fails codesign --verify, while the built app passes, is refused" \
+  "Thermik.app с $DMG не проходит codesign --verify --deep --strict."
+check "...with codesign's own error" 'has "/mnt/Thermik.app: a sealed resource is missing or invalid"'
+new_root dmg-lossy-hdiutil
+STUB_OLD_MACOS=1 STUB_DMG=lossy br
+refused_late "...also with hdiutil" "Thermik.app с $DMG не проходит codesign --verify --deep --strict."
+check "...which detaches it on the way out" 'logged_like "hdiutil detach $TMPDIR/*/mnt" && ! ran "diskutil eject"'
+new_root dmg-other-version
+STUB_DMG=otherversion br
+refused_late "a disk image whose app passes codesign --verify but is another version is refused" \
+  "у Thermik.app с $DMG не версия $V."
+check "...after the signatures of the app as built, unzipped and on the image" '[ "$(grep -c "^codesign --verify" "$STUB_LOG")" = 3 ]'
+new_root dmg-detach-busy
+STUB_DMG_FAIL=detach-once br
+check "a disk image still busy for a moment is ejected on the second try, 2 s later, and the release is built" \
+  '[ $RC = 0 ] && [ "$(grep -c "^diskutil eject $TMPDIR/" "$STUB_LOG")" = 2 ] && [ "$(grep -c "^sleep" "$STUB_LOG")" = 1 ] &&
+    logged "sleep 2" && ! ran "diskutil eject force" && ! has "Resource busy" && ends "$(summary "$REL" "$ADHOC")" &&
+    unmounted && no_temp'
+new_root dmg-detach-forced
+STUB_OLD_MACOS=1 STUB_DMG_FAIL=detach br
+check "...one hdiutil never detaches is detached with -force after four tries, 2 s apart" \
+  '[ $RC = 0 ] && [ "$(grep -c "^hdiutil detach $TMPDIR/" "$STUB_LOG")" = 4 ] &&
+    [ "$(grep -c "^hdiutil detach -force $TMPDIR/" "$STUB_LOG")" = 1 ] && [ "$(grep -cx "sleep 2" "$STUB_LOG")" = 3 ] &&
+    ! has "Resource busy" && ends "$(summary "$REL" "$ADHOC")" && unmounted && no_temp'
+new_root dmg-detach-stuck
+STUB_DMG_FAIL=detach-force br
+KEPT="$(cd "$TMPDIR" && ls -d thermik-release.* 2>/dev/null)"
+check "...and one not even diskutil eject force detaches is refused: the way out tries both once more, quietly, and keeps the temp dir the image is mounted in" \
+  '[ $RC = 1 ] && line_like "Ошибка: не удалось отключить $DMG от $TMPDIR/thermik-release.*/mnt." &&
+    [ "$(grep -c "^Error: Resource busy" <<<"$OUT")" = 1 ] && [ "$(grep -c "^diskutil eject $TMPDIR/" "$STUB_LOG")" = 5 ] &&
+    [ "$(grep -c "^diskutil eject force $TMPDIR/" "$STUB_LOG")" = 2 ] &&
+    line "Образ диска остался подключён к $TMPDIR/$KEPT/mnt: отключите его и удалите $TMPDIR/$KEPT." &&
+    ! has "Релиз $V" && [ ! -e "$REL/$SUMS" ] && ! unmounted && [ -d "$TMPDIR/$KEPT/mnt/Thermik.app" ]'
+# the image left "mounted" and its temp dir go before the next tests
+[ -z "$KEPT" ] || rm -rf "$WORK/tmp/$KEPT"
+rm -f "$STUB_MOUNTS"
 
 # --- release_assets naming files the script does not build (the fake tree's version.sh, patched)
 new_root extra-assets
-awk '{ if ($0 == "  echo SHA256SUMS") { print "  echo \"Thermik-$1.dmg\""; print "  echo \"Thermik-$1.pkg\"" } print }' \
+awk '{ if ($0 == "  echo \"Thermik-$1.sha256\"") { print "  echo \"Thermik-$1-dSYMs.zip\""; print "  echo \"Thermik-$1.pkg\"" } print }' \
   "$TREE/scripts/lib/version.sh" >"$ROOT/scripts/lib/version.sh"
 PATCHED="$("$BASH_BIN" -c '. "$0"; release_assets "$1" | tr "\n" " "' "$ROOT/scripts/lib/version.sh" "$V")"
 br
-check "release_assets naming files the script does not build is refused, without SHA256SUMS" \
-  '[ "$PATCHED" = "$APP_ZIP $DSYMS_ZIP Thermik-$V.dmg Thermik-$V.pkg SHA256SUMS " ] && [ $RC = 1 ] &&
-    line "Ошибка: не собраны: Thermik-$V.dmg Thermik-$V.pkg (их требует release_assets в scripts/lib/version.sh)." &&
-    ! has "Релиз $V" && [ ! -e "$REL/SHA256SUMS" ] && no_temp'
+check "release_assets naming files the script does not build is refused, without $SUMS" \
+  '[ "$PATCHED" = "$APP_ZIP $DMG Thermik-$V-dSYMs.zip Thermik-$V.pkg $SUMS " ] && [ $RC = 1 ] &&
+    line "Ошибка: не собраны: Thermik-$V-dSYMs.zip Thermik-$V.pkg (их требует release_assets в scripts/lib/version.sh)." &&
+    ! has "Релиз $V" && [ ! -e "$REL/$SUMS" ] && unmounted && no_temp'
 
 # --- under a UTF-8 locale, as in people's terminals and on GitHub's macOS runners, whatever the caller's: bash 3.2 on
 # macOS reads the first byte of a "«" or "»" right after $name as part of the name ("unbound variable" under set -u)
@@ -812,7 +1072,7 @@ UTF8="$(locale -a 2>/dev/null | awk 'tolower($0) ~ /^(en_us|c)\.utf-?8$/ && u ==
 if [ -n "$UTF8" ]; then
   new_root utf8-main
   LC_ALL=$UTF8 br
-  check "under $UTF8: a release build" '[ $RC = 0 ] && sums_ok "$REL" "$APP_ZIP" "$DSYMS_ZIP" && ends "$(summary "$REL" "$ADHOC")"'
+  check "under $UTF8: a release build" '[ $RC = 0 ] && sums_ok "$REL" "$APP_ZIP" "$DMG" && ends "$(summary "$REL" "$ADHOC")"'
   new_root utf8-version
   xcconfig "MARKETING_VERSION = 1.2" "CURRENT_PROJECT_VERSION = $BUILD" >"$ROOT/Config/Shared.xcconfig"
   LC_ALL=$UTF8 br
@@ -830,7 +1090,15 @@ if [ -n "$UTF8" ]; then
   new_root utf8-zip
   LC_ALL=$UTF8 STUB_DITTO=noparent br
   check "under $UTF8: an archive without Thermik.app at the top is refused with its message" \
-    '[ $RC = 1 ] && line "Ошибка: в $APP_ZIP наверху «Contents », а должно быть только Thermik.app." && [ ! -e "$REL/SHA256SUMS" ] && no_temp'
+    '[ $RC = 1 ] && line "Ошибка: в $APP_ZIP наверху «Contents », а должно быть только Thermik.app." && [ ! -e "$REL/$SUMS" ] && no_temp'
+  new_root utf8-dmg
+  LC_ALL=$UTF8 STUB_DMG=nested br
+  refused_late "under $UTF8: a disk image with the staged folder at the top is refused with its message" \
+    "на $DMG наверху «dmg », $ONLY"
+  new_root utf8-dmg-link
+  LC_ALL=$UTF8 STUB_DMG=copy br
+  refused_late "under $UTF8: a disk image whose Applications is no link is refused with its message" \
+    "Applications на $DMG — не ссылка на /Applications."
 else
   echo "ok the release build under a UTF-8 locale # SKIP no UTF-8 locale in locale -a"
 fi

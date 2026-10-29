@@ -23,7 +23,8 @@ scripts/lib/build.sh Debug     # l10n merge → xcodegen generate → xcodebuild
 
 The app is built at `build/DerivedData/Build/Products/Debug/Thermik.app`. `scripts/lib/build.sh Release` builds
 the Release configuration (`…/Products/Release/Thermik.app`). Release binaries are optimized for size (`-Osize`, also
-for the package's libraries) and stripped; their symbols are in the `.dSYM` bundles next to the app, for crash reports.
+for the package's libraries) and stripped; their symbols are in the `.dSYM` bundles next to the app, for crash reports
+(releases do not ship them).
 
 `Thermik.xcodeproj` is generated from `project.yml` and is not committed. Never edit it by hand, and do not let
 Xcode "upgrade" it. Change `project.yml` and run `xcodegen generate` (or `scripts/lib/build.sh`) instead. Other
@@ -220,11 +221,12 @@ The version is `MARKETING_VERSION` in `Config/Shared.xcconfig`: X.Y.Z without "v
   file. It never pushes and never tags.
 - **Publishing:** every push to `master` runs `.github/workflows/release.yml`: the whole CI, and, when the version
   has no release yet, the GitHub release "Thermik X.Y.Z", published as the latest release with the tag `X.Y.Z` on the
-  pushed commit. It holds the files of the CI's release build: `Thermik-X.Y.Z.zip` (the universal app, ad-hoc signed,
-  not notarized), `Thermik-X.Y.Z-dSYMs.zip` (the symbols for crash reports) and `SHA256SUMS`; its notes list the
-  commit subjects since the previous release and how to install. A push whose version is already released only runs
-  the checks. A version that has no tag is released by the next push to `master` that carries it, so the first push
-  of the repository to GitHub releases the version it has. One release run goes at a time: a newer push replaces a run
+  pushed commit. It holds the files of the CI's release build: the universal app, ad-hoc signed and not notarized, as
+  `Thermik-X.Y.Z.zip` and on the disk image `Thermik-X.Y.Z.dmg` (next to a link to Applications), and
+  `Thermik-X.Y.Z.sha256`, the checksums of both; its notes list the commit subjects since the previous release and
+  how to install. A push whose version is already released only runs the checks. A version that has no tag is
+  released by the next push to `master` that carries it, so the first push of the repository to GitHub releases the
+  version it has. One release run goes at a time: a newer push replaces a run
   that is still waiting, and its own run releases the version. The workflow reads the tags of `origin` without
   credentials, so the repository must be public.
 - **CI:** other branches and pull requests run `.github/workflows/ci.yml`: actionlint, shellcheck and the release
@@ -234,10 +236,9 @@ The version is `MARKETING_VERSION` in `Config/Shared.xcconfig`: X.Y.Z without "v
   locally.
 - **Local release build:** `scripts/build-release.sh` builds the same files into `build/release/`, from empty
   Release products as on GitHub. `--test` runs the self-checks first, `--out DIR` also copies the files to `DIR`. It
-  checks the version and the build number of the built app, both architectures, the dSYMs (the binaries' UUIDs and
-  debug information for both architectures) and the signature, then the signature and the version again in the app
-  unzipped from `Thermik-X.Y.Z.zip`. With `Config/Signing.local.xcconfig` the app is signed with your Team ID
-  instead of ad-hoc.
+  checks the version and the build number of the built app, both architectures and the signature, then the signature
+  and the version again in the app unzipped from `Thermik-X.Y.Z.zip` and on the mounted `Thermik-X.Y.Z.dmg`. With
+  `Config/Signing.local.xcconfig` the app is signed with your Team ID instead of ad-hoc.
 
 Releases need no secrets. Without a Developer ID they are ad-hoc signed, so macOS blocks the first launch of a
 downloaded copy until it is allowed in System Settings › Privacy & Security; the release notes say how.

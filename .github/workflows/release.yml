@@ -3,7 +3,7 @@ name: Release
 # Releases Thermik from master. Every push to master runs the whole CI first (ci.yml through workflow_call; ci.yml
 # skips its own run of that push, so the checks run once), and the CI's release build (scripts/build-release.sh, what
 # a local build runs) is what gets published: when the version in Config/Shared.xcconfig (MARKETING_VERSION) has no
-# release yet, Thermik-<version>.zip, Thermik-<version>-dSYMs.zip and SHA256SUMS become GitHub release
+# release yet, Thermik-<version>.zip, Thermik-<version>.dmg and Thermik-<version>.sha256 become GitHub release
 # "Thermik <version>" with the plain tag <version> (no "v") on the built commit: a draft first, every upload checked,
 # then published as the latest release.
 # A push that does not bump the version is tested and ends with a notice. Bump it with scripts/make-release.sh,
@@ -177,7 +177,7 @@ jobs:
             echo "::error::The release build holds ${actual//$'\n'/ }, not ${expected//$'\n'/ }."
             exit 1
           fi
-          (cd "$RUNNER_TEMP/release-assets" && sha256sum -c SHA256SUMS)
+          (cd "$RUNNER_TEMP/release-assets" && sha256sum -c "Thermik-$VERSION.sha256")
 
       - name: Write release notes
         run: |

@@ -109,9 +109,10 @@ adjust, and there is a colour-blind-friendly scale.
 
 ## Getting Thermik
 
-Thermik runs on macOS 14 or later. Download `Thermik-<version>.zip` from the [latest release](../../releases/latest),
-unzip it and move Thermik.app to Applications. The app is ad-hoc signed, not notarized, so macOS blocks its first
-launch: open it once, then allow it in System Settings › Privacy & Security › Open Anyway.
+Thermik runs on macOS 14 or later. Download `Thermik-<version>.dmg` from the [latest release](../../releases/latest),
+open it and drag Thermik.app to Applications (or take `Thermik-<version>.zip`, unzip it and move Thermik.app there).
+The app is ad-hoc signed, not notarized, so macOS blocks its first launch: open it once, then allow it in System
+Settings › Privacy & Security › Open Anyway.
 
 To build it from source instead, you need Xcode 27.1 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 2.46.0 or later.

@@ -312,8 +312,8 @@ check "app_version_set: a missing file fails and is not created" '[ $RC != 0 ] &
 
 # --- release_assets: the files of release X.Y.Z, in upload order; RELEASE_ARCHS: the architectures of the app
 fn '' release_assets 1.2.3
-is "release_assets 1.2.3: the zipped app, its zipped dSYMs and SHA256SUMS" 0 \
-  "$(lines Thermik-1.2.3.zip Thermik-1.2.3-dSYMs.zip SHA256SUMS)"
+is "release_assets 1.2.3: the zipped app, the app on a disk image and their sums" 0 \
+  "$(lines Thermik-1.2.3.zip Thermik-1.2.3.dmg Thermik-1.2.3.sha256)"
 fn '' eval 'printf "%s" "$RELEASE_ARCHS"'
 is "RELEASE_ARCHS: the universal app, arm64 x86_64" 0 'arm64 x86_64'
 
