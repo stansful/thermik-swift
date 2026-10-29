@@ -135,26 +135,31 @@ private struct SensorInspectorContent: View {
     /// Die sensors only (the ones "Hottest" is chosen from). When Settings › Sensors' blocks already exclude it (its
     /// block, or any block for a die-wide maximum: SensorStore.excludingBlocks), the sensor's own switch would change
     /// nothing visible, so the inspector says which block and offers to switch it (all of them for a die-wide
-    /// maximum) back on. The caption names the block: it can differ from "Hardware block" above (cluster summaries).
+    /// maximum) back on. The caption names the block when there is one, as the Sensors context menu does: it can
+    /// differ from "Hardware block" above (cluster summaries). The button leaves the sensor's own flag alone, so the
+    /// caption also says when that flag keeps it out.
     @ViewBuilder private var hottestAction: some View {
         let blocks = SensorStore.excludingBlocks(sensor.sensor, settings.hottestExcludedGroups)
         if SensorStore.isHottestCandidate(sensor.sensor) {
             if !blocks.isEmpty {
-                let dieWide = SensorStore.isDieWideMaximum(sensor.sensor)
-                Group {
-                    if dieWide {
-                        Text("It spans every hardware block, so it is left out of Hottest while any block is off in Settings › Sensors.")
-                    } else {
+                let single = blocks.count == 1 ? blocks.first : nil
+                VStack(alignment: .leading, spacing: 2) {
+                    if !SensorStore.isDieWideMaximum(sensor.sensor) {
                         Text("It goes with the “\(SensorStore.hottestBlock(sensor.sensor).title)” block, which is excluded from Hottest in Settings › Sensors.")
+                    } else if let single {
+                        Text("It spans every hardware block, so it is left out of Hottest while the “\(single.title)” block is off in Settings › Sensors.")
+                    } else {
+                        Text("It spans every hardware block, so it is left out of Hottest while any block is off in Settings › Sensors.")
                     }
+                    if sensor.isExcludedFromHottest { Text("It is also excluded on its own.") }
                 }
                 .font(ThermikFont.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 Button { settings.hottestExcludedGroups.subtract(blocks) } label: {
-                    dieWide ? Text("Include every block") : Text("Include this block")
+                    single != nil ? Text("Include this block") : Text("Include every block")
                 }
-                .help(dieWide ? Text("Switches every block back on in Settings › Sensors.")
-                              : Text("Switches the block back on in Settings › Sensors: all of its sensors count in Hottest again."))
+                .help(single != nil ? Text("Switches the block back on in Settings › Sensors. Sensors excluded on their own stay out of Hottest.")
+                                    : Text("Switches every block back on in Settings › Sensors."))
             } else {
                 Button { sensors.setExcludedFromHottest(sensor.id, !sensor.isExcludedFromHottest) } label: {
                     sensor.isExcludedFromHottest ? Text("Include in Hottest") : Text("Exclude from Hottest")

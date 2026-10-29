@@ -37,15 +37,15 @@
   },
   "Include this block": {
     "ru": "Учитывать этот блок",
-    "comment": "Sensors page inspector: button under the caption that names the sensor’s excluded hardware block; switches that block back on for the “Hottest” value (keep short, the inspector is narrow)"
+    "comment": "Sensors page inspector: button under the caption that names the excluded hardware block (the sensor’s own, or for a die-wide maximum the one block that is off); switches that block back on for the “Hottest” value (keep short, the inspector is narrow)"
   },
-  "Switches the block back on in Settings › Sensors: all of its sensors count in Hottest again.": {
-    "ru": "Снова включает блок (Настройки › Датчики): все его датчики опять учитываются в «Самом горячем».",
-    "comment": "Sensors page inspector: tooltip of the “Include this block” button"
+  "Switches the block back on in Settings › Sensors. Sensors excluded on their own stay out of Hottest.": {
+    "ru": "Снова включает блок (Настройки › Датчики). Датчики, исключённые по отдельности, по-прежнему не учитываются в «Самом горячем».",
+    "comment": "Sensors page inspector: tooltip of the “Include this block” button; the button does not touch sensors excluded one by one"
   },
   "Include every block": {
     "ru": "Учитывать все блоки",
-    "comment": "Sensors page inspector: button shown for a die-wide maximum (e.g. SoC die hotspot) while any hardware block is switched off; switches every block back on for the “Hottest” value (keep short, the inspector is narrow)"
+    "comment": "Sensors page inspector: button shown for a die-wide maximum (e.g. SoC die hotspot) while several hardware blocks are switched off; switches every block back on for the “Hottest” value (keep short, the inspector is narrow)"
   },
   "Switches every block back on in Settings › Sensors.": {
     "ru": "Снова включает все блоки (Настройки › Датчики).",
@@ -53,10 +53,18 @@
   },
   "Include the “%@” block in Hottest": {
     "ru": "Учитывать блок «%@» в «Самом горячем»",
-    "comment": "Sensors page table context menu, shown instead of the Exclude/Include item when the sensor’s hardware block is switched off in Settings › Sensors; %@ = the block’s name (e.g. “CPU performance cores”); switches it back on"
+    "comment": "Sensors page table context menu, shown instead of the Exclude/Include item when a hardware block switched off in Settings › Sensors leaves the sensor out (its own block, or for a die-wide maximum the one block that is off); %@ = the block’s name (e.g. “CPU performance cores”); switches it back on"
   },
   "Include every block in Hottest": {
     "ru": "Учитывать все блоки в «Самом горячем»",
     "comment": "Sensors page table context menu, for a die-wide maximum (e.g. SoC die hotspot) while several hardware blocks are switched off in Settings › Sensors; switches them all back on"
+  },
+  "It spans every hardware block, so it is left out of Hottest while the “%@” block is off in Settings › Sensors.": {
+    "ru": "Он охватывает все аппаратные блоки, поэтому не учитывается в «Самом горячем», пока в Настройках › Датчики выключен блок «%@».",
+    "comment": "Sensors page inspector, shown above the “Include this block” button for a die-wide maximum (e.g. SoC die hotspot) while exactly one hardware block is switched off; %@ = that block’s name"
+  },
+  "It is also excluded on its own.": {
+    "ru": "Кроме того, датчик исключён и по отдельности.",
+    "comment": "Sensors page inspector, second caption line under the excluded-block caption when the sensor is also excluded with its own “Exclude from Hottest” switch, which the block button does not undo"
   }
 }
