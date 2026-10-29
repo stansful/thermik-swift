@@ -2,11 +2,10 @@
 # workflow: release.yml calls it (workflow_call) before it publishes anything, so the checks run once per push and no
 # skipped CI run is left behind. No tests run here: scripts/tests/run.sh and scripts/lib/selftest.sh are local only.
 #   scripts        actionlint (the workflows) and shellcheck (scripts/, .github/scripts/)
-#   debug         the Debug build (scripts/lib/build.sh Debug), which must leave every tracked file as committed (it
-#                  regenerates App/Resources/Localizable.xcstrings)
 #   release-build  scripts/build-release.sh: the release files as release.yml publishes them, uploaded as the
-#                  artifact release-<version> (release.yml's publish job takes them from there)
-# The macOS jobs run on GitHub's xcode-27 runners with Xcode 27.1 (.github/actions/xcode).
+#                  artifact release-<version> (release.yml's publish job takes them from there). The build must leave
+#                  every tracked file as committed (it regenerates App/Resources/Localizable.xcstrings)
+# The release build runs on GitHub's xcode-27 runners with Xcode 27.1 (.github/actions/xcode).
 name: CI
 
 on:
@@ -57,33 +56,6 @@ jobs:
           docker run --rm -v "$PWD:/repo" -w /repo --entrypoint shellcheck "$ACTIONLINT_IMAGE" -x -f gcc \
             scripts/*.sh scripts/lib/*.sh scripts/tests/*.sh .github/scripts/*.sh
 
-  debug:
-    name: Debug build
-    runs-on: xcode-27
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/xcode
-      - name: scripts/lib/build.sh Debug
-        run: scripts/lib/build.sh Debug
-      - name: The build changed no tracked file
-        run: |
-          changed="$(git status --porcelain --untracked-files=no)"
-          if [[ -n "$changed" ]]; then
-            git --no-pager diff --stat
-            echo "::error title=The build changed tracked files::${changed//$'\n'/; }. scripts/lib/build.sh regenerates App/Resources/Localizable.xcstrings from App/Resources/L10n/: run it and commit the result."
-            exit 1
-          fi
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ failure() }}
-        with:
-          name: debug-build-log
-          path: build/xcodebuild-Debug.log
-          if-no-files-found: ignore
-          retention-days: 7
-
   release-build:
     name: Release build
     runs-on: xcode-27
@@ -95,6 +67,14 @@ jobs:
       - uses: ./.github/actions/xcode
       - name: scripts/build-release.sh
         run: scripts/build-release.sh --out "$RUNNER_TEMP/release"
+      - name: The build changed no tracked file
+        run: |
+          changed="$(git status --porcelain --untracked-files=no)"
+          if [[ -n "$changed" ]]; then
+            git --no-pager diff --stat
+            echo "::error title=The build changed tracked files::${changed//$'\n'/; }. scripts/lib/build.sh regenerates App/Resources/Localizable.xcstrings from App/Resources/L10n/: run it and commit the result."
+            exit 1
+          fi
       - name: Read the version
         id: version
         run: |

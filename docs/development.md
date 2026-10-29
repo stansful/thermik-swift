@@ -227,11 +227,11 @@ The version is `MARKETING_VERSION` in `Config/Shared.xcconfig`: X.Y.Z without "v
   of the repository to GitHub releases the version it has. One release run goes at a time: a newer push replaces a run
   that is still waiting, and its own run releases the version. The workflow reads the tags of `origin` without
   credentials, so the repository must be public.
-- **CI:** other branches and pull requests run `.github/workflows/ci.yml`: actionlint, shellcheck, the Debug build,
-  which must leave every tracked file as committed (it regenerates `Localizable.xcstrings`), and the release build,
-  kept as the run's `release-X.Y.Z` artifact. The macOS jobs run on GitHub's `xcode-27` runners with Xcode 27.1. CI
-  runs no tests: run the release scripts' tests (`scripts/tests/run.sh`) and the self-checks
-  (`scripts/lib/selftest.sh`) locally.
+- **CI:** other branches and pull requests run `.github/workflows/ci.yml`: actionlint, shellcheck and the release
+  build, which must leave every tracked file as committed (it regenerates `Localizable.xcstrings`) and is kept as the
+  run's `release-X.Y.Z` artifact. The release build runs on GitHub's `xcode-27` runners with Xcode 27.1. CI runs no
+  tests: run the release scripts' tests (`scripts/tests/run.sh`) and the self-checks (`scripts/lib/selftest.sh`)
+  locally.
 - **Local release build:** `scripts/build-release.sh` builds the same files into `build/release/`, from empty
   Release products as on GitHub. `--test` runs the self-checks first, `--out DIR` also copies the files to `DIR`. It
   checks the version and the build number of the built app, both architectures, the dSYMs (the binaries' UUIDs and
