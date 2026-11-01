@@ -11,6 +11,7 @@ struct SensorsPage: View {
     @Bindable var model: MainWindowModel
     @Environment(SensorStore.self) private var sensors
     @Environment(SettingsStore.self) private var settings
+    @Environment(HistoryStore.self) private var history
     @State private var sortOrder: [SensorSortComparator] = []
     @State private var columns = TableColumnCustomization<LiveSensor>()
     @State private var renaming: LiveSensor?
@@ -39,6 +40,9 @@ struct SensorsPage: View {
         .searchable(text: $model.sensorSearch, placement: .toolbar, prompt: Text("Search sensors"))
         .inspector(isPresented: $model.isInspectorShown) {
             SensorInspector(model: model, onRename: beginRename)
+                .environment(sensors)
+                .environment(settings)
+                .environment(history)
                 .inspectorColumnWidth(min: 260, ideal: 310, max: 400)
         }
         .toolbar {
