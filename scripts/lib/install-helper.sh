@@ -19,7 +19,7 @@ export PATH
 
 LABEL="app.thermik.helper"
 APP_ID="app.thermik.Thermik"
-DST="/Library/PrivilegedHelperTools/$LABEL"
+DST="/Library/PrivilegedHelperTools/Thermik.helper"
 PLIST="/Library/LaunchDaemons/$LABEL.plist"
 SUPPORT="/Library/Application Support/Thermik"
 TRUST="$SUPPORT/trusted-clients.plist"
@@ -136,6 +136,9 @@ install -d -m 0755 -o root -g wheel /Library/PrivilegedHelperTools "$SUPPORT"
 T="$(mktemp /Library/PrivilegedHelperTools/.thermik-helper.XXXXXX)"
 trap 'rm -f "$T" "$SUPPORT/.plist.new" "$SUPPORT/.trust.new" "$SUPPORT/.icon.new"' EXIT
 cp -X "$SRC" "$T"
+if xattr -p com.apple.quarantine "$T" >/dev/null 2>&1; then
+    xattr -d com.apple.quarantine "$T"
+fi
 chown root:wheel "$T"
 chmod 0755 "$T"
 codesign --verify --strict -R "=$REQ" "$T"
@@ -162,6 +165,8 @@ chown root:wheel "$SUPPORT/.plist.new" "$SUPPORT/.trust.new"
 chmod 0644 "$SUPPORT/.plist.new" "$SUPPORT/.trust.new"
 mv -f "$SUPPORT/.trust.new" "$TRUST"
 mv -f "$SUPPORT/.plist.new" "$PLIST"
+rm -f "/Library/PrivilegedHelperTools/Thermik.helper.app"
+rm -f "/Library/PrivilegedHelperTools/$LABEL"
 launchctl enable "system/$LABEL" 2>/dev/null || true
 n=0
 until launchctl bootstrap system "$PLIST"; do

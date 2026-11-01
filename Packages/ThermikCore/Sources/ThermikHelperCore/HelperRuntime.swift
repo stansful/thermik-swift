@@ -28,7 +28,7 @@ public enum HelperRuntime {
         return (raw as NSString).resolvingSymlinksInPath
     }
 
-    /// `/Library/PrivilegedHelperTools/app.thermik.helper` → `.legacy`; inside `*.app/Contents/MacOS/` →
+    /// `/Library/PrivilegedHelperTools/Thermik.helper` → `.legacy`; inside `*.app/Contents/MacOS/` →
     /// `.appService`; anything else (a build directory, `swift run`) → `.development` (SPEC §2.6.5 step 2).
     public static func detectInstallKind(executablePath path: String = executablePath) -> HelperInstallKind {
         if path == ThermikHelper.Legacy.helperPath { return .legacy }

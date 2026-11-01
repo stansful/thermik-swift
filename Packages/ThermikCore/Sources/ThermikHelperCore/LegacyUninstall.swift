@@ -12,6 +12,8 @@ public enum LegacyUninstall {
         ThermikHelper.Legacy.trustFilePath,
         ThermikHelper.Legacy.supportDirectory,
         ThermikHelper.Legacy.helperPath,
+        ThermikHelper.Legacy.previousHelperPath,
+        ThermikHelper.Legacy.brokenHelperPath,
     ]
 
     /// Seconds between the XPC reply and `launchctl bootout` (the reply must reach the app first).

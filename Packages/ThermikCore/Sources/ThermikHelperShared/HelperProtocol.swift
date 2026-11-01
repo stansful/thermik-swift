@@ -26,7 +26,9 @@ public enum ThermikHelper {
 
     /// Legacy install (ad-hoc builds without a Team ID, HELP §4).
     public enum Legacy {
-        public static let helperPath = "/Library/PrivilegedHelperTools/\(label)"
+        public static let helperPath = "/Library/PrivilegedHelperTools/Thermik.helper"
+        public static let previousHelperPath = "/Library/PrivilegedHelperTools/\(label)"
+        public static let brokenHelperPath = "/Library/PrivilegedHelperTools/Thermik.helper.app"
         public static let plistPath = "/Library/LaunchDaemons/\(label).plist"
         public static let supportDirectory = "/Library/Application Support/Thermik"
         /// root:wheel 0644, written only by the admin-authorized installer: cdhashes of trusted app builds.

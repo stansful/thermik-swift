@@ -203,6 +203,9 @@ public enum LegacyHelperInstaller {
         T="$(/usr/bin/mktemp /Library/PrivilegedHelperTools/.thermik-helper.XXXXXX)"
         trap '/bin/rm -f "$T" "$SUPPORT/.plist.new" "$SUPPORT/.trust.new"' EXIT
         /bin/cp -X "$SRC" "$T"
+        if /usr/bin/xattr -p com.apple.quarantine "$T" >/dev/null 2>&1; then
+            /usr/bin/xattr -d com.apple.quarantine "$T"
+        fi
         /usr/sbin/chown root:wheel "$T"
         /bin/chmod 0755 "$T"
         /usr/bin/codesign --verify --strict -R \(sq("=" + plan.helperRequirement)) "$T"
@@ -214,6 +217,8 @@ public enum LegacyHelperInstaller {
         /bin/chmod 0644 "$SUPPORT/.plist.new" "$SUPPORT/.trust.new"
         /bin/mv -f "$SUPPORT/.trust.new" "$TRUST"
         /bin/mv -f "$SUPPORT/.plist.new" "$PLIST"
+        /bin/rm -f \(sq(L.previousHelperPath))
+        /bin/rm -f \(sq(L.brokenHelperPath))
         /bin/launchctl enable "system/$LABEL" 2>/dev/null || true
         n=0
         until /bin/launchctl bootstrap system "$PLIST"; do
@@ -232,7 +237,7 @@ public enum LegacyHelperInstaller {
         PATH=/usr/bin:/bin:/usr/sbin:/sbin
         export PATH
         /bin/launchctl bootout \(sq("system/" + ThermikHelper.label)) 2>/dev/null || true
-        /bin/rm -f \(sq(L.plistPath)) \(sq(L.helperPath)) \(sq(ThermikHelper.manualMarkerPath))
+        /bin/rm -f \(sq(L.plistPath)) \(sq(L.helperPath)) \(sq(L.previousHelperPath)) \(sq(L.brokenHelperPath)) \(sq(ThermikHelper.manualMarkerPath))
         /bin/rm -rf \(sq(L.supportDirectory))
         """
     }

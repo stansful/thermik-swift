@@ -101,7 +101,7 @@ public enum SMCClientInspector {
 
     /// Executable file names of Thermik's own helper: legacy install (`ThermikHelper.label`, ThermikHelperShared)
     /// and the copy embedded in the app bundle (SMAppService). ThermikSMC cannot import ThermikHelperShared.
-    static let ownHelperNames: Set<String> = ["app.thermik.helper", "thermik-helper"]
+    static let ownHelperNames: Set<String> = ["app.thermik.helper", "Thermik.helper", "Thermik.helper.app", "thermik-helper"]
 
     public static func openClients() -> [SMCClientInfo] {
         var result: [SMCClientInfo] = []

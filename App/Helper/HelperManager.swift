@@ -128,6 +128,9 @@ import ThermikHelperShared
             }
         case .legacy:
             guard FileManager.default.fileExists(atPath: ThermikHelper.Legacy.plistPath) else { return .notInstalled }
+            if !FileManager.default.fileExists(atPath: ThermikHelper.Legacy.helperPath) {
+                return .needsUpgrade(installed: LegacyHelperInstaller.installedHelperBuild(at: ThermikHelper.Legacy.previousHelperPath) ?? "?", bundled: bundledHelperBuild ?? "?")
+            }
             if await Self.legacyStatus() == .requiresApproval { return .requiresApproval }   // disabled in Login Items
             if let mine = ownIdentity?.cdhashHex {
                 let trusted = LegacyHelperInstaller.trustedClientCDHashes() ?? []
