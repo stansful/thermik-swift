@@ -348,20 +348,13 @@ Releases API without credentials or cookies. The **Download…** action opens th
 
 ## Legal and clean-room rules
 
-Thermik is an independent project. It is **not affiliated with, endorsed by or derived from Tunabelly Software or
-TG Pro**. TG Pro is a trademark of its owner and is mentioned only to describe interoperability (for example,
-Thermik notices when TG Pro is already controlling the fans and then does not fight it).
+Thermik is an independent project. When another fan-control helper is in control, Thermik does not interfere with it.
 
-Thermik is written clean-room, and contributions must keep it that way:
+Thermik is written clean-room, and contributions must keep it that way;
 
-- no code, binaries, resources, icons, strings or data from TG Pro or any other proprietary app may be used,
-  inspected or reverse-engineered (no `strings`, `nm`, `otool`, nib or `Assets.car` parsing of their binaries);
 - hardware facts come from Apple's public documentation, Thermik's own read-only measurements on real Macs, and
   permissively licensed (MIT, BSD, Apache) projects, with attribution in the code (see Settings › About);
 - GPL projects are used for facts only, never for code.
-
-`research/` and any `*.zip` are git-ignored: they hold local notes and proprietary material that must never be
-committed.
 
 ## License
 

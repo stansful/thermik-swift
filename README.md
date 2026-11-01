@@ -145,7 +145,6 @@ only when you check for updates or enable daily checks. Opening a release sends 
 
 ## Legal
 
-Thermik is an independent project. It is not affiliated with, endorsed by or derived from Tunabelly Software or
-TG Pro. It is written clean-room: no code or resources from any proprietary app were used.
+Thermik is an independent project. It is written clean-room: no code or resources from any proprietary app were used.
 
 [MIT](LICENSE) © 2026 Thermik contributors.
