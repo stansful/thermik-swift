@@ -1,0 +1,23 @@
+{
+  "Update checks are unavailable for this build.": "В этой сборке проверка обновлений недоступна.",
+  "Update checks are disabled in demo mode.": "В деморежиме проверка обновлений отключена.",
+  "Unknown local update test scenario.": "Неизвестный сценарий локальной проверки обновлений.",
+  "Automatically check for updates": "Автоматически проверять обновления",
+  "Check for Updates…": "Проверить обновления…",
+  "GitHub Releases": "Релизы на GitHub",
+  "Software Updates": "Обновления приложения",
+  "Last checked": "Последняя проверка",
+  "Checking for updates…": "Проверка обновлений…",
+  "Thermik is up to date": "Установлена актуальная версия Thermik",
+  "Thermik %@ is available": "Доступен Thermik %@",
+  "Download…": "Скачать…",
+  "Later": "Позже",
+  "Download the new version from GitHub Releases and replace Thermik in Applications.": "Скачайте новую версию с GitHub Releases и замените Thermik в папке «Программы».",
+  "Could not check for updates": "Не удалось проверить обновления",
+  "Could not connect to GitHub. Check your connection and try again.": "Не удалось подключиться к GitHub. Проверьте соединение и повторите попытку.",
+  "GitHub's request limit was reached. Try again later.": "Достигнут лимит запросов GitHub. Повторите попытку позже.",
+  "No published release was found on GitHub.": "На GitHub не найден опубликованный релиз.",
+  "GitHub returned an unexpected response. Try again later.": "GitHub вернул неожиданный ответ. Повторите попытку позже.",
+  "When enabled, Thermik checks GitHub Releases once a day. Download opens the release in your browser; install the new version manually. Sensor data and logs stay on your Mac.": "При включённой автопроверке Thermik раз в день проверяет релизы на GitHub. Кнопка «Скачать» открывает релиз в браузере; новую версию нужно установить вручную. Данные датчиков и журналы остаются на вашем Mac.",
+  "No telemetry. Thermik connects to GitHub only when checking for updates.": "Без телеметрии. Thermik обращается к GitHub только при проверке обновлений."
+}

@@ -6,9 +6,9 @@ import AppKit
 import ThermikCore
 
 @MainActor enum MainMenu {
-    static func make(router: AppRouter) -> NSMenu {
+    static func make(router: AppRouter, updater: AppUpdater) -> NSMenu {
         let main = NSMenu()
-        main.addItem(submenu(appMenu(router: router)))
+        main.addItem(submenu(appMenu(router: router, updater: updater)))
         main.addItem(submenu(editMenu()))
         main.addItem(submenu(viewMenu(router: router)))
         let window = windowMenu(router: router)
@@ -23,9 +23,11 @@ import ThermikCore
         return item
     }
 
-    private static func appMenu(router: AppRouter) -> NSMenu {
+    private static func appMenu(router: AppRouter, updater: AppUpdater) -> NSMenu {
         let app = NSMenu(title: "Thermik")
         app.addItem(withTitle: String(localized: "About Thermik"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let updates = app.addItem(withTitle: String(localized: "Check for Updates…"), action: #selector(AppUpdater.checkForUpdates(_:)), keyEquivalent: "")
+        updates.target = updater
         app.addItem(.separator())
         app.addItem(MenuAction(title: String(localized: "Settings…"), key: ",") { router.showSettings(nil) }.item)
         app.addItem(MenuAction(title: String(localized: "Welcome Guide…"), key: "") { router.showOnboarding() }.item)

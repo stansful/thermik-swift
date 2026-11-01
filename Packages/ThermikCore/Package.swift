@@ -18,6 +18,7 @@ let package = Package(
         .library(name: "ThermikSMCWriter", targets: ["ThermikSMCWriter"]),       // HELPER ONLY (SMC writes)
         .library(name: "ThermikHelperCore", targets: ["ThermikHelperCore"]),     // HELPER ONLY (XPC service, lease, peer validation)
         .library(name: "ThermikCore", targets: ["ThermikCore"]),                 // app only
+        .library(name: "ThermikUpdates", targets: ["ThermikUpdates"]),           // GitHub release checks only
         .executable(name: "thermik-probe", targets: ["ThermikProbe"]),           // manual verification CLI
     ],
     targets: [
@@ -42,6 +43,8 @@ let package = Package(
                 resources: [.process("Resources")],
                 swiftSettings: sizeOptimized,
                 linkerSettings: [.linkedFramework("IOKit"), .linkedFramework("AppKit")]),
+        .target(name: "ThermikUpdates", swiftSettings: sizeOptimized),
+        .testTarget(name: "ThermikUpdatesTests", dependencies: ["ThermikUpdates"]),
         .executableTarget(name: "ThermikProbe",
                           dependencies: ["ThermikCore", "ThermikSMC", "ThermikSMCWriter", "ThermikHelperShared", "ThermikHelperCore"]),
     ],

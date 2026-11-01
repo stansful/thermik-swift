@@ -46,7 +46,7 @@ targets:
             subpath: Contents/Library/LaunchDaemons
     dependencies:
       - package: ThermikCore
-        products: [ThermikCore, ThermikSMC, ThermikHelperShared]   # NOT ThermikSMCWriter (app has no SMC write path)
+        products: [ThermikCore, ThermikSMC, ThermikHelperShared, ThermikUpdates]   # NOT ThermikSMCWriter (app has no SMC write path)
       - target: ThermikHelper
         embed: true
         codeSign: true

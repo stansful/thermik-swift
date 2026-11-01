@@ -15,5 +15,6 @@ extension View {
             .environment(env.alerts)
             .environment(env.diagnostics)
             .environment(env.router)
+            .environment(env.updater)
     }
 }

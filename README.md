@@ -27,7 +27,7 @@
 
 Thermik is a free, open-source menu bar app for macOS. It shows every temperature sensor of your Mac, the fans,
 the battery and the system load, and it can take over the fans with a curve you draw yourself. No account, no
-telemetry, no network access.
+telemetry. Update checks are optional.
 
 ## What it can do
 
@@ -46,6 +46,8 @@ telemetry, no network access.
 - **Alerts and logs.** Your own notification rules (threshold, duration, repeat limit, optional "fans to Max"),
   an event log and an optional CSV log.
 - **Automation.** Shortcuts actions, `thermik://` links and global hotkeys ([details](docs/automation.md)).
+- **Updates.** Check GitHub Releases from the app, or enable a daily check. The download button opens the release
+  in your browser; install the downloaded app as usual.
 - English and Russian, °C and °F, Liquid Glass on macOS 26.
 
 ## A closer look
@@ -114,6 +116,9 @@ open it and drag Thermik.app to Applications (or take `Thermik-<version>.zip`, u
 The app is ad-hoc signed, not notarized, so macOS blocks its first launch: open it once, then allow it in System
 Settings › Privacy & Security › Open Anyway.
 
+Use **Thermik › Check for Updates…** or Settings › General / About to look for a newer release. Daily checks are
+off until you turn them on in Settings › General.
+
 To build it from source instead, you need Xcode 27.1 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 2.46.0 or later.
 
@@ -135,8 +140,8 @@ attached are very welcome.
 
 ## Privacy
 
-Thermik has no telemetry, no analytics and no network code at all. Sensor data, settings and logs stay on your
-Mac.
+Thermik has no telemetry or analytics. Sensor data, settings and logs stay on your Mac. The app contacts GitHub
+only when you check for updates or enable daily checks. Opening a release sends it to your browser.
 
 ## Legal
 

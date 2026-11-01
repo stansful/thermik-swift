@@ -45,7 +45,7 @@ import ThermikCore
         env.router.showMain = { [weak self] r in self?.windows.showMain(r) }
         env.router.showSettings = { [weak self] t in self?.windows.showSettings(t) }
         env.router.showOnboarding = { [weak self] in self?.windows.showOnboarding() }
-        NSApp.mainMenu = MainMenu.make(router: env.router)
+        NSApp.mainMenu = MainMenu.make(router: env.router, updater: env.updater)
         #if DEBUG
         installDebugMenu()
         #endif
@@ -80,6 +80,12 @@ import ThermikCore
             let urls = pendingURLs
             pendingURLs.removeAll()
             urls.forEach { urlRouter?.handle($0) }
+            env.updater.start()
+            #if DEBUG
+            if UserDefaults.standard.string(forKey: "ThermikUpdateFixture") != nil {
+                env.router.showSettings(.general)
+            }
+            #endif
         }
     }
 
@@ -126,6 +132,7 @@ import ThermikCore
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard env != nil, !isTerminating else { return .terminateNow }
         isTerminating = true
+        env.updater.stop()
         sampling?.stop()
         releaseFans()
         logging?.closeBlocking(timeout: 2)

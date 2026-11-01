@@ -125,6 +125,7 @@ because an ad-hoc hardened-runtime binary cannot load another ad-hoc image.
 | Product | Linked by | Role |
 |---|---|---|
 | `ThermikCore` | app | sensors, system data, fan engine, alerts, diagnostics, CSV logging, demo samplers |
+| `ThermikUpdates` | app | GitHub release checks, version comparison and HTTP caching |
 | `ThermikSMC` | app + helper | read-only SMC access, fan hardware discovery |
 | `ThermikHelperShared` | app + helper | XPC protocol, connection, code identity, legacy installer |
 | `ThermikSMCWriter` | **helper only** | SMC writes, fan write sequencer, thermal safety monitor |
@@ -195,8 +196,8 @@ log stream --predicate 'subsystem BEGINSWITH "app.thermik"' --info      # everyt
 
 ## Verification
 
-There are no unit tests in v1. Verification means building and running the app (demo mode works on any Mac) and
-the `thermik-probe` self-checks, which act as the regression suite and are cited in commit messages.
+Verification includes building and running the app (demo mode works on any Mac), the update checker
+[unit tests](#app-updates) and the `thermik-probe` self-checks, which act as the hardware regression suite.
 `scripts/lib/selftest.sh` builds the probe and runs all of them (locally; CI runs no tests):
 
 | Command | Checks | Exit code |
@@ -206,6 +207,45 @@ the `thermik-probe` self-checks, which act as the regression suite and are cited
 | `thermik-probe alerts replay` | synthetic 1 Hz series through the default alert rules | 1 on failure |
 | `thermik-probe diagnostics selftest` | synthetic frames through every diagnostics rule | 1 on failure |
 | `thermik-probe log write <dir>` | writes a sample CSV log into `<dir>` (never into ~/Documents) | 1 on failure, 2 if `<dir>` is in ~/Documents |
+
+## App updates
+
+Thermik checks the latest stable release of `stansful/thermik-swift` through GitHub's public Releases API. Manual
+checks are available in **Thermik › Check for Updates…**, Settings › General and Settings › About. Daily checks
+are optional and off by default. A newer version shows **Download…**, which opens that release in the browser;
+the user downloads and replaces the app as usual. A check does not quit Thermik or change fan control.
+
+This needs no GitHub account, token, repository secrets or signing-key setup. The existing ZIP/DMG releases and
+release workflow supply everything the checker needs. Local source builds can check releases too.
+
+### Local update checks
+
+Run the update checker's unit tests without contacting GitHub:
+
+```sh
+swift test --package-path Packages/ThermikCore --filter ThermikUpdates
+```
+
+For a predictable UI check, build Debug and start a fixture. Quit any running Thermik copy first: the
+single-instance guard otherwise activates it instead of launching the test copy.
+
+```sh
+scripts/lib/build.sh Debug
+open build/DerivedData/Build/Products/Debug/Thermik.app --args -ThermikDemo YES -ThermikUpdateFixture available
+```
+
+Open Settings › General and press **Check for Updates…**. The fixtures `available`, `upToDate` and `offline`
+exercise the new-version, current-version and network-error states without network access. Demo mode keeps
+hardware access simulated.
+
+To check a real repository while making the local version older for comparison:
+
+```sh
+open build/DerivedData/Build/Products/Debug/Thermik.app --args -ThermikUpdateRepository stansful/thermik-swift -ThermikUpdateVersion 0.0.0
+```
+
+`ThermikUpdateFixture`, `ThermikUpdateRepository` and `ThermikUpdateVersion` are Debug-only launch overrides;
+Release builds ignore them. Automatic checking remains a user choice, and a manual check is available either way.
 
 ## Releases and CI
 
@@ -302,9 +342,9 @@ Siri and Spotlight phrases (App Shortcuts) are the exception: they live only in
 
 ## Privacy
 
-Thermik has **no telemetry, no analytics and no network access**: the sources contain no networking code at all.
-Sensor data, settings and the optional CSV logs stay on the Mac. A future opt-in update check is the only planned
-network feature.
+Thermik has **no telemetry or analytics**. Sensor data, settings and the optional CSV logs stay on the Mac.
+The update checker contacts GitHub when the user requests a check or enables daily checks. It uses the public
+Releases API without credentials or cookies. The **Download…** action opens the release page in the browser.
 
 ## Legal and clean-room rules
 

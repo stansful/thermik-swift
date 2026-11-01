@@ -1327,6 +1327,17 @@
       },
       "comment": "Menu bar label: style name or «Custom» builder option"
     },
+    "Automatically check for updates": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Автоматически проверять обновления"
+          }
+        }
+      }
+    },
     "Average fan speed": {
       "extractionState": "manual",
       "localizations": {
@@ -2019,6 +2030,17 @@
         }
       }
     },
+    "Check for Updates…": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Проверить обновления…"
+          }
+        }
+      }
+    },
     "Checked %@": {
       "extractionState": "manual",
       "localizations": {
@@ -2026,6 +2048,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Проверено в %@"
+          }
+        }
+      }
+    },
+    "Checking for updates…": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Проверка обновлений…"
           }
         }
       }
@@ -2485,6 +2518,28 @@
         }
       }
     },
+    "Could not check for updates": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось проверить обновления"
+          }
+        }
+      }
+    },
+    "Could not connect to GitHub. Check your connection and try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось подключиться к GitHub. Проверьте соединение и повторите попытку."
+          }
+        }
+      }
+    },
     "Critical": {
       "extractionState": "manual",
       "localizations": {
@@ -2895,6 +2950,28 @@
         }
       },
       "comment": "Menu bar label: style name or «Custom» builder option"
+    },
+    "Download the new version from GitHub Releases and replace Thermik in Applications.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Скачайте новую версию с GitHub Releases и замените Thermik в папке «Программы»."
+          }
+        }
+      }
+    },
+    "Download…": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Скачать…"
+          }
+        }
+      }
     },
     "Drag a point to change it, double-click to add one, press Delete to remove the selected point. Arrow keys nudge it (⌥ for bigger steps).": {
       "extractionState": "manual",
@@ -4036,6 +4113,39 @@
       },
       "comment": "Shortcuts parameter summary; keep ${source}"
     },
+    "GitHub Releases": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Релизы на GitHub"
+          }
+        }
+      }
+    },
+    "GitHub returned an unexpected response. Try again later.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub вернул неожиданный ответ. Повторите попытку позже."
+          }
+        }
+      }
+    },
+    "GitHub's request limit was reached. Try again later.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Достигнут лимит запросов GitHub. Повторите попытку позже."
+          }
+        }
+      }
+    },
     "Group": {
       "extractionState": "manual",
       "localizations": {
@@ -4851,6 +4961,17 @@
         }
       }
     },
+    "Last checked": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Последняя проверка"
+          }
+        }
+      }
+    },
     "Last return to Auto": {
       "extractionState": "manual",
       "localizations": {
@@ -4891,6 +5012,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Последнее выключение: %@. Подробности — на странице «Диагностика»."
+          }
+        }
+      }
+    },
+    "Later": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Позже"
           }
         }
       }
@@ -5550,6 +5682,17 @@
         }
       }
     },
+    "No published release was found on GitHub.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "На GitHub не найден опубликованный релиз."
+          }
+        }
+      }
+    },
     "No renamed, hidden or pinned sensors.": {
       "extractionState": "manual",
       "localizations": {
@@ -5590,6 +5733,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Нет датчиков для показа"
+          }
+        }
+      }
+    },
+    "No telemetry. Thermik connects to GitHub only when checking for updates.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Без телеметрии. Thermik обращается к GitHub только при проверке обновлений."
           }
         }
       }
@@ -7993,6 +8147,17 @@
         }
       }
     },
+    "Software Updates": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Обновления приложения"
+          }
+        }
+      }
+    },
     "Some checks have not run yet": {
       "extractionState": "manual",
       "localizations": {
@@ -8822,6 +8987,17 @@
         }
       }
     },
+    "Thermik %@ is available": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Доступен Thermik %@"
+          }
+        }
+      }
+    },
     "Thermik %@ started": {
       "extractionState": "manual",
       "localizations": {
@@ -8885,6 +9061,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Thermik ещё запускается. Повторите через несколько секунд."
+          }
+        }
+      }
+    },
+    "Thermik is up to date": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Установлена актуальная версия Thermik"
           }
         }
       }
@@ -9432,6 +9619,17 @@
       },
       "comment": "Intel shutdown cause code -128"
     },
+    "Unknown local update test scenario.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Неизвестный сценарий локальной проверки обновлений."
+          }
+        }
+      }
+    },
     "Unpin": {
       "extractionState": "manual",
       "localizations": {
@@ -9483,6 +9681,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Доступно обновление (установлен %1$@, в приложении %2$@)"
+          }
+        }
+      }
+    },
+    "Update checks are disabled in demo mode.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "В деморежиме проверка обновлений отключена."
+          }
+        }
+      }
+    },
+    "Update checks are unavailable for this build.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "В этой сборке проверка обновлений недоступна."
           }
         }
       }
@@ -9805,6 +10025,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Когда"
+          }
+        }
+      }
+    },
+    "When enabled, Thermik checks GitHub Releases once a day. Download opens the release in your browser; install the new version manually. Sensor data and logs stay on your Mac.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "При включённой автопроверке Thermik раз в день проверяет релизы на GitHub. Кнопка «Скачать» открывает релиз в браузере; новую версию нужно установить вручную. Данные датчиков и журналы остаются на вашем Mac."
           }
         }
       }

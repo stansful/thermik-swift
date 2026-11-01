@@ -90,6 +90,7 @@ private struct GeneralSettings: View {
                 Text("These shortcuts work in every app. None is set by default.")
                     .font(ThermikFont.caption).foregroundStyle(.secondary)
             }
+            SoftwareUpdateSection()
             Section {
                 Button { router.showOnboarding() } label: { Text("Show Welcome Guide…") }
                 Button(role: .destructive) { confirmReset = true } label: { Text("Reset to Defaults…") }

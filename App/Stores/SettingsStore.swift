@@ -10,6 +10,8 @@ import ThermikCore
     enum Key {
         static let launchAtLogin = "general.launchAtLogin"
         static let updateInterval = "general.updateInterval"
+        static let automaticallyCheckForUpdates = "updates.automaticallyCheck"
+        static let lastUpdateCheck = "updates.lastChecked"
         static let showDockIcon = "general.showDockIconWhileWindowOpen"
         static let temperatureUnit = "general.temperatureUnit"
         static let language = "general.language"
@@ -38,7 +40,7 @@ import ThermikCore
         static let colorScales = "appearance.colorScales"
         // Additive: hardware blocks left out of the "Hottest" value (Settings › Sensors), `SensorGroup` raw values.
         static let hottestExcludedGroups = "sensors.hottestExcludedGroups"
-        static let all = [launchAtLogin, updateInterval, showDockIcon, temperatureUnit, language, animatedEffects, colorBlindScale,
+        static let all = [launchAtLogin, updateInterval, automaticallyCheckForUpdates, lastUpdateCheck, showDockIcon, temperatureUnit, language, animatedEffects, colorBlindScale,
                           popoverDensity, menuBar, sensorOverrides, showHiddenSensors, showRawKeys, driveTemperatures, fans,
                           alertsEnabled, alertRules, alertSoundName, alertsSnoozedUntil, log, onboardingCompleted, helperWanted,
                           suppressHelperPrompt, menuBarHintShown, hotKeys, allowFanControlFromLinks, colorScales,
@@ -55,6 +57,8 @@ import ThermikCore
 
     // General
     var launchAtLogin: Bool { didSet { store(launchAtLogin, Key.launchAtLogin) } }
+    var automaticallyCheckForUpdates: Bool { didSet { store(automaticallyCheckForUpdates, Key.automaticallyCheckForUpdates) } }
+    var lastUpdateCheck: Date? { didSet { store(lastUpdateCheck, Key.lastUpdateCheck) } }
     var updateInterval: Double {
         didSet {
             // Snap foreign values (old builds, `defaults write`, a slider) to the nearest supported interval.
@@ -112,6 +116,8 @@ import ThermikCore
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         launchAtLogin = defaults.object(forKey: Key.launchAtLogin) as? Bool ?? true
+        automaticallyCheckForUpdates = defaults.object(forKey: Key.automaticallyCheckForUpdates) as? Bool ?? false
+        lastUpdateCheck = defaults.object(forKey: Key.lastUpdateCheck) as? Date
         let interval = defaults.object(forKey: Key.updateInterval) as? Double ?? 2
         updateInterval = Self.updateIntervals.contains(interval) ? interval : Self.nearestInterval(interval)
         showDockIconWhileWindowOpen = defaults.object(forKey: Key.showDockIcon) as? Bool ?? true
@@ -184,6 +190,7 @@ import ThermikCore
         isRestoring = true
         defer { isRestoring = false }
         launchAtLogin = fresh.launchAtLogin; updateInterval = fresh.updateInterval
+        automaticallyCheckForUpdates = fresh.automaticallyCheckForUpdates; lastUpdateCheck = fresh.lastUpdateCheck
         showDockIconWhileWindowOpen = fresh.showDockIconWhileWindowOpen; temperatureUnit = fresh.temperatureUnit
         language = fresh.language; hotKeys = fresh.hotKeys; allowFanControlFromLinks = fresh.allowFanControlFromLinks
         animatedEffects = fresh.animatedEffects; colorBlindScale = fresh.colorBlindScale

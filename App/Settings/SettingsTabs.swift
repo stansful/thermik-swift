@@ -266,6 +266,8 @@ struct SettingsAdvancedTab: View {
 // MARK: - About
 
 struct SettingsAboutTab: View {
+    @Environment(AppUpdater.self) private var updater
+
     static let acknowledgements: [(name: String, license: String)] = [
         ("Stats (exelban)", "MIT"), ("macmon", "MIT"), ("SMCKit", "MIT"), ("Battery Toolkit", "BSD-3-Clause"),
         ("agoodkind/macos-smc-fan", "MIT"), ("VirtualSMC", "BSD-3-Clause"),
@@ -280,10 +282,12 @@ struct SettingsAboutTab: View {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 96, height: 96)
                 Text(verbatim: "Thermik").font(.system(size: 26, weight: .semibold, design: .rounded))
                 Text(verbatim: String(localized: "Version \(version) (\(build))")).foregroundStyle(.secondary)
+                Button { updater.checkForUpdates() } label: { Text("Check for Updates…") }
+                    .disabled(!updater.canCheckForUpdates)
                 Text("See the heat. Ride it calmly.").font(.system(size: 13, weight: .medium))
                 VStack(alignment: .leading, spacing: 8) {
                     Label { Text("Free and open source under the MIT License.") } icon: { Image(systemName: "checkmark.seal") }
-                    Label { Text("No telemetry: Thermik never connects to the network.") } icon: { Image(systemName: "lock.shield") }
+                    Label { Text("No telemetry. Thermik connects to GitHub only when checking for updates.") } icon: { Image(systemName: "lock.shield") }
                     Label { Text("Fans always return to Auto when Thermik quits.") } icon: { Image(systemName: "fan") }
                 }
                 .font(.system(size: 12))

@@ -10,6 +10,7 @@ import ThermikCore
     let events: EventLogStore
     let router: AppRouter
     let visibility: VisibilityTracker
+    let updater: AppUpdater
     let helper: HelperManager
     let sensors: SensorStore
     let system: SystemStore
@@ -31,6 +32,7 @@ import ThermikCore
         events = EventLogStore()
         router = AppRouter()
         visibility = VisibilityTracker()
+        updater = demo ? AppUpdater.forDemo(settings: settings) : AppUpdater.forCurrentLaunch(settings: settings)
         helper = HelperManager(demo: demo)
         sensorSampler = demo ? DemoSensorSampler() : SensorSampler()
         systemSampler = demo ? DemoSystemSampler() : SystemSampler()
