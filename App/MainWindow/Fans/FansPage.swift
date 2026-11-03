@@ -1,4 +1,4 @@
-// FansPage.swift — Thermik (MIT). Unit 8. Fans page (SPEC §4.6 W4, §2.9.4 UI contract): per-fan cards, the shared
+// FansPage.swift — Thermik (MIT). Fans page: per-fan cards, the shared
 // mode switcher (disabled with Auto shown as current while Thermik cannot control the fans, §4.14), Fixed and Max
 // controls, the curve editor section (FanCurveSection.swift), the helper card and the safety copy.
 // Commands go through FanStore only (setMode / setFixedPercent / setLinked / setMaxAutoRevert / applyCurve /

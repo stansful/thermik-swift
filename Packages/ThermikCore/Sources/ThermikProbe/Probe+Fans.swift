@@ -1,4 +1,4 @@
-// Probe+Fans.swift — OWNER: Unit 3. `thermik-probe fans profile|snapshot|inspect|dryrun|sim`.
+// Probe+Fans.swift — `thermik-probe fans profile|snapshot|inspect|dryrun|sim`.
 //
 // SAFETY: every subcommand that touches real hardware is READ-ONLY. This file never constructs a
 // FanWriteSequencer or SMCFanController with a real `SMCConnection`: the only write-capable object it builds is
@@ -220,7 +220,7 @@ struct TemperatureSample {
     }
 }
 
-/// Live temperatures for the dry run: Unit 1's `SensorSampler` + `SensorAggregator` (read-only).
+/// Live temperatures for the dry run: `SensorSampler` + `SensorAggregator` (read-only).
 final class LiveTemperatures {
     let origin: String
     let fanProfile: FanHardwareProfile
@@ -259,7 +259,7 @@ final class LiveTemperatures {
     func read() async -> TemperatureSample {
         let now = Date()
         let inv = inventory
-        let frame = await sampler.sample(SampleRequest(sensorIDs: inv.sensors.map(\.id), includeFans: false, includePower: false))
+        let frame = await sampler.sample(SampleRequest(sensorIDs: inv.sensors.map(\.id), components: []))
         let sensors = frame.values
         let raw = SensorAggregator(inventory: inv).aggregates(frame.values, visible: Set(inv.sensors.filter(\.isVisibleByDefault).map(\.id)))
         // SensorStore-like smoothing: τ 2.8 s, 1.5 s for the "hottest" kinds (SPEC §2.5.6).
@@ -405,7 +405,7 @@ final class FanSim {
         run("M1: direct write sticks (Ftst present but unused)", .m1Direct) { seq, smc, _ in
             _ = try seq.setTarget(0, rpm: 3000)
             check(!smc.writeLog.contains { $0.contains("Ftst") }, "no Ftst write")
-            _ = seq.releaseAll(force: false, reason: "test")
+            _ = seq.releaseAll(reason: "test")
             check(mode(smc, "F0Md") == 0, "fan 0 back to mode 0")
         }
         run("M4 Max: a stopped fan refuses F%dMd=0 (0x82) -> spun up to Mn first, then handed back", .m1Direct) { seq, smc, clock in
@@ -414,7 +414,7 @@ final class FanSim {
             _ = try seq.setTarget(0, rpm: 0); _ = try seq.setTarget(1, rpm: 0)
             check(seq.appliedRPM[0] == 0 && seq.appliedRPM[1] == 0, "rpm 0 stops both fans")
             let start = clock.now()
-            let failures = seq.releaseAll(force: false, reason: "quit while stopped")
+            let failures = seq.releaseAll(reason: "quit while stopped")
             let took = clock.now().timeIntervalSince(start)
             print(String(format: "   failures: %@, release took %.2f s", failures.description, took))
             check(failures.isEmpty && mode(smc, "F0Md") == 0 && mode(smc, "F1Md") == 0 && seq.ownedFans.isEmpty,
@@ -428,7 +428,7 @@ final class FanSim {
         run("M1 variant: direct write reclaimed -> escalate to Ftst", .m1Reclaims) { seq, smc, _ in
             _ = try seq.setTarget(0, rpm: 3000)
             check(smc.writeLog.contains { $0.contains("Ftst=01") }, "escalated to the Ftst unlock")
-            _ = seq.releaseAll(force: false, reason: "test")
+            _ = seq.releaseAll(reason: "test")
             check(smc.bytes(FanHardwareProfile.ftstKey) == [0], "Ftst cleared on release")
         }
         run("M5: lowercase F%dmd, no Ftst, direct", .m5) { seq, smc, _ in
@@ -436,7 +436,7 @@ final class FanSim {
             check(smc.writeLog.first?.contains("F0md=01") == true, "lowercase mode key written")
             check(seq.allowList.contains("F0md") && !seq.allowList.contains("F0Md") && !seq.allowList.contains("Ftst"),
                   "allow-list = lowercase mode keys, no Ftst")
-            _ = seq.releaseAll(force: false, reason: "lease expired")
+            _ = seq.releaseAll(reason: "lease expired")
             check(mode(smc, "F0md") == 0 && mode(smc, "F1md") == 0, "both fans released")
         }
         run("Intel pre-T2: FS! bitmask + fpe2", .intelPreT2) { seq, smc, _ in
@@ -445,7 +445,7 @@ final class FanSim {
             print("   F1Tg bytes: \(tg.map { String(format: "%02x", $0) }.joined())")
             check(tg == [0x36, 0xb0], "3500 rpm -> fpe2 36b0 (big-endian 14.2)")
             check(smc.bytes(FanHardwareProfile.forceBitsKey) == [0, 2], "FS! bit 1 set")
-            _ = seq.releaseAll(force: false, reason: "sigterm")
+            _ = seq.releaseAll(reason: "sigterm")
             check(smc.bytes(FanHardwareProfile.forceBitsKey) == [0, 0], "FS! cleared")
         }
         run("Intel T2: F%dMd + flt", .intelT2) { seq, smc, _ in
@@ -486,7 +486,7 @@ final class FanSim {
             fresh.markerPath = nil
             fresh.adoptPersistedState(ftstSetByUs: true)
             check(!fresh.foreignControlSuspected(), "own leftover state is not a foreign controller while recovering")
-            let failures = fresh.restoreAll(force: true, reason: "startupRecovery")
+            let failures = fresh.forceRestoreAll(reason: "startupRecovery")
             print("   failures: \(failures)")
             printTrace(smc, profile: fresh.profile, owned: fresh.ownedFans, ftstSetByUs: fresh.ftstSetByUs)
             check(failures.isEmpty && smc.bytes(FanHardwareProfile.ftstKey) == [0] && mode(smc, "F0Md") == 3, "fans restored to System (mode 3, Ftst 0)")
@@ -522,7 +522,7 @@ final class FanSim {
             clock.advance(1.5)
             let applied = try? c.setManual(0, targetRPM: 3000)
             check(applied == 3000 && c.reclaimedFans().isEmpty, "re-asserted after 5 s")
-            let failures = c.restoreAll(force: false, reason: "test")
+            let failures = c.restoreAll(reason: "test")
             check(failures.isEmpty && !c.isControlling && mode(smc, "F0Md") == 3, "restoreAll: System again")
         }
     }
@@ -570,7 +570,7 @@ final class FanSim {
         for _ in 0..<3 { clock.advance(1); verdicts.append(c.evaluateSafety()) }
         print("   no readable die sensor: \(verdicts.map(text).joined(separator: ", "))")
         check(verdicts.last == .sensorFailure && verdicts.first != .sensorFailure, "3 ticks without a reading -> sensorFailure (restore System)")
-        _ = c.restoreAll(force: false, reason: "sensorFailure")
+        _ = c.restoreAll(reason: "sensorFailure")
     }
 
     // MARK: SMCClientInspector classification (rule: a non-fan helper is never named)

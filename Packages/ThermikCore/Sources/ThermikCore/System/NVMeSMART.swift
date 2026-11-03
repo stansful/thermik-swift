@@ -1,4 +1,4 @@
-// NVMeSMART.swift — Thermik (MIT). OWNER: Unit 2.
+// NVMeSMART.swift — Thermik (MIT).
 // NVMe SMART / Health log (log page 0x02) via the public NVMeSMARTLib.plugin CFPlugIn
 // (SDK header IOKit/storage/nvme/NVMeSMARTLibExternal.h, imported through CThermikSPI; SYS §6.1).
 // No root needed (verified on M4 Max / macOS 27.0.1, APPLE SSD AP1024Z). The drive SERIAL is never read (PII).

@@ -1,4 +1,4 @@
-// Thermal.swift — Thermik (MIT). OWNER: Unit 2.
+// Thermal.swift — Thermik (MIT).
 // macOS thermal pressure (Darwin notify key, SDK libkern/OSThermalNotification.h) and ProcessInfo.thermalState (SYS §5).
 // Public APIs, no root, sandbox-safe.
 import Foundation

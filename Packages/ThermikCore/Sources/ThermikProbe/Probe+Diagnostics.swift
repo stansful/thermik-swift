@@ -1,4 +1,4 @@
-// Probe+Diagnostics.swift — OWNER: Unit 6. `thermik-probe diagnostics [--demo] [--seconds N]` — READ-ONLY;
+// Probe+Diagnostics.swift — `thermik-probe diagnostics [--demo] [--seconds N]` — READ-ONLY;
 // `thermik-probe diagnostics selftest` — synthetic frames through every DiagnosticsEngine rule (no hardware).
 // Discovers sensors and system data through the real samplers (the demo samplers with --demo), observes fans and
 // sensors at 1 Hz for N s (default 12; foreign fan control needs 10 s), prints every DiagnosticItem with its raw
@@ -27,7 +27,7 @@ extension Probe {
         }
         let machine = await systemSampler.start()
         let slow = await systemSampler.slowData(.all)
-        let systemFrame = await systemSampler.sample(SystemSampleRequest(battery: true, powerSources: true))
+        let systemFrame = await systemSampler.sample([.battery, .powerSources])
         let battery = systemFrame.battery
         let pressure = systemFrame.pressure
 
@@ -277,7 +277,7 @@ private struct DiagnosticsSelfTest {
     mutating func items() async {
         print("== items: slow-data rules")
         let demo = DemoSystemSampler()
-        var battery = await demo.sample(SystemSampleRequest(battery: true)).battery
+        var battery = await demo.sample(.battery).battery
         var health = await demo.slowData(.all).appleBatteryHealth
         func item(_ kind: DiagnosticKind, slow: SlowSystemData = SlowSystemData(), battery: BatterySnapshot? = nil,
                   helper: HelperHealth = .notInstalled, inventory: SensorInventory? = nil, pressure: ThermalPressure = .nominal,

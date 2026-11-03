@@ -1,4 +1,4 @@
-// IOKitHelpers.swift — Thermik (MIT). OWNER: Unit 2.
+// IOKitHelpers.swift — Thermik (MIT).
 // Small, allocation-light IORegistry / sysctl / process helpers shared by the System readers (SYS Appendix A.2).
 // Internal on purpose: nothing here is API. Every function is safe to call from any thread.
 import Foundation

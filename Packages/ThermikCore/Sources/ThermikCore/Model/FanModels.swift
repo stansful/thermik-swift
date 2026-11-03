@@ -1,5 +1,4 @@
-// FanModels.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). Fan modes, curves, engine plan & commands.
-// Only exception: Unit 3 may retune the NUMBERS inside FanPresets.curve(_:).
+// FanModels.swift — Thermik (MIT). Fan modes, curves, engine plan and commands.
 // Percent semantics everywhere: 0 % == F%dMn (minimum SPINNING speed), 100 % == F%dMx, per fan.
 // "Off" is never a manual value — only System (macOS) may stop the fans (FANS §11.1).
 import Foundation
@@ -148,8 +147,7 @@ public struct FanCurve: Codable, Sendable, Hashable {
 }
 
 /// PROVISIONAL presets tuned to M4 Max reality (idle CPU average ≈ 60–68 °C, all-core load ≈ 77–80 °C,
-/// cluster hotspots ≈ 90–99 °C; SENS §5.1/§5.4). Unit 3 may retune the NUMBERS after a ≤ 60 s load test;
-/// the API is frozen.
+/// cluster hotspots ≈ 90–99 °C; SENS §5.1/§5.4). Preset numbers may be retuned after a ≤ 60 s load test.
 public enum FanPresets {
     public static func curve(_ id: FanPresetID) -> FanCurve {
         switch id {

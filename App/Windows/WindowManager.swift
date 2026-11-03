@@ -1,6 +1,5 @@
-// WindowManager.swift — Thermik (MIT). Unit 0 seed; OWNER: Unit 8. AppKit-managed windows hosting SwiftUI
-// (deterministic from a menu-bar agent; avoids SwiftUI Settings-scene/openWindow pitfalls). Surface FROZEN:
-// init(env:), showMain(_:), showSettings(_:), showOnboarding(), isMainWindowVisible.
+// WindowManager.swift — Thermik (MIT). AppKit-managed windows hosting SwiftUI
+// (deterministic from a menu-bar agent; avoids SwiftUI Settings-scene/openWindow pitfalls).
 //
 // Responsibilities (SPEC §4.6–4.8):
 // - main window (NavigationSplitView, 1080 × 700 default, 880 × 560 minimum, frame autosave "ThermikMain"; Settings are

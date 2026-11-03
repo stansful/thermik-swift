@@ -1,4 +1,4 @@
-// SensorChooser.swift — Thermik (MIT). Unit 8. "Specific sensor…" picker sheet used by the fan-curve driving sensor
+// SensorChooser.swift — Thermik (MIT). "Specific sensor…" picker sheet used by the fan-curve driving sensor
 // and the alert rule editor: searchable list of temperature sensors grouped by display group, with live values.
 import SwiftUI
 import ThermikCore

@@ -1,4 +1,4 @@
-// MockFanHelperClient.swift — Thermik (MIT). OWNER: Unit 0 (frozen). Demo-mode helper: accepts every command,
+// MockFanHelperClient.swift — Thermik (MIT). Demo-mode helper: accepts every command,
 // clamps to the demo fan range, never talks XPC. Also `UnavailableFanHelperClient` for "no helper" states.
 import Foundation
 import ThermikHelperShared

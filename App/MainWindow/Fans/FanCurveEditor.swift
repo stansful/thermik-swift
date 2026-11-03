@@ -1,4 +1,4 @@
-// FanCurveEditor.swift — Thermik (MIT). Unit 8. Percent-based fan-curve editor (SPEC §4.9, DES §4.4 / §7.9), adapted
+// FanCurveEditor.swift — Thermik (MIT). Percent-based fan-curve editor, adapted
 // from the design kit's rpm editor (research/design/kit/ThermikCharts.swift, Thermik's own MIT code).
 //
 // Model: Core `CurvePoint` (celsius, percent 0…100 of each fan's own [Mn, Mx]). The editor keeps `points` sorted by °C.

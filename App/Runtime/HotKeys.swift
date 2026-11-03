@@ -1,4 +1,4 @@
-// HotKeys.swift — Thermik (MIT). OWNER: Unit 5. P1 global shortcuts ("Show main window", "Show or hide the panel")
+// HotKeys.swift — Thermik (MIT). Global shortcuts ("Show main window", "Show or hide the panel")
 // with Carbon `RegisterEventHotKey` — public API, no third-party dependency, no Accessibility permission, works
 // from an LSUIElement agent. No default combination is set (FEAT §9.2): the user records one in Settings.
 // Approach after FEAT §9.2 option 2; the context pointer replaces its static handler table.
@@ -78,7 +78,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// Registers the shortcuts stored in `SettingsStore.hotKeys` and re-registers whenever they change.
-/// `HotKeys.shared` is configured once by AppDelegate; Settings (Unit 8) embeds `HotKeyRecorder(action:)`.
+/// `HotKeys.shared` is configured once by AppDelegate; Settings embeds `HotKeyRecorder(action:)`.
 @MainActor @Observable final class HotKeys {
     static let shared = HotKeys()
 
@@ -170,7 +170,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-// MARK: - Recorder (embedded by the Settings window, Unit 8)
+// MARK: - Recorder (embedded by the Settings window)
 
 /// "Record Shortcut" button: click, press a combination (Esc cancels, ⌫ clears). Reads `SettingsStore` from the
 /// environment (`.thermikEnvironment(env)`).

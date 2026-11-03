@@ -1,4 +1,4 @@
-//  ThermikControls.swift — the switch and the slider drawn with shapes, and plain table rows (MIT). OWNER: Unit 7.
+//  ThermikControls.swift — the switch and the slider drawn with shapes, and plain table rows (MIT).
 //  On macOS 26 and later every appearance of a system switch or slider, SwiftUI's or AppKit's, makes the process hold
 //  about 260 MB of GPU memory for a second (their Liquid Glass knobs are rendered with Metal; measured on macOS 27, also
 //  for mini and disabled switches), and so do a table's zebra stripes wherever rows do not fill it. There these draw the

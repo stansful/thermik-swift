@@ -1,4 +1,4 @@
-// CodeIdentity.swift — Thermik (MIT). Shared by Thermik.app and the privileged helper. OWNER: Unit 4.
+// CodeIdentity.swift — Thermik (MIT). Shared by Thermik.app and the privileged helper.
 // Port of research/helper/skeleton/Shared/CodeIdentity.swift (HELP §A.2).
 // Code-signing facts about a running process or an executable on disk. Used by the helper (peer validation,
 // its own policy), by the app (SMAppService vs legacy install, pinning its own cdhash for ad-hoc builds) and by

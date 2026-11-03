@@ -1,4 +1,4 @@
-// AppEnvironment.swift — Thermik (MIT). Composition root (stores + samplers). Created by Unit 0; OWNER: Unit 5.
+// AppEnvironment.swift — Thermik (MIT). Composition root (stores + samplers).
 // Construction order matters (dependencies flow downwards). Services that need the whole environment
 // (SamplingCoordinator, MenuBarController, WindowManager, CSVLoggingService) are created by AppDelegate.
 import Foundation

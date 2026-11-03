@@ -1,4 +1,4 @@
-// MainMenu.swift — Thermik (MIT). Unit 0 seed; OWNER: Unit 8. The app menu bar, visible while a window is open
+// MainMenu.swift — Thermik (MIT). The app menu bar, visible while a window is open
 // (`.regular`); its key equivalents also work while Thermik is an agent (`.accessory`) and a window is key.
 // View ▸ pages carry ⌘1…⌘8 (SPEC §4.6, §4.13); Edit ▸ Undo/Redo route through the responder chain to the key window's
 // UndoManager (the fan-curve editor registers its edits there).

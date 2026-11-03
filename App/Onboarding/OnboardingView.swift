@@ -1,4 +1,4 @@
-// OnboardingView.swift — Thermik (MIT). Unit 0 stub; OWNER: Unit 8. First-run guide (SPEC §4.8, DES §7.10):
+// OnboardingView.swift — Thermik (MIT). First-run guide:
 // 560 × 460, three steps with Skip on every step, shown until `onboarding.completed`.
 //   1. Welcome — icon, promise, three checklist rows (checkmarks draw on with `.drawOn` on macOS 26+).
 //   2. Helper — why it exists, [Install Helper…] (HelperManager: admin prompt in legacy mode, Login Items approval with

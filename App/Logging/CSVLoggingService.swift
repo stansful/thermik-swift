@@ -1,4 +1,4 @@
-// CSVLoggingService.swift — Thermik (MIT). OWNER: Unit 6. Surface FROZEN; additions marked. SPEC §2.12.
+// CSVLoggingService.swift — Thermik (MIT).
 //
 // Tick consumer that turns the stores into CSV rows for the `CSVLogWriter` actor. Rows are due every
 // `settings.log.intervalSeconds` (0 = every tick); a tick that carries events writes an extra row at once so the
@@ -17,7 +17,7 @@ import ThermikCore
     let system: SystemStore
     let events: EventLogStore
 
-    /// ADDED (Unit 6): the file being written (nil until the first row), and the writer's last I/O problem.
+    /// the file being written (nil until the first row), and the writer's last I/O problem.
     private(set) var currentFileURL: URL?
     private(set) var lastError: String?
 
@@ -73,7 +73,7 @@ import ThermikCore
         })
     }
 
-    /// ADDED (Unit 6): sensor columns the log needs read every tick (SamplingCoordinator's `extra`).
+    /// sensor columns the log needs read every tick (SamplingCoordinator's `extra`).
     var requiredSensorIDs: Set<SensorID> {
         let config = settings.log
         guard config.enabled, config.include.contains(.sensors) else { return [] }

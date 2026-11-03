@@ -74,10 +74,18 @@ public final class MockFanController: FanControlling {
         if ownedFans.isEmpty && ftstSetByUs { ftstSetByUs = false; log.append("Ftst=0") }
     }
 
-    @discardableResult public func restoreAll(force: Bool, reason: String) -> [String] {
+    @discardableResult public func restoreAll(reason: String) -> [String] {
+        recordRestore(operation: "restoreAll", reason: reason)
+    }
+
+    @discardableResult public func forceRestoreAll(reason: String) -> [String] {
+        recordRestore(operation: "forceRestoreAll", reason: reason)
+    }
+
+    private func recordRestore(operation: String, reason: String) -> [String] {
         ownedFans.removeAll(); appliedRPM.removeAll(); ftstSetByUs = false; simulatedReclaimedFans.removeAll()
         safetyOverrideActive = false
-        log.append("restoreAll(force: \(force), reason: \(reason))")
+        log.append("\(operation)(reason: \(reason))")
         return []
     }
 

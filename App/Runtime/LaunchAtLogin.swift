@@ -1,6 +1,6 @@
-// LaunchAtLogin.swift — Thermik (MIT). OWNER: Unit 5. "Launch at login" through SMAppService.mainApp (macOS 13+,
+// LaunchAtLogin.swift — Thermik (MIT). "Launch at login" through SMAppService.mainApp (macOS 13+,
 // public ServiceManagement API; FEAT §9.1). `settings.launchAtLogin` is the user's intent, the system registration
-// is the truth: Settings (Unit 8) binds the toggle to the setting and shows `LaunchAtLogin.shared.status`. The user can
+// is the truth: Settings binds the toggle to the setting and shows `LaunchAtLogin.shared.status`. The user can
 // approve, switch off or remove Thermik in System Settings › Login Items while it runs, so the status is re-read
 // whenever Thermik becomes active or one of its windows (Settings) becomes key — off the main actor, since
 // SMAppService does XPC to BTM.

@@ -1,5 +1,5 @@
-// SamplingCoordinator.swift — Thermik (MIT). Basic loop by Unit 0; OWNER: Unit 5 (adaptive cadence §2.3.4,
-// per-reader cadences, sleep/wake pause, request building from every consumer's needs). Surface FROZEN.
+// SamplingCoordinator.swift — Thermik (MIT). Adaptive cadence, per-reader schedules,
+// sleep/wake pause, and request building from every consumer's needs.
 //
 // One loop (Task + ContinuousClock) on the main actor. Each tick awaits both samplers concurrently (their actors
 // do the IOKit work off the main thread), then hands one `Tick` to the consumers in the fixed order of §2.3.3.
@@ -211,7 +211,7 @@ import ThermikCore
         let nominal = iv.timeInterval
         let start = clock.now
         let (ids, allVisible) = sensorRequest()
-        let request = SampleRequest(sensorIDs: ids, includeFans: env.fans.hasFans, includePower: true)
+        let request = SampleRequest(sensorIDs: ids, components: env.fans.hasFans ? [.fans, .power] : [.power])
         let systemRequest = self.systemRequest(at: start)
         let sensorSampler = env.sensorSampler, systemSampler = env.systemSampler
         async let frameResult = sensorSampler.sample(request)
@@ -309,13 +309,14 @@ import ThermikCore
         let log = env.settings.log
         // The CSV log keeps its per-tick usage and IOReport power columns while UI is visible, as before.
         let logged = { (g: LogColumnGroup) in visible && log.enabled && log.include.contains(g) }
-        var r = SystemSampleRequest()
-        r.cpuLoad = vis.showsSystemPage || logged(.usage) || isDue(.cpu, every: 5, now)
-        r.gpuUsage = r.cpuLoad
-        r.memory = isDue(.memory, every: visible ? 2 : 10, now)
-        r.soc = vis.needsSoCMetrics || logged(.power)
-        r.battery = batteryMissing ? isDue(.battery, every: 60, now) : (vis.needsBatteryDetail || isDue(.battery, every: 5, now))
-        r.powerSources = powerSourcesDirty || isDue(.powerSources, every: 30, now)
+        var r: SystemSampleRequest = []
+        if vis.showsSystemPage || logged(.usage) || isDue(.cpu, every: 5, now) { r.formUnion([.cpuLoad, .gpuUsage]) }
+        if isDue(.memory, every: visible ? 2 : 10, now) { r.insert(.memory) }
+        if vis.needsSoCMetrics || logged(.power) { r.insert(.soc) }
+        if batteryMissing ? isDue(.battery, every: 60, now) : (vis.needsBatteryDetail || isDue(.battery, every: 5, now)) {
+            r.insert(.battery)
+        }
+        if powerSourcesDirty || isDue(.powerSources, every: 30, now) { r.insert(.powerSources) }
         return r
     }
 
@@ -326,13 +327,13 @@ import ThermikCore
     }
 
     private func markRead(_ r: SystemSampleRequest, at t: ContinuousClock.Instant, frame: SystemFrame) {
-        if r.cpuLoad { lastRead[.cpu] = t }
-        if r.memory { lastRead[.memory] = t }
-        if r.battery {
+        if r.contains(.cpuLoad) { lastRead[.cpu] = t }
+        if r.contains(.memory) { lastRead[.memory] = t }
+        if r.contains(.battery) {
             lastRead[.battery] = t
             if batteryMissing != (frame.battery == nil) { batteryMissing = frame.battery == nil }
         }
-        if r.powerSources { lastRead[.powerSources] = t; powerSourcesDirty = false }
+        if r.contains(.powerSources) { lastRead[.powerSources] = t; powerSourcesDirty = false }
     }
 
     // MARK: Slow data (system_profiler, SMART, boot history): never awaited by a tick

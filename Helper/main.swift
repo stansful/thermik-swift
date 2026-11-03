@@ -1,4 +1,4 @@
-// main.swift — Thermik privileged helper (root LaunchDaemon `app.thermik.helper`). OWNER: Unit 4.
+// main.swift — Thermik privileged helper (root LaunchDaemon `app.thermik.helper`).
 // Wiring only, in the order of SPEC §2.6.5; the logic lives in ThermikHelperCore.
 //   thermik-helper          real mode: must be root (launchd), drives the SMC through SMCFanController
 //   thermik-helper --mock   foreground developer run without root: MockFanController, never touches the SMC

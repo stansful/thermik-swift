@@ -1,4 +1,4 @@
-// HIDSensorProvider.swift — Thermik (MIT). OWNER: Unit 1. READ-ONLY IOHIDEventSystem temperature reader (SPEC §2.5.2/5).
+// HIDSensorProvider.swift — Thermik (MIT). Read-only IOHIDEventSystem temperature reader.
 //
 // Facts used (SENS §3, verified on M4 Max / macOS 27):
 //  * only the FULL client (`IOHIDEventSystemClientCreate`, private SPI declared in CThermikSPI) returns events; the

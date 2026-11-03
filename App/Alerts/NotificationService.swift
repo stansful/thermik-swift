@@ -1,4 +1,4 @@
-// NotificationService.swift — Thermik (MIT). OWNER: Unit 6 (new). Local notifications for alerts (SPEC §2.10).
+// NotificationService.swift — Thermik (MIT). Local notifications for alerts.
 //
 // UNUserNotificationCenter with [.alert, .sound] (no badge: menu-bar app). Interruption level `.active`
 // (`.timeSensitive` needs an entitlement, §6.2). Request id `alert.<ruleID>` replaces the previous notification of the

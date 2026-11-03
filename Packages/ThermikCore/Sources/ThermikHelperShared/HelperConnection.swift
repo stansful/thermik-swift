@@ -1,6 +1,6 @@
-// HelperConnection.swift — Thermik (MIT). App-side NSXPC client of the privileged helper. OWNER: Unit 4.
+// HelperConnection.swift — Thermik (MIT). App-side NSXPC client of the privileged helper.
 // Port of research/helper/skeleton/App/HelperConnection.swift (HELP §A.9), conforming to `FanHelperClient`
-// (SPEC §2.6.6). Public API FROZEN (SPEC A.2).
+// Public client API.
 //
 // Lazily (re)connecting: an interruption (helper crashed, idle-exited, was upgraded) keeps the NSXPCConnection —
 // the next message makes launchd relaunch the helper — and reports `onDisconnect(false)` so FanStore re-sends its

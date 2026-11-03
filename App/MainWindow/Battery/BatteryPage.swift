@@ -1,4 +1,4 @@
-// BatteryPage.swift — Thermik (MIT). Unit 8. Battery page (SPEC §4.6 W5, M9; laptops only — the sidebar hides it on
+// BatteryPage.swift — Thermik (MIT). Battery page (laptops only — the sidebar hides it on
 // desktops): health (NominalChargeCapacity / DesignCapacity), macOS "Maximum capacity" + condition (system_profiler),
 // cycles vs rated, temperature on the battery scale, charge and charging state, adapter, time to empty / full, live
 // battery power chart, voltage / current, cell voltages and the raw figures in a details popover.

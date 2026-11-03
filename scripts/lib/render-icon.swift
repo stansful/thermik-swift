@@ -1,4 +1,4 @@
-// render-icon.swift — Thermik (MIT). Unit 8 tool: renders the app icon PNGs from the vector concept of
+// render-icon.swift — Thermik (MIT). Renders the app icon PNGs from the vector concept of
 // research/design/icon/thermik-icon.svg (DES §7.2 / SPEC §4.15) directly with Core Graphics at every size, so small
 // renditions stay crisp. Additions over the SVG draft: Apple-style continuous corners, the standard
 // macOS icon drop shadow, a faint top highlight.

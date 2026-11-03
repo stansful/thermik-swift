@@ -1,4 +1,4 @@
-// Probe+SMC.swift — OWNER: Unit 0. Read-only SMC dump / key reads (attribute-aware decoding).
+// Probe+SMC.swift — Read-only SMC dump / key reads (attribute-aware decoding).
 import Foundation
 import ThermikSMC
 

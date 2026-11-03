@@ -1,5 +1,5 @@
-//  ThermikComponents.swift — reusable SwiftUI components (MIT). OWNER: Unit 7. Public API frozen for Unit 8
-//  (additions allowed). Liquid Glass only on the control layer (SPEC §4.3); every coloured value also has text and a glyph.
+//  ThermikComponents.swift — reusable SwiftUI components (MIT).
+//  Liquid Glass only on the control layer; every coloured value also has text and a glyph.
 import SwiftUI
 import ThermikCore
 

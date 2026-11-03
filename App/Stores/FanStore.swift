@@ -1,4 +1,4 @@
-// FanStore.swift — Thermik (MIT). OWNER: Unit 3. Public surface FROZEN (SPEC §2.14, Appendix B.3).
+// FanStore.swift — Thermik (MIT).
 // The fan-control POLICY (SPEC §2.9.4): live fans, foreign-controller detection, status, the 1 Hz engine tick,
 // Max auto-revert, safety events, error handling, sleep/wake/quit. The helper command pipeline (send-only-changes,
 // in-flight guard, lease renewal) lives in FanControlCoordinator.
@@ -157,8 +157,9 @@ import ThermikSMC
     func load(profile: FanHardwareProfile, names: [String]?) {
         let profileChanged = profile != self.profile
         self.profile = profile
-        fans = profile.fans.map {
-            LiveFan(descriptor: $0, displayName: Self.displayName(dbName: names?[safe: $0.index], descriptor: $0))
+        fans = profile.fans.map { fan in
+            let databaseName = names?.indices.contains(fan.index) == true ? names?[fan.index] : nil
+            return LiveFan(descriptor: fan, displayName: Self.displayName(dbName: databaseName, descriptor: fan))
         }
         if profileChanged || engine == nil { engine = profile.fans.isEmpty ? nil : FanControlEngine(profile: profile) }
         if !loaded {
@@ -678,8 +679,4 @@ import ThermikSMC
         default: return raw
         }
     }
-}
-
-extension Array {
-    subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
 }

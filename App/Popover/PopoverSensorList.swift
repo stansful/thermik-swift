@@ -1,4 +1,4 @@
-// PopoverSensorList.swift — Thermik (MIT). OWNER: Unit 7. Scrolling sensor list of the popover (SPEC §4.5):
+// PopoverSensorList.swift — Thermik (MIT). Scrolling sensor list of the popover:
 // "Pinned" first, then collapsible display groups (count, hottest 5-min sparkline, hottest value) that remember their
 // expanded state. Rows observe their own LiveSensor (only that row re-renders on a new value). Click → main window on
 // that sensor; right-click → Pin / Unpin, Hide, Rename…, Show in Menu Bar, Set Alert…, Copy Value. Keyboard: Tab

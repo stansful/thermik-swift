@@ -1,4 +1,4 @@
-// SettingsTabs.swift — Thermik (MIT). Unit 8. Settings tabs Alerts, Appearance, Helper, Advanced and About (SPEC §4.7).
+// SettingsTabs.swift — Thermik (MIT). Settings tabs Alerts, Appearance, Helper, Advanced and About.
 // Logging reuses LoggingSettingsSection (shared with the Logs page).
 import AppKit
 import SwiftUI
@@ -217,7 +217,7 @@ struct SettingsHelperTab: View {
 // MARK: - Advanced
 
 struct SettingsAdvancedTab: View {
-    /// Read directly by the system sampler (Unit 2); not part of SettingsStore (SPEC §2.11).
+    /// Read directly by the system sampler; not part of SettingsStore.
     @AppStorage("advanced.experimentalCLPCPower") private var experimentalCLPC = false
     @State private var copied = false
 

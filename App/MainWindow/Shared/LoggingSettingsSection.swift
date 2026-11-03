@@ -1,5 +1,5 @@
-// LoggingSettingsSection.swift — Thermik (MIT). Unit 8. CSV logging options (SPEC §2.12, §4.6 Logs, §4.7 Logging),
-// shared by the Logs page and Settings › Logging. Writes `settings.log` (LogConfig); CSVLoggingService (Unit 6) picks
+// LoggingSettingsSection.swift — Thermik (MIT). CSV logging options,
+// shared by the Logs page and Settings › Logging. Writes `settings.log` (LogConfig); CSVLoggingService picks
 // the change up. Retention is off by default and only ever touches Thermik-*.csv files in the chosen folder.
 import AppKit
 import SwiftUI

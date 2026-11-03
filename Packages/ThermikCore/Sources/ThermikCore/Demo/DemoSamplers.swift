@@ -1,5 +1,4 @@
-// DemoSamplers.swift — Thermik (MIT). OWNER: Unit 0 (frozen). Synthetic samplers for `-ThermikDemo YES`:
-// lets UI units run the app with M4-Max-like data before the real samplers land, and on any Mac.
+// DemoSamplers.swift — Thermik (MIT). Synthetic M4-Max-like samplers for `-ThermikDemo YES`.
 import Foundation
 import ThermikSMC
 
@@ -63,7 +62,7 @@ public actor DemoSensorSampler: SensorSampling {
         let fans = FanControlState(ftst: 0, forceBits: nil, fans: (0..<2).map {
             FanSnapshot(index: $0, actualRPM: rpm + Double($0) * 40, targetRPM: rpm, mode: .auto, dutyCycle: rpm / 9600, timestamp: now)
         })
-        return SensorFrame(date: now, values: values, raw: values, gated: [], fans: request.includeFans ? fans : nil,
+        return SensorFrame(date: now, values: values, raw: values, gated: [], fans: request.components.contains(.fans) ? fans : nil,
                            power: PowerValues(systemTotalW: 20 + 90 * load, dcInW: 22 + 90 * load, batteryW: 0, socW: 12 + 70 * load),
                            isPostWake: false)
     }
@@ -92,9 +91,9 @@ public actor DemoSystemSampler: SystemSampling {
                                                                 current_mA: 4990, isWireless: false),
                                       systemPowerIn_mW: 35000, systemLoad_mW: 35000, batteryPower_mW: 0)
         return SystemFrame(date: Date(),
-                           cpuLoad: request.cpuLoad ? (0..<16).map { i in CoreLoad(user: i < 4 ? 0.4 : 0.1, system: 0.05, nice: 0, idle: i < 4 ? 0.55 : 0.85) } : nil,
+                           cpuLoad: request.contains(.cpuLoad) ? (0..<16).map { i in CoreLoad(user: i < 4 ? 0.4 : 0.1, system: 0.05, nice: 0, idle: i < 4 ? 0.55 : 0.85) } : nil,
                            memory: nil, gpu: GPUUtilization(model: "Apple M4 Max", coreCount: 40, devicePercent: 12, rendererPercent: 10, tilerPercent: 3, inUseSystemMemory: nil),
-                           soc: nil, battery: request.battery ? battery : nil,
+                           soc: nil, battery: request.contains(.battery) ? battery : nil,
                            powerSources: PowerSourceSummary(kind: .ac, timeRemaining: .infinity, batteryWarningLevel: 1, lowPowerMode: false),
                            pressure: .nominal, processThermalState: .nominal)
     }

@@ -1,4 +1,4 @@
-//  ThermikTokens.swift — design tokens for Thermik (MIT). OWNER: Unit 7. Public API frozen for Unit 8 (additions allowed).
+//  ThermikTokens.swift — design tokens for Thermik (MIT).
 //  SPEC §4.2 / DES §7.3–7.5: thermal ramp (vivid + deep ink, colour-blind variant), per-class scales, typography,
 //  metrics, motion and locale-safe number formatting.
 import SwiftUI
@@ -277,7 +277,6 @@ enum ThermikFormat {
     /// "38.2 W" / «38,2 Вт» (non-breaking space before the unit, SPEC §4.12).
     static func watts(_ w: Double) -> String { number(w, decimals: 1) + "\u{00A0}" + wattUnit }
 
-    // Additions (Unit 7)
 
     /// Temperature in the display unit, rounded the way the UI shows it (menu bar change detection, VoiceOver).
     static func degrees(_ c: Double, unit: UnitTemperature = .celsius) -> Int {

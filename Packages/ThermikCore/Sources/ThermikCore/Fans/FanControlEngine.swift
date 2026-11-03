@@ -1,4 +1,4 @@
-// FanControlEngine.swift — Thermik (MIT). OWNER: Unit 3. API FROZEN (SPEC §2.9.2).
+// FanControlEngine.swift — Thermik (MIT).
 // Pure logic (no I/O): (plan, temperatures, pressure, time) → per-fan commands `.system` or `.rpm(x)`.
 // Runs in the unprivileged app at 1 Hz on the main actor (a non-Sendable class confined to its owner). The helper
 // only actuates and enforces its own invariants; it never runs curves, so a crashed or quit app always ends in

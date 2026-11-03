@@ -1,4 +1,4 @@
-// Probe+Log.swift — OWNER: Unit 6. `thermik-probe log write <dir> [daily|weekly|never|size:N]`: writes a 5-row sample
+// Probe+Log.swift — `thermik-probe log write <dir> [daily|weekly|never|size:N]`: writes a 5-row sample
 // log + column sidecar into the GIVEN directory with the real CSVLogWriter, then prints and checks both files.
 // Three rows are written, the writer is closed (≈ quit) and a NEW writer appends two more (≈ relaunch): the file must
 // keep one header and grow, never be truncated. Refuses ~/Documents (verification must never write there).

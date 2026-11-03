@@ -1,4 +1,4 @@
-// FanControlCoordinator.swift — Thermik (MIT). OWNER: Unit 3. The app → helper command pipeline behind FanStore
+// FanControlCoordinator.swift — Thermik (MIT). The app → helper command pipeline behind FanStore
 // (SPEC §2.9.4 steps 5–6): sends only CHANGES, one sequence in flight at a time with "latest desired state wins",
 // renews the lease every 2 s while Thermik holds the fans, releases everything with one `resetAllFans()`, and
 // classifies helper errors for FanStore's policy (retry, monitoring-only, foreign controller, …).

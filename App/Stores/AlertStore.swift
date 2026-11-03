@@ -1,4 +1,4 @@
-// AlertStore.swift — Thermik (MIT). OWNER: Unit 6 (AlertEngine + NotificationService). Surface FROZEN; additions marked.
+// AlertStore.swift — Thermik (MIT). AlertEngine + NotificationService coordination.
 //
 // Each tick (SPEC §2.10): build AlertInputs from the stores (smoothed values of VISIBLE temperature sensors read this
 // tick, plus those of the sensors `.sensor` rules name, hidden or not; aggregates, DiagnosticsStore.stalledFans and
@@ -30,7 +30,7 @@ enum NotificationAuthorization: Sendable, Equatable { case unknown, notDetermine
     @ObservationIgnored private(set) var systemSampler: (any SystemSampling)?
 
     static let capacity = 500
-    /// UserDefaults key (ADDED, Unit 6): the boot an abnormal-shutdown alert was already shown for (once per boot,
+    /// UserDefaults key: the boot an abnormal-shutdown alert was already shown for (once per boot,
     /// also across relaunches).
     static let lastShutdownAlertBootKey = "alerts.lastShutdownAlertBoot"
 
@@ -65,10 +65,10 @@ enum NotificationAuthorization: Sendable, Equatable { case unknown, notDetermine
     var alertsToday: Int { recent.filter { $0.kind == .raised && Calendar.current.isDateInToday($0.date) }.count }
     var hasActiveAlert: Bool { !activeRuleIDs.isEmpty }
 
-    /// ADDED (Unit 6): true while `settings.alertsSnoozedUntil` lies in the future.
+    /// true while `settings.alertsSnoozedUntil` lies in the future.
     var isSnoozed: Bool { settings.alertsSnoozedUntil.map { $0 > Date() } ?? false }
 
-    /// ADDED (Unit 6): sensors the enabled rules need read every tick (SamplingCoordinator's `extra`): the sensor of a
+    /// sensors the enabled rules need read every tick (SamplingCoordinator's `extra`): the sensor of a
     /// `.sensor` rule, the visible sensors of a `.group` rule, every visible sensor for `.anySensor`.
     var requiredSensorIDs: Set<SensorID> {
         var ids = Set<SensorID>()
@@ -301,11 +301,11 @@ enum NotificationAuthorization: Sendable, Equatable { case unknown, notDetermine
     func remove(_ id: UUID) { settings.alertRules.removeAll { $0.id == id } }
     func resetToDefaults() { settings.alertRules = AlertRule.defaultRules }
 
-    /// ADDED: a new rule the Alerts page should open pre-filled in its editor ("Set Alert…" in the popover, which
+    /// a new rule the Alerts page should open pre-filled in its editor ("Set Alert…" in the popover, which
     /// cannot reach the main window's model). The page clears it when it opens the editor.
     var pendingNewRuleSubject: AlertRule.Subject?
 
-    /// ADDED: asks the Alerts page for a new rule on `subject`; the caller then shows the page (`router.showMain(.alerts)`).
+    /// asks the Alerts page for a new rule on `subject`; the caller then shows the page (`router.showMain(.alerts)`).
     func requestNewRule(for subject: AlertRule.Subject) { pendingNewRuleSubject = subject }
 
     /// Authorization is requested when the first rule is enabled (or on onboarding step 3).
@@ -339,7 +339,7 @@ enum NotificationAuthorization: Sendable, Equatable { case unknown, notDetermine
                                                    soundName: settings.alertSoundName))
     }
 
-    /// ADDED (Unit 6): System Settings › Notifications › Thermik (when the permission was denied).
+    /// System Settings › Notifications › Thermik (when the permission was denied).
     func openNotificationSettings() { notifications.openSystemSettings() }
 
     func snooze(for seconds: TimeInterval) { settings.alertsSnoozedUntil = Date().addingTimeInterval(seconds) }

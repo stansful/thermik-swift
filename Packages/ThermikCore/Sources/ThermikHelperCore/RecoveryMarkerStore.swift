@@ -1,4 +1,4 @@
-// RecoveryMarkerStore.swift — Thermik (MIT). HELPER ONLY. OWNER: Unit 4.
+// RecoveryMarkerStore.swift — Thermik (MIT). HELPER ONLY.
 // Invariant I7 (SPEC §2.6.2): a per-boot JSON `RecoveryMarker` at /var/run/app.thermik.helper.manual exists while
 // the helper holds any fan in manual mode. It is written BEFORE the first manual write and removed only after a
 // complete restore, so a helper that crashed or was SIGKILLed restores the fans when launchd relaunches it

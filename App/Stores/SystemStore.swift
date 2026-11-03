@@ -1,4 +1,4 @@
-// SystemStore.swift — Thermik (MIT). Minimal implementation by Unit 0; OWNER afterwards: Unit 5. Surface FROZEN.
+// SystemStore.swift — Thermik (MIT).
 // Readers run at their own cadences (SPEC §2.3.4), so a frame carries only what was read this tick: every field
 // keeps its last value until the next read. Thermal pressure and the power source kind are logged as events.
 import Foundation

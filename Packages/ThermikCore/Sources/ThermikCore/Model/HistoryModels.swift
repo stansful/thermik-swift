@@ -1,4 +1,4 @@
-// HistoryModels.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). In-memory history types.
+// HistoryModels.swift — Thermik (MIT). In-memory history types.
 // RingBuffer / Downsample moved here from the design kit (research/design/kit/ThermikCharts.swift).
 import Foundation
 

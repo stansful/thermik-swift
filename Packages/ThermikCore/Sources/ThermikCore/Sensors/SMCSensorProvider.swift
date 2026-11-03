@@ -1,4 +1,4 @@
-// SMCSensorProvider.swift — Thermik (MIT). OWNER: Unit 1. READ-ONLY SMC side of the sensor sampler (SPEC §2.5.2/§2.5.3).
+// SMCSensorProvider.swift — Thermik (MIT). Read-only SMC side of the sensor sampler.
 //
 // Wraps one `SMCConnection` (ThermikSMC: thread-safe, read path only — the app links no SMC write code).
 // Measured on M4 Max / macOS 27 (SENS §2.6): enumerating 3512 keys + key info of the ≈ 400 `T*` keys ≈ 11 ms;

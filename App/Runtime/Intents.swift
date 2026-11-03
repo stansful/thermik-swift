@@ -1,4 +1,4 @@
-// Intents.swift — Thermik (MIT). OWNER: Unit 5. P1 App Intents for Shortcuts and Spotlight (FEAT §9.7): Get
+// Intents.swift — Thermik (MIT). App Intents for Shortcuts and Spotlight: Get
 // Temperature, Set Fan Mode, Apply Fan Preset. They run inside the app process — the system launches the agent in
 // the background when it is not running — and act on `AppEnvironment.current`, like a click in the popover would.
 // Titles must stay string literals: Xcode extracts them at build time (App Intents metadata), Russian comes from the
@@ -181,7 +181,7 @@ enum ThermikIntentError: Error, CustomLocalizedStringResourceConvertible {
         let visible = env.sensors.sensors.filter { !$0.isHidden }.map(\.id)
         if let f = env.sensors.lastFrame,
            visible.allSatisfy({ f.values[$0] != nil || f.raw[$0] != nil || f.gated.contains($0) }) { return nil }
-        let frame = await env.sensorSampler.sample(SampleRequest(sensorIDs: visible, includeFans: false, includePower: false))
+        let frame = await env.sensorSampler.sample(SampleRequest(sensorIDs: visible, components: []))
         return SensorAggregator(inventory: inventory).aggregates(frame.values, visible: Set(visible))[kind]
     }
 

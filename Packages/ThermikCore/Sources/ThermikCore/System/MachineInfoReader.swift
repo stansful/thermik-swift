@@ -1,4 +1,4 @@
-// MachineInfoReader.swift — Thermik (MIT). OWNER: Unit 2.
+// MachineInfoReader.swift — Thermik (MIT).
 // Model identifier, marketing name, chip, CPU tiers / topology and GPU (SYS §8). ~1.5–5 ms, no root, read once.
 import Foundation
 import IOKit

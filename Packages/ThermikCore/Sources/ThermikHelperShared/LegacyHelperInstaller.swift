@@ -1,7 +1,5 @@
-// LegacyHelperInstaller.swift — Thermik (MIT). App side. OWNER: Unit 4.
-// Port of research/helper/skeleton/App/LegacyHelperInstaller.swift (HELP §4, §A.11). Public API FROZEN (SPEC A.2);
-// additions: Plan.init, Plan.helperIcon, launchdPlist(), trustFile(_:), trustedClientCDHashes(at:),
-// installedHelperBuild(), iconResourceFork(_:), `KnownFanControlHelpers` (bottom of the file).
+// LegacyHelperInstaller.swift — Thermik (MIT). App side.
+// Port of research/helper/skeleton/App/LegacyHelperInstaller.swift (HELP §4, §A.11).
 //
 // Install path for builds WITHOUT a Team ID (ad-hoc / "Sign to Run Locally"), where SMAppService has no stable
 // identity to pin (HELP §2.4). One administrator prompt (`do shell script … with administrator privileges`) runs a

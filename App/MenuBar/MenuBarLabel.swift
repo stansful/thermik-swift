@@ -1,5 +1,4 @@
-//  MenuBarLabel.swift — status-item label rendering (MIT). OWNER: Unit 7. Kit API (MenuBarSnapshot,
-//  MenuBarLabelRenderer.image(for:style:colored:scale:), CompactLabel) is frozen for Unit 8's style gallery.
+//  MenuBarLabel.swift — status-item label rendering (MIT).
 //  MenuBarExtra's label only honours ONE Text and/or ONE Image (verified on macOS 27: a VStack collapses
 //  to its first Text). Multi-line / multi-metric labels are therefore drawn into an NSImage with AppKit
 //  (DES §2.1: 0.50 % CPU at 1 Hz vs 1.09 % for ImageRenderer), template unless colour is needed.
@@ -43,7 +42,7 @@ struct MenuBarSnapshot: Equatable, Sendable {
     var rpm: Double?
     var normalized: Double          // for colour / gauge fill
     var alert: Bool                 // ≥ very hot or a user alert is raised
-    // Unit 7 additions — defaults keep the original memberwise init `MenuBarSnapshot(celsius:rpm:normalized:alert:)`.
+    // Defaults keep the original memberwise init `MenuBarSnapshot(celsius:rpm:normalized:alert:)`.
     var primary: MenuBarReading? = nil       // nil → .temperature(celsius, .soc)
     var secondary: MenuBarReading? = nil     // nil → rpm.map(.rpm) ?? .none
     var fahrenheit = false
@@ -139,7 +138,7 @@ final class MenuBarLabelRenderer {
     /// Number of images actually drawn (cache misses) — debug statistics.
     private(set) var renderCount = 0
 
-    /// Kit API (Unit 0 / Unit 8 gallery): template unless `colored`; drawn for `scale` (and 2×).
+    /// Template unless `colored`; drawn for `scale` (and 2×).
     func image(for s: MenuBarSnapshot, style: MenuBarStyle, colored: Bool, scale: CGFloat) -> NSImage {
         let appearance = NSApp?.effectiveAppearance.name ?? .aqua
         return image(for: s, style: style, options: MenuBarRenderOptions(colored: colored, appearance: appearance),

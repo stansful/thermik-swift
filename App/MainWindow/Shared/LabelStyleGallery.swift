@@ -1,4 +1,4 @@
-// LabelStyleGallery.swift — Thermik (MIT). Unit 8. Live menu-bar style gallery (SPEC §4.4, §4.7 Menu Bar, §4.8 step 3):
+// LabelStyleGallery.swift — Thermik (MIT). Live menu-bar style gallery:
 // the MenuBarStyle previews rendered by the kit's MenuBarLabelRenderer from the current readings (CPU temperature
 // and average fan speed), shown on a menu-bar-like strip. Selecting one writes `settings.menuBar.style`.
 import AppKit

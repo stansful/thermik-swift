@@ -1,5 +1,5 @@
-// HelperManager.swift — Thermik (MIT). OWNER: Unit 4. Port of research/helper/skeleton/App/HelperManager.swift
-// (HELP §A.10); SPEC §2.6.4, §2.6.6. Public surface FROZEN (SPEC B.4); additions: isBusy, lastError, bundledHelperBuild.
+// HelperManager.swift — Thermik (MIT). Privileged helper lifecycle and connection management.
+// Port of research/helper/skeleton/App/HelperManager.swift (HELP §A.10).
 //
 // App-side owner of the privileged helper's lifecycle: install state, install / approve / upgrade / uninstall, and
 // the `client` FanStore talks to. The install mode comes from the app's OWN signature:

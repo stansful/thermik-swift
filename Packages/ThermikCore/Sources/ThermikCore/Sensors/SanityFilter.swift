@@ -1,4 +1,4 @@
-// SanityFilter.swift — Thermik (MIT). OWNER: Unit 1. Validity of ONE decoded temperature (SPEC §2.5.4, SENS §5.3/§7).
+// SanityFilter.swift — Thermik (MIT). Validity of one decoded temperature.
 //
 // Sentinels observed on M4 Max / macOS 27 (SENS §5.3), all rejected by the rule below:
 //  * power-gated P-cluster triplet (-4.0, -4.0 + offset, 0.0), e.g. (-4.0, 1.9, 0.0): everything < 10 °C on die groups;

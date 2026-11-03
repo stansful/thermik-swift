@@ -1,4 +1,4 @@
-// DiagnosticsPage.swift — Thermik (MIT). Unit 8. Diagnostics page (SPEC §4.6 W7, §2.13): one card per DiagnosticItem
+// DiagnosticsPage.swift — Thermik (MIT). Diagnostics page: one card per DiagnosticItem
 // (status glyph, localized finding, expandable raw details in SF Mono), "Run fan test" (P1, helper required),
 // "Load sleep/wake history" (pmset log on demand, last 200 events in a table), Copy report / Save report….
 // Core returns structured findings; every sentence shown here is localized in this file.

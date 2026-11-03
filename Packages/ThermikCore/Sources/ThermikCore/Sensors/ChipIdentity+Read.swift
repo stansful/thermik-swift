@@ -1,4 +1,4 @@
-// ChipIdentity+Read.swift — Thermik (MIT). OWNER: Unit 1. Chip / board identity (SPEC §2.5.2 step 1, SENS §8.3).
+// ChipIdentity+Read.swift — Thermik (MIT). Chip and board identity.
 //
 // Verified on Mac16,5: IOPlatformExpertDevice `platform-name` = "t6041" (Data, NUL-padded), `target-type` = "J616c",
 // `compatible` = "J616cAP\0Mac16,5\0AppleARM\0"; `hw.model` = "Mac16,5"; `machdep.cpu.brand_string` = "Apple M4 Max";

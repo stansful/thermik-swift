@@ -1,4 +1,4 @@
-// DiagnosticsStore.swift — Thermik (MIT). OWNER: Unit 6. Surface FROZEN; additions marked. SPEC §2.13.
+// DiagnosticsStore.swift — Thermik (MIT).
 //
 // Feeds every tick into DiagnosticsEngine (fan stall / target mismatch / foreign control, stuck sensors) and
 // re-evaluates the items every 5 s from the stores' slow data. Items whose content did not change keep their
@@ -74,7 +74,7 @@ import ThermikCore
             + DiagnosticsEngine.eventsMarkdown(events.events, limit: Self.reportEventCount)
     }
 
-    /// ADDED (Unit 6): "Copy report" — the Markdown report on the general pasteboard.
+    /// "Copy report" — the Markdown report on the general pasteboard.
     func copyReport() {
         let pb = NSPasteboard.general
         pb.clearContents()

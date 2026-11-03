@@ -1,4 +1,4 @@
-// WindowComponents.swift — Thermik (MIT). Unit 8. Small building blocks shared by the main-window pages, Settings
+// WindowComponents.swift — Thermik (MIT). Small building blocks shared by the main-window pages, Settings
 // and onboarding: locale-safe number formatting with localized units, page scaffolding, metric tiles, banners,
 // placeholders. Built on the DesignSystem kit (cards, fonts, palette) without changing it.
 import AppKit

@@ -1,7 +1,5 @@
-// SettingsStore.swift — Thermik (MIT). Implemented by Unit 0; OWNER afterwards: Unit 5 (keys are FROZEN, SPEC §2.11).
-// Typed UserDefaults facade. Simple values stored natively, complex ones as JSON Data. Every write is immediate.
-// Unit 5 added keys (additive, not in the frozen table): `general.hotKeys` (P1 global shortcuts) and
-// `general.urlScheme.allowFanControl` (P2: `thermik://` links may change fan control without asking).
+// SettingsStore.swift — Thermik (MIT). Typed UserDefaults facade.
+// Simple values stored natively, complex ones as JSON Data. Every write is immediate.
 import Foundation
 import Observation
 import ThermikCore
@@ -33,7 +31,6 @@ import ThermikCore
         static let helperWanted = "helper.wanted"
         static let suppressHelperPrompt = "helper.suppressInstallPrompt"
         static let menuBarHintShown = "menuBar.hintShown"
-        // Unit 5 (additive)
         static let hotKeys = "general.hotKeys"
         static let allowFanControlFromLinks = "general.urlScheme.allowFanControl"
         // Additive: user-tuned colour-scale stops per sensor class (Settings › Appearance).
@@ -174,8 +171,8 @@ import ThermikCore
         sensorOverrides[id.description] = empty ? nil : o
     }
 
-    /// Keys that views keep through @AppStorage outside this store (the popover's expanded groups, Unit 7; the
-    /// experimental CLPC power toggle in Settings › Advanced, Unit 8, read by Unit 2's IOReport). Reset clears them too.
+    /// Keys that views keep through @AppStorage outside this store (the popover's expanded groups and the
+    /// experimental CLPC power toggle in Settings › Advanced, read by IOReport). Reset clears them too.
     /// Per-boot bookkeeping (alerts.lastShutdownAlertBoot, diag.*) is deliberately kept.
     static let viewOwnedKeys = ["popover.expandedGroups", "advanced.experimentalCLPCPower"]
 

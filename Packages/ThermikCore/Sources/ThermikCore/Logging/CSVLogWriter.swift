@@ -1,5 +1,4 @@
-// CSVLogWriter.swift — Thermik (MIT). OWNER: Unit 6. API FROZEN (init / update / append / flush / close /
-// currentFileURL); additions are marked. SPEC §2.12.
+// CSVLogWriter.swift — Thermik (MIT).
 //
 // Buffered (flush every 10 s, at 64 rows, on rotation and on close), rotating, NON-DESTRUCTIVE:
 //   • daily  → Thermik-YYYY-MM-DD.csv          • weekly → Thermik-YYYY-Www.csv (ISO week)
@@ -47,9 +46,9 @@ public actor CSVLogWriter {
     private let timestamps = ISO8601DateFormatter()
     private let log = Logger(subsystem: "app.thermik.Thermik", category: "logging")
 
-    /// ADDED (Unit 6): the last I/O problem (folder not writable, disk full…); nil after a successful write.
+    /// the last I/O problem (folder not writable, disk full…); nil after a successful write.
     public private(set) var lastError: String?
-    /// ADDED (Unit 6): rows written to disk since this writer was created.
+    /// rows written to disk since this writer was created.
     public private(set) var rowsWritten = 0
 
     public init(config: LogConfig, header: CSVLogHeader) {
@@ -96,7 +95,7 @@ public actor CSVLogWriter {
             if case .sizeMB(let mb) = config.rotation, target.size + data.count > Self.limitBytes(mb),
                target.size > headerBytes() {                       // never rotate a file that holds only its header
                 closeHandle()
-                target = try createFile(url: uniqueURL(base: "Thermik-" + Self.stamp(Date(), dateAndTime: true)), period: period)
+                target = try createFile(url: uniqueURL(base: "Thermik-" + Self.dateAndTimeStamp(Date())), period: period)
             }
             try target.handle.write(contentsOf: data)
             target.size += data.count
@@ -168,7 +167,7 @@ public actor CSVLogWriter {
         let url: URL
         switch config.rotation {
         case .sizeMB:
-            url = uniqueURL(base: "Thermik-" + Self.stamp(firstRow, dateAndTime: true))
+            url = uniqueURL(base: "Thermik-" + Self.dateAndTimeStamp(firstRow))
         case .daily, .weekly, .never:
             let base = baseName(period: period)
             let primary = folderURL.appendingPathComponent(base + ".csv")
@@ -285,7 +284,7 @@ public actor CSVLogWriter {
 
     private func periodKey(for date: Date) -> String {
         switch config.rotation {
-        case .daily: return Self.stamp(date, dateAndTime: false)
+        case .daily: return Self.dayStamp(date)
         case .weekly:
             var cal = Calendar(identifier: .iso8601)
             cal.timeZone = .current
@@ -303,14 +302,16 @@ public actor CSVLogWriter {
         }
     }
 
-    /// "2026-10-26" or "2026-10-26-153012" (local time; POSIX digits).
-    static func stamp(_ date: Date, dateAndTime: Bool) -> String {
+    /// "2026-10-26" (local time; POSIX digits).
+    static func dayStamp(_ date: Date) -> String {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = .current
-        let c = cal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
-        let day = String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
-        return dateAndTime ? day + "-" + timeStamp(date) : day
+        let c = cal.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
+
+    /// "2026-10-26-153012" (local time; POSIX digits).
+    static func dateAndTimeStamp(_ date: Date) -> String { dayStamp(date) + "-" + timeStamp(date) }
 
     /// "153012" (local time).
     static func timeStamp(_ date: Date) -> String {
@@ -392,7 +393,7 @@ public actor CSVLogWriter {
     }
 
     /// Integers for rpm / percentages / flags, 2 decimals for GB, 1 decimal for temperatures, watts and usage.
-    /// ADDED (Unit 6, public): CSVLoggingService and the probe use the same rule.
+    /// CSVLoggingService and the probe use the same rule.
     public static func decimals(for id: String) -> Int {
         if id.hasSuffix("_rpm") || id.hasSuffix("_target") || id.hasSuffix("_pct") || id == "on_ac" || id == "thermal_pressure" {
             return 0
@@ -401,7 +402,6 @@ public actor CSVLogWriter {
     }
 
     /// Locale-independent ("." decimals, no grouping); non-finite → empty cell; never "-0.0".
-    /// ADDED (Unit 6, public).
     public static func number(_ v: Double, decimals: Int) -> String {
         guard v.isFinite else { return "" }
         let scale = pow(10, Double(max(decimals, 0)))
@@ -416,12 +416,12 @@ public actor CSVLogWriter {
 
     // MARK: Sidecar  (Thermik-YYYY-MM-DD.columns.json: id → {en, ru, group, index})
 
-    /// ADDED (Unit 6): the sidecar path for a log file.
+    /// the sidecar path for a log file.
     public static func sidecarURL(for csv: URL) -> URL {
         csv.deletingPathExtension().appendingPathExtension("columns.json")
     }
 
-    /// ADDED (Unit 6): the `LogColumnGroup` (or "time") a column id belongs to, for the sidecar.
+    /// the `LogColumnGroup` (or "time") a column id belongs to, for the sidecar.
     public static func columnGroup(for id: String) -> String {
         switch id {
         case "timestamp": return "time"

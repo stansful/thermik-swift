@@ -1,4 +1,4 @@
-// DiagnosticsModels.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). Free hardware diagnostics (TG: paid).
+// DiagnosticsModels.swift — Thermik (MIT). Hardware diagnostics models.
 // Core returns STRUCTURED findings; the app localizes them (no UI strings in Core).
 import Foundation
 

@@ -1,4 +1,4 @@
-//  FirstRunHint.swift — Thermik (MIT). OWNER: Unit 7. First-run hint (SPEC §4.4 B6): a small popover anchored to the
+//  FirstRunHint.swift — Thermik (MIT). First-run hint: a small popover anchored to the
 //  status item, "Thermik lives here. Click for temperatures and fans.", shown once (then `menuBar.hintShown = true`).
 //  Shown only while the item is actually visible, after onboarding (or 60 s after launch if onboarding is still open).
 import AppKit

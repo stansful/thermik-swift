@@ -1,7 +1,7 @@
-// HelperService.swift — Thermik (MIT). HELPER ONLY. OWNER: Unit 4. Public entry points FROZEN (SPEC §5 Unit 4).
+// HelperService.swift — Thermik (MIT). HELPER ONLY.
 //
 // The helper is a dumb, safe actuator: the app decides targets, this service enforces the invariants of
-// SPEC §2.6.2 around the `FanControlling` write layer (Unit 3):
+// Fan safety and lifecycle policy around the `FanControlling` write layer:
 //   I1  targets finite, ≥ 0, clamped to the SMC's own [Mn, Mx]; the client gets the applied rpm
 //   I3  lease: no command / renewal for `lease` s → System            (1 Hz watchdog)
 //   I4  last client gone → System after a 3 s grace                    (connectionClosed)
@@ -109,7 +109,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
     // MARK: Lifecycle (public, synchronous)
 
     /// Call once at startup: crash recovery (I7), then the 1 Hz watchdog. If the per-boot marker exists, a
-    /// previous instance died while controlling → `restoreAll(force: true)`. Otherwise the fans are left alone.
+    /// previous instance died while controlling → `forceRestoreAll`. Otherwise the fans are left alone.
     public func start() {
         stateQueue.sync {
             guard !started, !isShuttingDown else { return }
@@ -135,7 +135,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
             watchdog?.cancel(); watchdog = nil
             clientGoneWork?.cancel(); clientGoneWork = nil
             if fans.isControlling || overrideActive || marker.exists {
-                revertLocked(reason: reason, force: true)
+                forceRevertLocked(reason: reason)
             }
             if !wasShuttingDown { serviceLog.notice("shutdown (\(reason, privacy: .public))") }
         }
@@ -146,7 +146,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
     public func systemWillSleep() {
         stateQueue.sync {
             sleeping = true
-            if fans.isControlling || overrideActive { revertLocked(reason: "sleep", force: false) }
+            if fans.isControlling || overrideActive { revertLocked(reason: "sleep") }
             powerLog.notice("system will sleep: commands are refused until wake")
         }
     }
@@ -195,7 +195,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
             let work = DispatchWorkItem { [weak self] in
                 guard let self, self.connections.isEmpty, self.fans.isControlling || self.overrideActive else { return }
                 serviceLog.notice("last client gone for \(self.config.clientGoneGraceSeconds, privacy: .public) s")
-                self.revertLocked(reason: "clientGone", force: false)                              // I4
+                self.revertLocked(reason: "clientGone")                              // I4
             }
             clientGoneWork?.cancel()
             clientGoneWork = work
@@ -255,7 +255,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
         stateQueue.async { [self] in
             lastActivity = clock.now
             if fans.isControlling || overrideActive || marker.exists {
-                revertLocked(reason: reason, force: true)
+                forceRevertLocked(reason: reason)
             } else {
                 serviceLog.info("resetAllFans: nothing to restore")
             }
@@ -270,7 +270,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
                 reply(.thermikHelper(.notPermitted, "self-uninstall exists only for legacy installs (this helper: \(installKind.rawValue))"))
                 return
             }
-            if fans.isControlling || overrideActive || marker.exists { revertLocked(reason: "uninstall", force: true) }
+            if fans.isControlling || overrideActive || marker.exists { forceRevertLocked(reason: "uninstall") }
             do {
                 try handler()
                 reply(nil)
@@ -347,12 +347,12 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
         let owned = fans.ownedFans
         guard owned.contains(index) else {
             // Not ours: never touch it. If nothing is owned but Ftst is still ours, finish the release.
-            if owned.isEmpty, fans.isControlling { revertLocked(reason: "released", force: false) }
+            if owned.isEmpty, fans.isControlling { revertLocked(reason: "released") }
             requestedRPM[index] = nil
             return nil
         }
         if owned == [index] {
-            revertLocked(reason: "released", force: false)       // last owned fan → full restore (also clears Ftst)
+            revertLocked(reason: "released")       // last owned fan → full restore (also clears Ftst)
             return nil
         }
         if overrideActive {
@@ -393,7 +393,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
             if leaseDeadline == nil { extendLeaseLocked(ThermikHelper.Limits.defaultLeaseSeconds) }   // defensive
             if let deadline = leaseDeadline, now >= deadline {
                 serviceLog.notice("lease expired")
-                revertLocked(reason: "leaseExpired", force: false)                                    // I3
+                revertLocked(reason: "leaseExpired")                                    // I3
             } else {
                 let verdict = fans.evaluateSafety()
                 applySafetyLocked(verdict)                                                            // I8, I9
@@ -406,7 +406,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
         } else {
             leaseDeadline = nil
             if let retry = restoreRetryAt, now >= retry, marker.exists {
-                revertLocked(reason: "restoreRetry", force: true)
+                forceRevertLocked(reason: "restoreRetry")
             }
         }
         idleCheckLocked(now)
@@ -449,7 +449,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
                     serviceLog.notice("fan \(fan.index, privacy: .public) stopped again: die \(String(format: "%.1f °C", hot ?? 0), privacy: .public)")
                 }
             } catch {
-                revertLocked(reason: "stopRestartFailed", force: false)
+                revertLocked(reason: "stopRestartFailed")
                 return
             }
         }
@@ -460,7 +460,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
         switch verdict {
         case .sensorFailure:
             serviceLog.error("no readable die sensor: returning the fans to System")
-            revertLocked(reason: "sensorFailure", force: false)
+            revertLocked(reason: "sensorFailure")
         case let .override(hottest, top4):
             if !overrideActive {
                 overrideActive = true
@@ -473,7 +473,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
                     _ = try fans.setManual(fan.index, targetRPM: fan.maxRPM)
                 } catch {
                     serviceLog.error("thermal override write failed on fan \(fan.index, privacy: .public): \(Self.wireError(error).localizedDescription, privacy: .public)")
-                    revertLocked(reason: "overrideWriteFailed", force: false)
+                    revertLocked(reason: "overrideWriteFailed")
                     return
                 }
             }
@@ -490,7 +490,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
     /// Back to what the app last asked for; fans it never asked for return to System.
     private func restoreRequestedLocked() {
         guard fans.isControlling else { return }
-        guard !requestedRPM.isEmpty else { revertLocked(reason: "overrideReleased", force: false); return }
+        guard !requestedRPM.isEmpty else { revertLocked(reason: "overrideReleased"); return }
         do {
             for fan in fans.profile.fans {
                 if let rpm = requestedRPM[fan.index] {
@@ -500,7 +500,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
                 }
             }
         } catch {
-            revertLocked(reason: "overrideReleaseFailed", force: false)
+            revertLocked(reason: "overrideReleaseFailed")
             return
         }
         updateMarkerLocked()
@@ -534,7 +534,7 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
         }
         let adoptedMinimums = !(minimumRecovery?.savedMinimumBytes.isEmpty ?? true)
         fans.adoptPersistedState(ftstSetByUs: ftstSetByUs)
-        revertLocked(reason: "startupRecovery", force: true)
+        forceRevertLocked(reason: "startupRecovery")
         if adoptedMinimums, minimumRecovery?.savedMinimumBytes.isEmpty == true {
             fanProfileStale = true
             serviceLog.notice("original fan minimums restored; the fan profile was read while they were raised")
@@ -545,12 +545,20 @@ public final class HelperService: @unchecked Sendable {   // state confined to `
     /// it stays (a crash now still recovers) and a forced retry is scheduled. With a marker on disk the restore is
     /// always forced: the forcing it covers is Thermik's (I7, I10), and a helper that restarted after a failed restore
     /// owns no fans, so a plain one would skip them, report success and drop the marker with the fans still manual.
-    private func revertLocked(reason: String, force: Bool) {
+    private func revertLocked(reason: String) {
+        guard !marker.exists else { forceRevertLocked(reason: reason); return }
+        completeRevertLocked(reason: reason) { fans.restoreAll(reason: reason) }
+    }
+
+    private func forceRevertLocked(reason: String) {
+        completeRevertLocked(reason: reason) { fans.forceRestoreAll(reason: reason) }
+    }
+
+    private func completeRevertLocked(reason: String, restore: () -> [String]) {
         overrideReleaseHoldUntil = nil
         lastHottestC = nil
-        let hadMarker = marker.exists
-        let hadControl = fans.isControlling || overrideActive || hadMarker
-        let failures = fans.restoreAll(force: force || hadMarker, reason: reason)
+        let hadControl = fans.isControlling || overrideActive || marker.exists
+        let failures = restore()
         leaseDeadline = nil
         overrideActive = false
         requestedRPM.removeAll()

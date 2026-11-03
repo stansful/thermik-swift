@@ -1,5 +1,4 @@
-// DiagnosticsEngine.swift — Thermik (MIT). OWNER: Unit 6. API FROZEN (init / observe / stalledFans / items / report);
-// additions are marked. Free hardware diagnostics (SPEC §2.13). Pure value type, mutated on the main actor.
+// DiagnosticsEngine.swift — Thermik (MIT). Free hardware diagnostics. Pure value type, mutated on the main actor.
 //
 // `observe` is fed every tick (cheap: one pass over the fans and the sensors of the frame) and keeps only timers and
 // a sparse 30 s sample per sensor; `items` turns that history plus the slow context into structured findings
@@ -13,7 +12,7 @@
 //   sensors  suspect when a valid value stays exactly constant for > 10 min while a sibling of the same hardware
 //            group changed by ≥ 2 °C, the raw value is out of the plausible range for > 1 min, or the sensor is
 //            invalid for > 1 min while ≥ 80 % of its group is valid (power-gated clusters excluded).
-//   foreign  (ADDED) fan modes forced (Ftst = 1, a mode key = 1 or FS! ≠ 0) for > 10 s while Thermik commands
+//   foreign  fan modes forced (Ftst = 1, a mode key = 1 or FS! ≠ 0) for > 10 s while Thermik commands
 //            nothing → another app controls the fans (reported through the helper item).
 import Foundation
 import ThermikSMC
@@ -91,10 +90,10 @@ public struct DiagnosticsEngine: Sendable {
     private var groupValidFraction: [SensorGroup: Double] = [:]
     private var lastValidCount = 0
 
-    /// ADDED (Unit 6): product name for a suspected foreign fan controller (set by the store / probe from
+    /// product name for a suspected foreign fan controller (set by the store / probe from
     /// FanStore's naming or `installedFanControlProducts()`); nil = unnamed.
     public var foreignControllerName: String?
-    /// ADDED: the nominal sampling interval (s), set by the store before every `observe` (0 = unknown: the spacing of
+    /// the nominal sampling interval (s), set by the store before every `observe` (0 = unknown: the spacing of
     /// the frames alone sets the sensor-unseen limit).
     public var nominalInterval: TimeInterval = 0
 
@@ -102,7 +101,7 @@ public struct DiagnosticsEngine: Sendable {
 
     // MARK: Observation
 
-    /// ADDED (Unit 6): sensor groups and default visibility for the sensor checks (call after discovery).
+    /// sensor groups and default visibility for the sensor checks (call after discovery).
     public mutating func load(inventory: SensorInventory) {
         let old = Dictionary(slots.map { ($0.id, $0.track) }, uniquingKeysWith: { a, _ in a })
         var seen = Set<SensorID>()
@@ -212,20 +211,20 @@ public struct DiagnosticsEngine: Sendable {
             .map(\.key).sorted()
     }
 
-    /// ADDED (Unit 6): fans whose speed differs from the target by > 25 % for > 60 s (stalled fans excluded).
+    /// fans whose speed differs from the target by > 25 % for > 60 s (stalled fans excluded).
     public var fansNotReachingTarget: [Int] {
         guard let now = lastFrameDate else { return [] }
         return fanTracks.filter { $0.value.mismatchSince.map { now.timeIntervalSince($0) > Self.mismatchSeconds } ?? false }
             .map(\.key).sorted()
     }
 
-    /// ADDED (Unit 6): another process has been forcing the fans for > 10 s while Thermik commanded nothing.
+    /// another process has been forcing the fans for > 10 s while Thermik commanded nothing.
     public var foreignControlSuspected: Bool {
         guard let now = lastFrameDate, let since = foreignSince else { return false }
         return now.timeIntervalSince(since) >= Self.foreignControlSeconds
     }
 
-    /// ADDED (Unit 6): suspect sensors with the reason, sorted by id.
+    /// suspect sensors with the reason, sorted by id.
     public func suspectSensors() -> [(id: SensorID, reason: String)] {
         guard let now = lastFrameDate else { return [] }
         var out: [(SensorID, String)] = []
@@ -512,8 +511,7 @@ public struct DiagnosticsEngine: Sendable {
         return Self.redact(md)
     }
 
-    /// ADDED (Unit 6): the "Recent events" Markdown section (newest last), redacted. DiagnosticsStore appends it
-    /// to `report(…)` (the frozen signature has no events parameter).
+    /// The "Recent events" Markdown section (newest last), redacted. DiagnosticsStore appends it to `report(…)`.
     public static func eventsMarkdown(_ events: [AppEvent], limit: Int = 50) -> String {
         var md = "\n### Recent events\n\n"
         let recent = events.suffix(limit)
@@ -524,7 +522,7 @@ public struct DiagnosticsEngine: Sendable {
         return redact(md)
     }
 
-    /// ADDED (Unit 6): removes identifying strings: 10–12 character upper-case alphanumerics that mix letters and
+    /// removes identifying strings: 10–12 character upper-case alphanumerics that mix letters and
     /// digits (Apple serial numbers), UUIDs, MAC / Bluetooth addresses, the user's home path and the host name.
     public static func redact(_ text: String) -> String {
         var s = text
@@ -554,7 +552,7 @@ public struct DiagnosticsEngine: Sendable {
 
     // MARK: Known fan controllers (naming only)
 
-    /// ADDED (Unit 6): launchd labels of known fan-control helpers (public identifiers). Only the PRESENCE of their
+    /// launchd labels of known fan-control helpers (public identifiers). Only the PRESENCE of their
     /// plist / executable is checked; nothing is opened or read. Detection itself is the SMC state
     /// (`foreignControlSuspected`); these only put a name on it.
     public static let knownFanControlHelpers: [(label: String, product: String)] = [
@@ -563,11 +561,11 @@ public struct DiagnosticsEngine: Sendable {
         ("eu.exelban.Stats.SMC.Helper", "Stats"),
     ]
 
-    /// ADDED (Unit 6): SMC clients that are NOT fan controllers although they run a root helper that opens the SMC
+    /// SMC clients that are NOT fan controllers although they run a root helper that opens the SMC
     /// (battery charge limiters such as AlDente). Never reported as a fan controller.
     public static let knownNonFanSMCClients = ["aldente"]
 
-    /// ADDED (Unit 6): products of `knownFanControlHelpers` installed on this Mac (launchd plist or helper present).
+    /// products of `knownFanControlHelpers` installed on this Mac (launchd plist or helper present).
     public static func installedFanControlProducts() -> [String] {
         let fm = FileManager.default
         var out: [String] = []
@@ -580,7 +578,7 @@ public struct DiagnosticsEngine: Sendable {
         return out
     }
 
-    /// ADDED (Unit 6): false for names of known non-fan SMC clients (AlDente's helper and the like).
+    /// false for names of known non-fan SMC clients (AlDente's helper and the like).
     public static func isPlausibleFanController(_ name: String) -> Bool {
         let lower = name.lowercased()
         return !knownNonFanSMCClients.contains { lower.contains($0) }

@@ -1,4 +1,4 @@
-// FanCurveSection.swift — Thermik (MIT). Unit 8. The curve card of the Fans page (SPEC §4.6 W4, §4.9): power-source
+// FanCurveSection.swift — Thermik (MIT). The curve card of the Fans page: power-source
 // tabs (adapter / battery, P1), preset menu, driving-sensor picker ("Specific sensor…"), hysteresis, ramp-up / ramp-down
 // times, "Release to macOS below the first point", the FanCurveEditor with the live operating point, and the floating
 // glass [Revert] [Apply] bar that appears only with unsaved changes.

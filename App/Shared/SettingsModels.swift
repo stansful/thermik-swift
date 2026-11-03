@@ -1,4 +1,4 @@
-// SettingsModels.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). App-level persisted settings types.
+// SettingsModels.swift — Thermik (MIT). App-level persisted settings types.
 import Foundation
 import ThermikCore
 

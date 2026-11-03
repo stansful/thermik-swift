@@ -1,4 +1,4 @@
-// Routing.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). Navigation + what is on screen (drives sampling cadence).
+// Routing.swift — Thermik (MIT). Navigation + what is on screen (drives sampling cadence).
 import Foundation
 import Observation
 import ThermikCore

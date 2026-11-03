@@ -1,4 +1,4 @@
-// EventLogStore.swift — Thermik (MIT). Implemented by Unit 0; OWNER afterwards: Unit 6 (API frozen; additions marked).
+// EventLogStore.swift — Thermik (MIT).
 // In-memory event log (Logs page) + CSV event-column feed. Any unit may call record().
 import Foundation
 import Observation
@@ -7,7 +7,7 @@ import ThermikCore
 @MainActor @Observable final class EventLogStore {
     private(set) var events: [AppEvent] = []
     let capacity = 2000
-    /// ADDED (Unit 6): CSV tokens kept for CSVLoggingService between two drains (it drains every tick; the cap only
+    /// CSV tokens kept for CSVLoggingService between two drains (it drains every tick; the cap only
     /// matters if nothing drains, e.g. before the first tick).
     let csvTokenCapacity = 256
     @ObservationIgnored private var pendingCSV: [String] = []

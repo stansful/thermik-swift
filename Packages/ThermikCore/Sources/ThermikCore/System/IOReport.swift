@@ -1,4 +1,4 @@
-// IOReport.swift — Thermik (MIT). OWNER: Unit 2.
+// IOReport.swift — Thermik (MIT).
 // Apple Silicon CPU-cluster / per-core / GPU frequency and residency, SoC power and the SSD-controller temperature from
 // the private /usr/lib/libIOReport.dylib (SYS §4). No root, works under Hardened Runtime without entitlements.
 // Function signatures follow the open-source users of this API: macmon (vladkens/macmon, MIT, Rust) and

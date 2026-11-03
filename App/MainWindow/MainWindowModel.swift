@@ -1,4 +1,4 @@
-// MainWindowModel.swift — Thermik (MIT). Unit 8. Navigation and per-window UI state of the main window.
+// MainWindowModel.swift — Thermik (MIT). Navigation and per-window UI state of the main window.
 // Owned by WindowManager (so routes from the menu bar, notifications and ⌘1…⌘8 land in the same window) and read by
 // MainWindowRoot. Changes that affect sampling cadence (page, inspected sensor) are reported through `onVisibleChange`;
 // WindowManager turns them into VisibilityTracker updates (SPEC §4.6).

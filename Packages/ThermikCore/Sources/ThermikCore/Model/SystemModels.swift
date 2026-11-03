@@ -1,6 +1,6 @@
-// SystemModels.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). Data snapshots produced by Unit 2's readers.
+// SystemModels.swift — Thermik (MIT). Data snapshots produced by the system readers.
 // Field sets copied from research/system/prod/*.swift (verified on M4 Max / macOS 27.0.1).
-// Readers (Unit 2) live in ThermikCore/System/*.swift and construct these with the memberwise inits.
+// Readers live in ThermikCore/System/*.swift and construct these with the memberwise inits.
 import Foundation
 
 // MARK: Battery & power sources (SYS §2)

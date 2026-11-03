@@ -1,4 +1,4 @@
-// HistoryChartPanel.swift — Thermik (MIT). Unit 8. History charts for the main window (SPEC §4.11):
+// HistoryChartPanel.swift — Thermik (MIT). History charts for the main window:
 // ≤ 1 h → the kit's LiveHistoryChart (LTTB samples, hover in a sibling overlay layer, explicit domains, no implicit
 // animation); 6 h / 24 h → a min/max envelope band + average line built from HistoryStore buckets, with the same
 // hover design (ChartHover written by ChartHoverInput, drawn by the kit's ChartHoverLayer). Values are converted to the

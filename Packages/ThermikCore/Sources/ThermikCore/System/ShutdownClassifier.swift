@@ -1,5 +1,4 @@
-// ShutdownClassifier.swift — Thermik (MIT). OWNER: Unit 2. API FROZEN (`classify`); `classify(reason:)` and
-// `intelCodeDescription(_:)` are additive.
+// ShutdownClassifier.swift — Thermik (MIT). Shutdown classification.
 // Conservative token classifier for kern.shutdownreason (+ Intel "Previous shutdown cause" codes), SYS §7.
 // Apple documents neither vocabulary: the verdict is a heuristic and the UI always shows the raw string next to it.
 import Foundation

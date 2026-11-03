@@ -1,4 +1,4 @@
-// PopoverRoot.swift — Thermik (MIT). OWNER: Unit 7. The menu bar popover (SPEC §4.5, DES §7.7): 360 pt wide,
+// PopoverRoot.swift — Thermik (MIT). The menu bar popover: 360 pt wide,
 // height = content up to 620 pt (or the screen); header and fans stay pinned, the sensor list scrolls, footer pinned.
 // The content tree exists only while the panel is open (StatusPanelState.isOpen), so a closed popover costs nothing.
 import SwiftUI
@@ -73,7 +73,7 @@ extension StatusPanelState? {
     }
 }
 
-// MARK: - DEBUG overrides (SPEC §5 Unit 7 acceptance: force fanless / helper-missing / stale / ◆ states)
+// MARK: - DEBUG overrides (force fanless / helper-missing / stale / ◆ states)
 
 /// Forced UI states for manual verification. Always empty in Release builds. In DEBUG builds they are toggled from the
 /// status item's right-click "Debug" menu or set at launch, e.g. `open Thermik.app --args -ThermikDemo YES

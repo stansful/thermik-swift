@@ -1,4 +1,4 @@
-// OverviewPage.swift — Thermik (MIT). Unit 8. Overview (SPEC §4.6, DES §7.8): KPI tiles (Hottest with HeatGlow,
+// OverviewPage.swift — Thermik (MIT). Overview: KPI tiles (Hottest with HeatGlow,
 // thermal pressure = the hottest sensor's level on its colour scale, fans, power) on an aurora band, chip thermal map
 // (only when the catalog has a die layout) or per-group bars, top-5 sensors with sparklines, live history (CPU / GPU /
 // SoC hottest + fan rpm strip, hover callout in a separate overlay layer), diagnostics summary chips and a basic

@@ -1,4 +1,4 @@
-// Events.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). In-app event log entries (Logs page, CSV event column).
+// Events.swift — Thermik (MIT). In-app event log entries (Logs page, CSV event column).
 import Foundation
 
 public enum AppEventPayload: Sendable, Hashable {

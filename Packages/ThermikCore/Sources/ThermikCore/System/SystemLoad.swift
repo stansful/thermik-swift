@@ -1,4 +1,4 @@
-// SystemLoad.swift — Thermik (MIT). OWNER: Unit 2.
+// SystemLoad.swift — Thermik (MIT).
 // Per-core CPU load, Activity Monitor-compatible memory figures and GPU utilization (SYS §3). Public Mach / IORegistry
 // APIs only: no root, no SMC, sandbox-safe. Verified on M4 Max / macOS 27.0.1.
 import Darwin

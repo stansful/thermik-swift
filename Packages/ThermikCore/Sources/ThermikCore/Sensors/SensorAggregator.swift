@@ -1,4 +1,4 @@
-// SensorAggregator.swift — Thermik (MIT). OWNER: Unit 1. API FROZEN.
+// SensorAggregator.swift — Thermik (MIT).
 // Pure: computes AggregateValues and per-DisplayGroup stats from one frame of VALID raw values (§2.5.4/§2.5.5).
 //
 // Formulas (SPEC §2.5.5; the Intel chains of §3.4 are resolved into the headline sets by SensorCatalog):

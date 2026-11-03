@@ -1,4 +1,4 @@
-//  EffectFrames.swift — the aurora, the heat glow and the chip thermal map, drawn on the CPU (MIT). OWNER: Unit 7.
+//  EffectFrames.swift — the aurora, the heat glow and the chip thermal map, drawn on the CPU (MIT).
 //  Ported from the former Metal shaders (same noise, distances, falloffs and colour maths, checked pixel by pixel). A
 //  SwiftUI Metal effect on screen, even a paused one, made RenderBox hold 70–260 MB of GPU surfaces; a frame here is a
 //  small bitmap. Terms that change slowly across the picture (noise, the weighted temperature field) are computed every

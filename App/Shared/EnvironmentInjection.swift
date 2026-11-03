@@ -1,4 +1,4 @@
-// EnvironmentInjection.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). Every hosted SwiftUI root calls
+// EnvironmentInjection.swift — Thermik (MIT). Every hosted SwiftUI root calls
 // `.thermikEnvironment(env)`; views read stores with `@Environment(SensorStore.self) private var sensors`.
 import SwiftUI
 

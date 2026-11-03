@@ -1,4 +1,4 @@
-// PowerSources.swift — Thermik (MIT). OWNER: Unit 2.
+// PowerSources.swift — Thermik (MIT).
 // IOPowerSources (public, sandbox-safe; SYS §2.4): providing source, time remaining, warning level, accessories (P2).
 import Foundation
 import IOKit.ps

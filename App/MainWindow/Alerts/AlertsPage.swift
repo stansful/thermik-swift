@@ -1,7 +1,7 @@
-// AlertsPage.swift — Thermik (MIT). Unit 8. Alerts page (SPEC §4.6 W9, §2.10): notification-permission banner
+// AlertsPage.swift — Thermik (MIT). Alerts page: notification-permission banner
 // (→ System Settings › Notifications when denied), master switch and snooze state, the rule list (enable switch,
 // subject, condition "above 95° for 30 s", cooldown) with an Add / Edit sheet (AlertRuleEditor.swift), "Send test
-// notification", "Reset to defaults…" and the recent alerts list. Rule storage is AlertStore (Unit 6).
+// notification", "Reset to defaults…" and the recent alerts list. Rule storage is AlertStore.
 import SwiftUI
 import ThermikCore
 

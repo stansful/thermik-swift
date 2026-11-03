@@ -1,5 +1,4 @@
-// Display+Strings.swift — Thermik (MIT). Created by Unit 0; OWNER: Unit 8 (Unit 7 may ADD cases only via its own
-// file-private helpers). Localized titles for Core enums. Core never contains UI strings (SPEC §4.12).
+// Display+Strings.swift — Thermik (MIT). Localized titles for Core enums. Core never contains UI strings.
 import Foundation
 import ThermikCore
 import ThermikHelperShared
@@ -161,7 +160,6 @@ extension DiagnosticKind {
     }
 }
 
-// MARK: - Unit 8 additions (add-only; the keys above stay unchanged)
 
 extension SensorGroup {
     /// Hardware block of a key (Sensors inspector).

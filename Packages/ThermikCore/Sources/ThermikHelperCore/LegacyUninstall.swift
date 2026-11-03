@@ -1,4 +1,4 @@
-// LegacyUninstall.swift — Thermik (MIT). HELPER ONLY. OWNER: Unit 4.
+// LegacyUninstall.swift — Thermik (MIT). HELPER ONLY.
 // XPC `uninstallLegacyHelper` for legacy installs (HELP §4.3; SPEC §2.6.5 step 8): the root helper deletes its own
 // fixed set of files — no path ever comes from the client (I14) — replies, then boots itself out. launchd's SIGTERM
 // lands in main.swift's handler (restore + exit 0). The app needs no administrator password for this.

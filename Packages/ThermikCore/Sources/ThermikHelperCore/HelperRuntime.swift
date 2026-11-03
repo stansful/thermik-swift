@@ -1,4 +1,4 @@
-// HelperRuntime.swift — Thermik (MIT). HELPER ONLY. OWNER: Unit 4.
+// HelperRuntime.swift — Thermik (MIT). HELPER ONLY.
 // Process-level facts the helper's main.swift wires together (SPEC §2.6.5): loggers, install-kind detection,
 // the embedded version info, and the fallback controller used when the SMC cannot be opened.
 import Foundation
@@ -62,7 +62,8 @@ public final class UnavailableFanController: FanControlling {
     public func ftstValue() -> Int? { nil }
     public func setManual(_ index: Int, targetRPM: Double) throws -> Double { throw FanWriteError.notControllable }
     public func setAutomatic(_ index: Int) throws { throw FanWriteError.notControllable }
-    @discardableResult public func restoreAll(force: Bool, reason: String) -> [String] { [] }
+    @discardableResult public func restoreAll(reason: String) -> [String] { [] }
+    @discardableResult public func forceRestoreAll(reason: String) -> [String] { [] }
     public func adoptPersistedState(ftstSetByUs: Bool) {}
     public func reclaimedFans() -> [Int] { [] }
     public func foreignControlSuspected() -> Bool { false }

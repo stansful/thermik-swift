@@ -1,4 +1,4 @@
-// LogsPage.swift — Thermik (MIT). Unit 8. Logs page (SPEC §4.6 W8, L3): table of in-app events (time, type, details;
+// LogsPage.swift — Thermik (MIT). Logs page: table of in-app events (time, type, details;
 // newest first) with a type filter and search, plus the CSV logging options inline (LoggingSettingsSection).
 import SwiftUI
 import ThermikCore

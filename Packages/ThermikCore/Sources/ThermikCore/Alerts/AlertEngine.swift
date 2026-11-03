@@ -1,4 +1,4 @@
-// AlertEngine.swift — Thermik (MIT). OWNER: Unit 6. API FROZEN (init / evaluate / reset); additions are marked.
+// AlertEngine.swift — Thermik (MIT).
 // Pure, stateful: duration ("for N s"), hysteresis re-arm and cooldown per rule (SPEC §2.10).
 //
 // One state machine per rule:
@@ -55,10 +55,10 @@ public struct AlertEngine: Sendable {
 
     public init() {}
 
-    /// ADDED (Unit 6): rules currently in the raised state (AlertStore mirrors this into `activeRuleIDs`).
+    /// rules currently in the raised state (AlertStore mirrors this into `activeRuleIDs`).
     public var raisedRuleIDs: Set<UUID> { Set(states.lazy.filter { $0.value.phase == .raised }.map(\.key)) }
 
-    /// ADDED (Unit 6): true once the one-shot rule `id` has fired (AlertStore stops passing the shutdown verdict).
+    /// true once the one-shot rule `id` has fired (AlertStore stops passing the shutdown verdict).
     public func hasFired(_ id: UUID) -> Bool { firedOnce.contains(id) }
 
     public mutating func evaluate(rules: [AlertRule], inputs: AlertInputs) -> [AlertEvent] {
@@ -177,7 +177,7 @@ public struct AlertEngine: Sendable {
     }
 }
 
-/// ADDED (Unit 6): stable machine name of a subject, e.g. "anySensor", "aggregate(cpuHottest)", "group(cpu)",
+/// stable machine name of a subject, e.g. "anySensor", "aggregate(cpuHottest)", "group(cpu)",
 /// "sensor(smc:Tp01)", "thermalPressure(heavy)". Used by `AppEventPayload.csvToken` (CSV event column, SPEC §2.12)
 /// and notification thread identifiers. Without it, string interpolation prints module-qualified associated
 /// values ("aggregate(ThermikCore.AggregateKind.cpuHottest)").

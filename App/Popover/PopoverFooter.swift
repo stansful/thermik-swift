@@ -1,4 +1,4 @@
-// PopoverFooter.swift — Thermik (MIT). OWNER: Unit 7. Popover footer (SPEC §4.5): alerts-today / diagnostics status
+// PopoverFooter.swift — Thermik (MIT). Popover footer: alerts-today / diagnostics status
 // links (→ Alerts / Diagnostics pages), the gear (⌘, → Settings › General in the main window) and Quit (⌘Q). The main
 // window opens from a sensor row, the status links, the right-click menu or the gear.
 import SwiftUI

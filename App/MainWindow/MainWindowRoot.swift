@@ -1,5 +1,5 @@
-// MainWindowRoot.swift — Thermik (MIT). Unit 0 stub; OWNER: Unit 8. NavigationSplitView main window (SPEC §4.6,
-// DES §7.8): source-list sidebar (Overview, Sensors, Fans, Battery, System, Diagnostics, Logs, Alerts, then Settings in
+// MainWindowRoot.swift — Thermik (MIT). NavigationSplitView main window:
+// source-list sidebar (Overview, Sensors, Fans, Battery, System, Diagnostics, Logs, Alerts, then Settings in
 // its own section) with badges and a footer (model, chip, helper status dot); toolbar with the history range
 // (5 m…24 h), export and the stale chip. Settings are a page of this window, not a window of their own.
 // Pages live in App/MainWindow/<Page>/; navigation state in MainWindowModel (owned by WindowManager).
@@ -201,7 +201,7 @@ private struct PageContainer: View {
     }
 }
 
-/// Export the visible range of history (P1): CSV or JSON via HistoryStore.export.
+/// Export the visible range of history (P1) as CSV or JSON.
 private struct HistoryExportMenu: View {
     var model: MainWindowModel
     @Environment(HistoryStore.self) private var history
@@ -211,8 +211,8 @@ private struct HistoryExportMenu: View {
 
     var body: some View {
         Menu {
-            Button { export(json: false) } label: { Text("Export as CSV…") }
-            Button { export(json: true) } label: { Text("Export as JSON…") }
+            Button { exportCSV() } label: { Text("Export as CSV…") }
+            Button { exportJSON() } label: { Text("Export as JSON…") }
         } label: {
             Label { Text("Export") } icon: { Image(systemName: "square.and.arrow.up") }
         }
@@ -229,12 +229,19 @@ private struct HistoryExportMenu: View {
         return ids
     }
 
-    private func export(json: Bool) {
-        let data = history.export(seriesIDs, window: model.historyWindow, json: json)
+    private func exportCSV() {
+        save(history.exportCSV(seriesIDs, window: model.historyWindow), fileExtension: "csv", contentType: .commaSeparatedText)
+    }
+
+    private func exportJSON() {
+        save(history.exportJSON(seriesIDs, window: model.historyWindow), fileExtension: "json", contentType: .json)
+    }
+
+    private func save(_ data: Data, fileExtension: String, contentType: UTType) {
         let panel = NSSavePanel()
         let stamp = Date().formatted(.iso8601.year().month().day().dateSeparator(.dash))
-        panel.nameFieldStringValue = "Thermik-history-\(stamp).\(json ? "json" : "csv")"
-        panel.allowedContentTypes = [json ? .json : .commaSeparatedText]
+        panel.nameFieldStringValue = "Thermik-history-\(stamp).\(fileExtension)"
+        panel.allowedContentTypes = [contentType]
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try data.write(to: url, options: .atomic) } catch { NSAlert(error: error).runModal() }

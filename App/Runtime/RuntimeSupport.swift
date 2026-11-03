@@ -1,4 +1,4 @@
-// RuntimeSupport.swift — Thermik (MIT). OWNER: Unit 5. Small concurrency helpers for the app runtime: continuous
+// RuntimeSupport.swift — Thermik (MIT). Small concurrency helpers for the app runtime: continuous
 // observation of @Observable state from non-view code, and bounded waits.
 import Foundation
 import Observation

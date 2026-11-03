@@ -1,4 +1,4 @@
-// Heuristics.swift — Thermik (MIT). OWNER: Unit 1. Descriptors for keys that no per-chip database describes (SPEC §3.3).
+// Heuristics.swift — Thermik (MIT). Descriptors for keys that no per-chip database describes.
 //
 // Used (1) for every key of a Mac without `<platform>.json`, (2) for keys that a DB does not list (new firmware, other
 // SKU of the same SoC), and (3) by `thermik-probe sensors discover`, which also runs the P1 detectors at the bottom.

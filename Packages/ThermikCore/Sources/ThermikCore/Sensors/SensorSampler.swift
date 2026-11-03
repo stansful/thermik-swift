@@ -1,4 +1,4 @@
-// SensorSampler.swift — Thermik (MIT). OWNER: Unit 1. Public API is FROZEN: `public actor SensorSampler: SensorSampling`
+// SensorSampler.swift — Thermik (MIT). Public `SensorSampling` actor.
 // + `init()`. Discovery and one read pass per tick, off the main actor (SPEC §2.3.1, §2.5.2, §2.5.3).
 //
 // The actor owns every non-Sendable piece: the SMC provider (one `SMCConnection`), the HID reader (one full
@@ -186,13 +186,13 @@ public actor SensorSampler: SensorSampling {
         var fans: FanControlState?
         var power = PowerValues.empty
         if let smc, smcHealthy, let inv = inventory {
-            if request.includeFans, !inv.fanProfile.fans.isEmpty {
+            if request.components.contains(.fans), !inv.fanProfile.fans.isEmpty {
                 let before = smc.connection.connectionFailureCount
                 fans = FanReader.snapshot(smc.connection, profile: inv.fanProfile, now: date)
                 // The link died during the snapshot (or there was no pass to notice it): its failed reads are 0 rpm.
                 if smc.connection.connectionFailureCount != before { fans = nil }
             }
-            if request.includePower { power = smc.power() }
+            if request.components.contains(.power) { power = smc.power() }
         }
         if let smc { noteSMCLink(smc.connection, failed: smc.connection.connectionFailureCount != smcFailures) }
         return SensorFrame(date: date, values: values, raw: raw, gated: gated, fans: fans, power: power, isPostWake: postWake)

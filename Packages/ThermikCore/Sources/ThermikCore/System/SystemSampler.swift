@@ -1,4 +1,4 @@
-// SystemSampler.swift — Thermik (MIT). OWNER: Unit 2. API FROZEN: `public actor SystemSampler: SystemSampling` + `init()`.
+// SystemSampler.swift — Thermik (MIT).
 // Owns every stateful System reader (SPEC §2.3.1, §2.7) and publishes Sendable snapshots. Never touches the SMC.
 // Slow tools (`system_profiler`, `pmset`, `log show`) run through `ProcessRunner` on a utility GCD thread, so the actor is
 // suspended (not blocked) while they run and `sample(_:)` keeps being served.
@@ -42,15 +42,15 @@ public actor SystemSampler: SystemSampling {
     /// subscription (≈ 65 ms, logged). Thermal pressure is read on every call (~26 µs).
     public func sample(_ request: SystemSampleRequest) async -> SystemFrame {
         var load: [CoreLoad]?
-        if request.cpuLoad {
+        if request.contains(.cpuLoad) {
             let l = cpu.sample()
             load = l.isEmpty ? nil : l                           // nil right after start/wake (no baseline yet)
         }
-        let memory = request.memory ? MemoryReader.read() : nil
-        let gpu = request.gpuUsage ? GPUReader.primary() : nil
-        let socMetrics = request.soc ? sampleSoC() : nil
-        let bat = request.battery ? battery.read() : nil
-        let power = request.powerSources ? PowerSources.summary() : nil
+        let memory = request.contains(.memory) ? MemoryReader.read() : nil
+        let gpu = request.contains(.gpuUsage) ? GPUReader.primary() : nil
+        let socMetrics = request.contains(.soc) ? sampleSoC() : nil
+        let bat = request.contains(.battery) ? battery.read() : nil
+        let power = request.contains(.powerSources) ? PowerSources.summary() : nil
         return SystemFrame(date: Date(), cpuLoad: load, memory: memory, gpu: gpu, soc: socMetrics, battery: bat,
                            powerSources: power, pressure: thermal.current(),
                            processThermalState: ThermalPressureReader.processThermalState())
@@ -88,7 +88,7 @@ public actor SystemSampler: SystemSampling {
         top.reset()
     }
 
-    // MARK: Additive API (not part of the frozen protocol)
+    // MARK: Diagnostics and probe
 
     /// P2 "Devices" section: Bluetooth accessory batteries (names deliberately not exposed). ~1 ms.
     public func accessories() async -> [AccessoryBattery] { PowerSources.accessories() }

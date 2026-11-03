@@ -1,4 +1,4 @@
-// LogModels.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). CSV logging configuration & rows (SPEC §2.12).
+// LogModels.swift — Thermik (MIT). CSV logging configuration and rows.
 import Foundation
 
 public enum LogColumnGroup: String, Codable, Sendable, CaseIterable {

@@ -1,6 +1,6 @@
-// HelperControlCard.swift — Thermik (MIT). Unit 8. Helper status + actions, shared by the Fans page, Settings › Helper
+// HelperControlCard.swift — Thermik (MIT). Helper status + actions, shared by the Fans page, Settings › Helper
 // and onboarding (SPEC §4.6 W4, §4.7, F8). Reflects HelperManager.state; Install / Approve (Login Items) / Update /
-// Reinstall / Uninstall call HelperManager (Unit 4), which owns both install modes (SMAppService with a Team ID, the
+// Reinstall / Uninstall call HelperManager, which owns both install modes (SMAppService with a Team ID, the
 // legacy admin-prompt installer for ad-hoc builds). This view never talks to launchd or the SMC itself.
 import AppKit
 import SwiftUI

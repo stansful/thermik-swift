@@ -1,14 +1,20 @@
-// SamplingProtocols.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). Sampler actors ↔ app runtime.
+// SamplingProtocols.swift — Thermik (MIT). Sampler actors ↔ app runtime.
 import Foundation
 import ThermikSMC
 
 /// What to read in one sensor tick (built by the app's SamplingCoordinator from what is visible/needed).
 public struct SampleRequest: Sendable, Equatable {
+    public struct Components: OptionSet, Sendable {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
+        public static let fans = Components(rawValue: 1 << 0)
+        public static let power = Components(rawValue: 1 << 1)
+    }
+
     public var sensorIDs: [SensorID]          // SMC + HID mixed; HID ids are read at most every hidInterval
-    public var includeFans: Bool
-    public var includePower: Bool
-    public init(sensorIDs: [SensorID], includeFans: Bool = true, includePower: Bool = true) {
-        self.sensorIDs = sensorIDs; self.includeFans = includeFans; self.includePower = includePower
+    public var components: Components
+    public init(sensorIDs: [SensorID], components: Components = [.fans, .power]) {
+        self.sensorIDs = sensorIDs; self.components = components
     }
 }
 
@@ -65,18 +71,15 @@ public protocol SensorSampling: Actor {
     func didWake() async
 }
 
-public struct SystemSampleRequest: Sendable, Equatable {
-    public var cpuLoad = false
-    public var memory = false
-    public var gpuUsage = false
-    public var soc = false                    // IOReport frequencies/power (~6–8 ms): only while visible
-    public var battery = false
-    public var powerSources = false
-    public init(cpuLoad: Bool = false, memory: Bool = false, gpuUsage: Bool = false, soc: Bool = false,
-                battery: Bool = false, powerSources: Bool = false) {
-        self.cpuLoad = cpuLoad; self.memory = memory; self.gpuUsage = gpuUsage; self.soc = soc
-        self.battery = battery; self.powerSources = powerSources
-    }
+public struct SystemSampleRequest: OptionSet, Sendable {
+    public let rawValue: Int
+    public init(rawValue: Int) { self.rawValue = rawValue }
+    public static let cpuLoad = SystemSampleRequest(rawValue: 1 << 0)
+    public static let memory = SystemSampleRequest(rawValue: 1 << 1)
+    public static let gpuUsage = SystemSampleRequest(rawValue: 1 << 2)
+    public static let soc = SystemSampleRequest(rawValue: 1 << 3)       // IOReport frequencies/power (~6–8 ms): only while visible
+    public static let battery = SystemSampleRequest(rawValue: 1 << 4)
+    public static let powerSources = SystemSampleRequest(rawValue: 1 << 5)
 }
 
 public struct SystemFrame: Sendable {

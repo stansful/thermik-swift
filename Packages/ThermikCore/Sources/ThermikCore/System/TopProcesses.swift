@@ -1,4 +1,4 @@
-// TopProcesses.swift — Thermik (MIT). OWNER: Unit 2. P1 (alert notification bodies: "what is heating the Mac").
+// TopProcesses.swift — Thermik (MIT). CPU process sampling for alert notification bodies.
 // libproc: proc_listallpids + proc_pid_rusage(RUSAGE_INFO_V4). CPU % = Δ(ri_user_time + ri_system_time) / Δwall × 100,
 // i.e. percent of ONE core (Activity Monitor's convention). Without root only the user's own processes are readable;
 // the others fail silently and are skipped. ~2–4 ms for ~700 processes.

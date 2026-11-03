@@ -1,5 +1,4 @@
-//  ThermikCharts.swift — live history chart and the chart kit for Thermik (MIT). OWNER: Unit 7 (kit; public API frozen
-//  for Unit 8).
+//  ThermikCharts.swift — live history chart and the chart kit for Thermik (MIT).
 //  Charts rules (SPEC §4.11): explicit domains, no implicit animation on data ticks, hover in a sibling overlay,
 //  monotone interpolation, at most one area, dashed thresholds, localized relative axis labels.
 //  Drawn with Shapes and Text, not Swift Charts: any Swift Charts chart on screen made RenderBox hold 150–260 MB of
@@ -479,4 +478,4 @@ struct SelectionCallout: View {
     }
 }
 
-// Fan curve editor: App/MainWindow/Fans/FanCurveEditor.swift (Unit 8; percent-based, binds to Core [CurvePoint]).
+// Fan curve editor: App/MainWindow/Fans/FanCurveEditor.swift (percent-based, binds to Core [CurvePoint]).

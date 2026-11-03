@@ -1,4 +1,4 @@
-// BootHistoryReader.swift — Thermik (MIT). OWNER: Unit 2.
+// BootHistoryReader.swift — Thermik (MIT).
 // Why the Mac last booted / shut down / slept / woke (SYS §7). Every source is readable without root:
 // undocumented sysctls (Apple Silicon), IOPMrootDomain properties, the DumpPanic breadcrumb, and on Intel/T2 the
 // "Previous shutdown cause: N" kernel line from the unified log (one narrow `log show` window, once per boot).

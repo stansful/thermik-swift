@@ -209,7 +209,7 @@ public enum HelperWire {
     public static func makeInterface() -> NSXPCInterface { NSXPCInterface(with: ThermikHelperXPC.self) }
 }
 
-/// App-side async facade over the XPC connection. Implemented by `HelperConnection` (Unit 4) and by
+/// App-side async facade over the XPC connection. Implemented by `HelperConnection` and by
 /// `MockFanHelperClient` (demo mode). Every method may throw NSError in `ThermikHelper.errorDomain`
 /// or NSCocoaErrorDomain 4097/4099/4102 (connection interrupted / invalid / code-signing requirement failed).
 public protocol FanHelperClient: AnyObject, Sendable {

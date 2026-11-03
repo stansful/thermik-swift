@@ -1,4 +1,4 @@
-// SMCFanController.swift — Thermik (MIT). HELPER ONLY. The real `FanControlling` behind HelperService (Unit 4):
+// SMCFanController.swift — Thermik (MIT). HELPER ONLY. The real `FanControlling` behind HelperService:
 // FanWriteSequencer (writes, allow-list, Ftst unlock, clamp) + FanReader (live state) + ThermalSafetyMonitor
 // (I8/I9). Called only on the helper's serial state queue, so it keeps no locks of its own.
 //
@@ -27,7 +27,7 @@ public final class SMCFanController: FanControlling {
     private let log: (String) -> Void
     /// The crash-recovery marker (I7). While it exists the fans may still be Thermik's (a previous helper instance
     /// died while controlling), so forcing seen in the SMC is not evidence of a foreign controller (I10).
-    /// nil disables the check. HelperService (Unit 4) owns the file; this class only tests for its presence.
+    /// nil disables the check. HelperService owns the file; this class only tests for its presence.
     public var markerPath: String? = ThermikHelper.manualMarkerPath
     /// Set by `adoptPersistedState` (the marker was found at startup) until the next full restore.
     private var recoveringFromMarker = false
@@ -108,10 +108,18 @@ public final class SMCFanController: FanControlling {
         if !sequencer.isControlling { safety.reset() }
     }
 
-    @discardableResult public func restoreAll(force: Bool, reason: String) -> [String] {
+    @discardableResult public func restoreAll(reason: String) -> [String] {
+        completeRestore { sequencer.releaseAll(reason: reason) }
+    }
+
+    @discardableResult public func forceRestoreAll(reason: String) -> [String] {
+        completeRestore { sequencer.forceReleaseAll(reason: reason) }
+    }
+
+    private func completeRestore(_ release: () -> [String]) -> [String] {
         defer { noteLink() }
         let linkFailures = link?.connectionFailureCount
-        let failures = sequencer.releaseAll(force: force, reason: reason)
+        let failures = release()
         if failures.isEmpty {
             recoveringFromMarker = false
             safety.reset()

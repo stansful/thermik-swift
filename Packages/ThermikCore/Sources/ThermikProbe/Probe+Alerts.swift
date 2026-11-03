@@ -1,5 +1,5 @@
-// Probe+Alerts.swift — OWNER: Unit 6. `thermik-probe alerts replay`: feeds synthetic 1 Hz series through
-// AlertRule.defaultRules with a pure AlertEngine (no notifications, no hardware) and checks the SPEC §5 Unit 6 cases:
+// Probe+Alerts.swift — `thermik-probe alerts replay`: feeds synthetic 1 Hz series through
+// AlertRule.defaultRules with a pure AlertEngine (no notifications, no hardware):
 // raise after exactly 10 s above, no raise on a single spike, clear below threshold − hysteresis, no second raise
 // within the cooldown, one-shot abnormalShutdown. Exits with status 1 when a check fails.
 import Foundation

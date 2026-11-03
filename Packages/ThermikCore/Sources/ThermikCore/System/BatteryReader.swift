@@ -1,4 +1,4 @@
-// BatteryReader.swift — Thermik (MIT). OWNER: Unit 2.
+// BatteryReader.swift — Thermik (MIT).
 // AppleSmartBattery gauge read from the IORegistry (no root, no SMC; SYS §2.1–2.3, verified on M4 Max / macOS 27.0.1).
 import Foundation
 import IOKit

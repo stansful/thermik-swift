@@ -1,4 +1,4 @@
-// Probe+Helper.swift — OWNER: Unit 4. Manual verification of the privileged-helper stack (NOT a test target).
+// Probe+Helper.swift — Manual verification of the privileged-helper stack (NOT a test target).
 //   thermik-probe helper selftest [Thermik.app]   HelperService + HelperXPCServer + PeerValidator + HelperConnection
 //                                                 in ONE process over NSXPCListener.anonymous() with MockFanController.
 //                                                 Never touches the SMC, needs no root, installs nothing.
@@ -510,8 +510,8 @@ private enum HelperSelfTest {
             crashed.start()
             let log = crashed.withController { ($0 as? MockFanController)?.log ?? [] }
             let s = crashed.stateSnapshot()
-            check(log.contains("restoreAll(force: true, reason: startupRecovery)") && !store.exists && s.lastRevertReason == "startupRecovery",
-                  "marker at start (crashed pid 4242) → restoreAll(force: true), marker removed")
+            check(log.contains("forceRestoreAll(reason: startupRecovery)") && !store.exists && s.lastRevertReason == "startupRecovery",
+                  "marker at start (crashed pid 4242) → forceRestoreAll, marker removed")
             crashed.shutdown(reason: "selftest")
         } catch {
             check(false, "cannot write a test marker: \(error.localizedDescription)")

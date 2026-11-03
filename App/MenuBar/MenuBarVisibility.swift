@@ -1,5 +1,5 @@
-//  MenuBarVisibility.swift — Thermik (MIT). OWNER: Unit 7. Hidden / notch detection for the status item (SPEC §4.4 B5,
-//  FEAT §9.3): macOS silently drops items that do not fit (behind the camera notch, crowded menu bar) and, on 26+,
+//  MenuBarVisibility.swift — Thermik (MIT). Hidden / notch detection for the status item.
+//  macOS silently drops items that do not fit (behind the camera notch, crowded menu bar) and, on 26+,
 //  items the user switched off in System Settings › Menu Bar. Detection is event-driven (no polling):
 //  2 s after launch, on screen-parameter and Space changes, on app activation (wide app menus push items away), on
 //  occlusion changes of the item's window and on `isVisible` (KVO; ⌘-drag removal). Hidden for > 10 s → one hint per

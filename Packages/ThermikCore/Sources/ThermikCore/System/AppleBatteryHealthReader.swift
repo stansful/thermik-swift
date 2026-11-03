@@ -1,4 +1,4 @@
-// AppleBatteryHealthReader.swift — Thermik (MIT). OWNER: Unit 2.
+// AppleBatteryHealthReader.swift — Thermik (MIT).
 // Apple's own "Maximum Capacity" and condition, from `system_profiler SPPowerDataType -json` (SYS §2.3).
 // ~125 ms (process spawn): launch + every 6 h, cached by SystemSampler. JSON values are not localized.
 import Foundation

@@ -1,4 +1,4 @@
-// AlertRuleEditor.swift — Thermik (MIT). Unit 8. Add / Edit sheet for one AlertRule (SPEC §4.6 W9, §2.10): subject
+// AlertRuleEditor.swift — Thermik (MIT). Add / Edit sheet for one AlertRule: subject
 // (any sensor, aggregates, groups, a specific sensor, fan stalled, fan mode changed, thermal pressure, abnormal
 // shutdown, battery service), threshold, duration, hysteresis, cooldown, sound (P1) and "Fans to Max" (P1).
 // Thresholds are stored in °C and shown in the user's unit. Email / webhook channels are P2 and hidden in v1.

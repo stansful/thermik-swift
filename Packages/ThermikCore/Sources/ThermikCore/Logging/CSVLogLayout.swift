@@ -1,4 +1,4 @@
-// CSVLogLayout.swift — Thermik (MIT). OWNER: Unit 6 (new). The column layout of a Thermik CSV log and how one
+// CSVLogLayout.swift — Thermik (MIT). The column layout of a Thermik CSV log and how one
 // sample maps onto it (SPEC §2.12). Shared by the app's CSVLoggingService and `thermik-probe log write`, so both
 // produce byte-identical layouts.
 //

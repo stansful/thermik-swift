@@ -1,4 +1,4 @@
-// Tick.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). One sampling tick fanned out to all consumers.
+// Tick.swift — Thermik (MIT). One sampling tick fanned out to all consumers.
 import Foundation
 import ThermikCore
 

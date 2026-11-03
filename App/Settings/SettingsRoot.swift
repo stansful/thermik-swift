@@ -1,4 +1,4 @@
-// SettingsRoot.swift — Thermik (MIT). Unit 0 stub; OWNER: Unit 8. Content of one Settings tab (SPEC §4.7); the
+// SettingsRoot.swift — Thermik (MIT). Content of one Settings tab; the
 // tabs are the strip of SettingsPage, the Settings page of the main window. Every control writes its SettingsStore key immediately
 // (keys: §2.11). This file: General, Menu Bar, Sensors, Fans. SettingsTabs.swift: Alerts, Logging, Appearance,
 // Helper, Advanced, About.
@@ -43,7 +43,7 @@ private struct GeneralSettings: View {
         let login = LaunchAtLogin.shared
         Form {
             Section {
-                // The toggle writes the intent; LaunchAtLogin (Unit 5) observes it and registers SMAppService.mainApp.
+                // The toggle writes the intent; LaunchAtLogin observes it and registers SMAppService.mainApp.
                 Toggle(isOn: $s.launchAtLogin) { Text("Launch at login") }
                 if settings.launchAtLogin, login.requiresApproval {
                     HStack {
@@ -78,7 +78,7 @@ private struct GeneralSettings: View {
                 Toggle(isOn: $s.showDockIconWhileWindowOpen) { Text("Show Dock icon while a window is open") }
             }
             Section {
-                // Global hot keys (P1, Unit 5's HotKeys): recorded combos are stored in settings.hotKeys.
+                // Recorded global hot keys are stored in settings.hotKeys.
                 ForEach([HotKeyAction.showMainWindow, .togglePopover], id: \.self) { action in
                     LabeledContent {
                         HotKeyRecorder(action: action)
@@ -115,7 +115,7 @@ private struct GeneralSettings: View {
     }
 }
 
-/// Relaunch after a language change or a reset. Uses the lifecycle owner's relaunch (Unit 5): a helper shell waits
+/// Relaunch after a language change or a reset: a helper shell waits
 /// until this process has exited (so the new instance does not hit the single-instance check), gives up after 30 s,
 /// keeps demo mode, and opens the app bundle again.
 @MainActor enum AppRelauncher {

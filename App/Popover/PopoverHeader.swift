@@ -1,4 +1,4 @@
-// PopoverHeader.swift — Thermik (MIT). OWNER: Unit 7. Popover header (SPEC §4.5): aurora background, "Hottest · <sensor>"
+// PopoverHeader.swift — Thermik (MIT). Popover header: aurora background, "Hottest · <sensor>"
 // caption + level chip (the hottest sensor's level on its own colour scale; a click opens Overview, the tooltip names
 // the macOS pressure), hero temperature + icon-only level badge (the chip already says the word; heat glow behind the
 // value when ≥ hot), summary line (CPU average · GPU average · system power · battery). Decorative budget: the aurora

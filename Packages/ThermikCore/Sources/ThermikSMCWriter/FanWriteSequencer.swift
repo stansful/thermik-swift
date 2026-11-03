@@ -62,7 +62,7 @@ public struct FanWriteTiming: Sendable, Equatable {
 
 /// intelMinimumOnly crash recovery (I7). On such a Mac Thermik "forces" a fan by raising F%dMn, so giving it back to
 /// System means writing the ORIGINAL F%dMn bytes back, and those must outlive a helper crash or a failed restore:
-/// HelperService keeps them in the recovery marker. An optional companion of the frozen `FanControlling` contract
+/// HelperService keeps them in the recovery marker. An optional companion of the `FanControlling` contract
 /// (FanWriteSequencer and SMCFanController conform; the mock and the "no SMC" controller need not).
 public protocol MinimumOnlyRecovery: AnyObject {
     /// Original F%dMn bytes per fan index that are not back in the SMC yet (always empty on every other scheme).
@@ -340,12 +340,29 @@ public final class FanWriteSequencer: MinimumOnlyRecovery {
         }
     }
 
-    /// Never throws; retries each write. `force == true` also clears state Thermik did
-    /// not record (startup recovery after SIGKILL, or explicit user "Reset to System").
-    /// Returns human-readable failures (empty == fully restored).
+    /// Never throws; retries each write of state Thermik recorded. Returns human-readable failures.
     @discardableResult
-    public func releaseAll(force: Bool, reason: String) -> [String] {
-        log("releaseAll(force: \(force), reason: \(reason))")
+    public func releaseAll(reason: String) -> [String] {
+        performRelease(reason: reason, operation: "releaseAll",
+                       releasesMode: { fan, _ in ownedFans.contains(fan.index) },
+                       forceBitsAfter: { current, ours in current & ~ours },
+                       shouldReleaseFtst: { _ in ftstSetByUs })
+    }
+
+    /// Also clears unrecorded state left by a crash or an explicit reset. Never throws; retries each write.
+    @discardableResult
+    public func forceReleaseAll(reason: String) -> [String] {
+        performRelease(reason: reason, operation: "forceReleaseAll",
+                       releasesMode: { fan, mode in ownedFans.contains(fan.index) || readUInt8(mode) == 1 },
+                       forceBitsAfter: { _, _ in 0 },
+                       shouldReleaseFtst: { key in ftstSetByUs || readUInt8(key) == 1 })
+    }
+
+    private func performRelease(reason: String, operation: String,
+                                releasesMode: (FanDescriptor, FourCC) -> Bool,
+                                forceBitsAfter: (UInt16, UInt16) -> UInt16,
+                                shouldReleaseFtst: (FourCC) -> Bool) -> [String] {
+        log("\(operation)(reason: \(reason))")
         var failures: [String] = []
         @discardableResult func attempt(_ what: String, _ body: () throws -> Void) -> Bool {
             for n in 1...max(1, timing.restoreAttempts) {
@@ -355,15 +372,15 @@ public final class FanWriteSequencer: MinimumOnlyRecovery {
             }
             return false
         }
-        func releasesMode(_ fan: FanDescriptor) -> Bool {
-            fan.modeKey.map { ownedFans.contains(fan.index) || (force && readUInt8($0) == 1) } ?? false
-        }
         // Every stopped fan spins up first, so their waits in `releaseMode` overlap.
-        for fan in profile.fans where releasesMode(fan) { try? spinUpForRelease(fan) }
+        for fan in profile.fans {
+            guard let mode = fan.modeKey, releasesMode(fan, mode) else { continue }
+            try? spinUpForRelease(fan)
+        }
         for fan in profile.fans {
             switch profile.scheme {
             case .appleSilicon, .intelModeKey:
-                if let m = fan.modeKey, releasesMode(fan) {
+                if let m = fan.modeKey, releasesMode(fan, m) {
                     attempt("\(m)=0") { try releaseMode(fan, m) }
                 }
             case .intelMinimumOnly:
@@ -382,12 +399,12 @@ public final class FanWriteSequencer: MinimumOnlyRecovery {
                 let raw = try smc.readRaw(fsKey).1
                 let cur = raw.count >= 2 ? (UInt16(raw[0]) << 8 | UInt16(raw[1])) : 0
                 let ours = ownedFans.reduce(UInt16(0)) { $0 | (UInt16(1) << UInt16($1)) }
-                let new = force ? 0 : (cur & ~ours)
+                let new = forceBitsAfter(cur, ours)
                 if new != cur { try write(fsKey, [UInt8(new >> 8), UInt8(new & 0xFF)]) }
             }
         }
         let ftst = FanHardwareProfile.ftstKey
-        if allowList.contains(ftst), ftstSetByUs || (force && readUInt8(ftst) == 1) {
+        if allowList.contains(ftst), shouldReleaseFtst(ftst) {
             attempt("Ftst=0") { try writeUInt8(ftst, 0) }
         }
         if failures.isEmpty {

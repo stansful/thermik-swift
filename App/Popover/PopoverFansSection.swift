@@ -1,4 +1,4 @@
-// PopoverFansSection.swift — Thermik (MIT). OWNER: Unit 7. Fans card of the popover (SPEC §4.5 / §4.14): one live row
+// PopoverFansSection.swift — Thermik (MIT). Fans card of the popover: one live row
 // per fan (Core Animation spin, rpm bar with min tick and target dot), ONE mode switcher for all fans, preset menu
 // (Curve), inline slider (Fixed), auto-revert countdown (Max), and the state lines: fans stopped by macOS, foreign
 // controller, helper missing / approval / upgrade / unreachable, engaging, error. Fanless Macs get one line instead.

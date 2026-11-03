@@ -1,4 +1,4 @@
-// SystemPage.swift — Thermik (MIT). Unit 8. System page (SPEC §4.6 W6): machine identity, cores, memory, macOS build,
+// SystemPage.swift — Thermik (MIT). System page: machine identity, cores, memory, macOS build,
 // uptime; per-core CPU usage bars (efficiency then performance clusters), GPU usage, memory used / pressure / swap,
 // requested cluster frequencies ("≈ MHz", IOReport), power, and the thermal-pressure history as a step chart.
 // While this page (or Overview) is visible VisibilityTracker.needsSoCMetrics turns IOReport sampling on.

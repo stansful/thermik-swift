@@ -1,5 +1,6 @@
-// PowerEventMonitor.swift — Thermik (MIT). OWNER: Unit 5 (port of research/system/prod/PowerEvents.swift:
-// NSWorkspace sleep/wake/screens + IOPS change + Low Power Mode). Surface FROZEN.
+// PowerEventMonitor.swift — Thermik (MIT).
+// Port of research/system/prod/PowerEvents.swift.
+// NSWorkspace sleep/wake/screens + IOPS change + Low Power Mode.
 // The app does not register with IORegisterForSystemPower: it never needs to delay sleep. The root helper restores
 // the fans itself on kIOMessageSystemWillSleep before acknowledging (SPEC §2.3.5); `.willSleep` here is the app's
 // belt-and-braces path.

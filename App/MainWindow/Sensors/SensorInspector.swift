@@ -1,4 +1,4 @@
-// SensorInspector.swift — Thermik (MIT). Unit 8. Sensors inspector (SPEC §4.6 W3, P1): big value + level, history chart
+// SensorInspector.swift — Thermik (MIT). Sensors inspector: big value + level, history chart
 // for the toolbar range, session and range statistics, and the technical identity of the reading (raw key, source,
 // SMC type, role, hardware block, raw decoded value, "approximate name" badge for heuristic sensors), and the actions
 // (pin, hide, rename, alert, statistics; die sensors: exclude from / include in "Hottest", or switch its excluded

@@ -1,4 +1,4 @@
-// URLRouter.swift — Thermik (MIT). OWNER: Unit 5. P2 `thermik://` links (FEAT §9.6), registered in project.yml
+// URLRouter.swift — Thermik (MIT). `thermik://` links, registered in project.yml
 // (CFBundleURLTypes). Navigation links act at once. A link that hands control of the fans to Thermik asks first
 // (any web page can open a URL; Cancel is the default button), unless the user ticked "Always allow"; switching back
 // to Auto never asks.

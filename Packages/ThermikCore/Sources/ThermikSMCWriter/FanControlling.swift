@@ -1,5 +1,4 @@
-// FanControlling.swift — Thermik (MIT). HELPER ONLY. Frozen contract between the helper's XPC/lifecycle
-// layer (Unit 4: HelperService) and the SMC write layer (Unit 3: SMCFanController / FanWriteSequencer).
+// FanControlling.swift — Thermik (MIT). HELPER ONLY. Contract between the helper's lifecycle and SMC write layers.
 // Every call happens on the helper's single serial state queue → implementations need not be thread-safe.
 import Foundation
 import ThermikSMC
@@ -34,9 +33,10 @@ public protocol FanControlling: AnyObject {
     func setManual(_ index: Int, targetRPM: Double) throws -> Double
     /// One fan back to System; clears Ftst when the last owned fan is released and we set it.
     func setAutomatic(_ index: Int) throws
-    /// Never throws; retries each write. `force` also clears state Thermik did not record (startup recovery
-    /// after a crash, explicit user "Reset to System"). Returns human-readable failures (empty = restored).
-    @discardableResult func restoreAll(force: Bool, reason: String) -> [String]
+    /// Never throws; retries each write of state Thermik recorded. Returns human-readable failures (empty = restored).
+    @discardableResult func restoreAll(reason: String) -> [String]
+    /// Also clears state Thermik did not record (startup recovery after a crash, explicit user "Reset to System").
+    @discardableResult func forceRestoreAll(reason: String) -> [String]
     /// Restore bookkeeping from the recovery marker after a helper restart.
     func adoptPersistedState(ftstSetByUs: Bool)
     /// Fans we believe we own whose live mode is no longer manual (macOS reclaimed them: wake, Siri, dictation).

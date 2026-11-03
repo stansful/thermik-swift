@@ -1,5 +1,5 @@
-// MenuBarController.swift — Thermik (MIT). OWNER: Unit 7. Surface FROZEN: init(env:), install(), isItemOnScreen,
-// consume(_:). The last tick consumer (SPEC §2.3.3): resolves the menu bar metrics, colours, ◆ badge and stale marker
+// MenuBarController.swift — Thermik (MIT).
+// The last tick consumer: resolves the menu bar metrics, colours, ◆ badge and stale marker
 // into a label snapshot (cheap; the image is redrawn only when the visible text changes), owns the status item, the
 // popover, hidden/notch detection, the first-run hint and the right-click menu (Mode ▸, Open Thermik, Settings…, Quit).
 import AppKit

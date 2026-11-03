@@ -1,4 +1,4 @@
-// SensorsPage.swift — Thermik (MIT). Unit 8. Sensors page (SPEC §4.6 W3): group filter chips, a sortable / searchable
+// SensorsPage.swift — Thermik (MIT). Sensors page: group filter chips, a sortable / searchable
 // SwiftUI Table (☆ pin, name, group, value, session min / avg / max, 5-minute sparkline, raw key hidden unless
 // "Show raw SMC keys"), a context menu (pin, hide, exclude from Hottest, rename, set alert, copy) and the inspector
 // (SensorInspector.swift). Rows observe their own LiveSensor, so a value change re-renders only that row's cells (§2.14).

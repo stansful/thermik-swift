@@ -1,4 +1,4 @@
-// AlertModels.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). Alert rules (supersets TG Pro's two thresholds).
+// AlertModels.swift — Thermik (MIT). Alert rules.
 import Foundation
 
 public struct AlertRule: Codable, Identifiable, Hashable, Sendable {
@@ -69,7 +69,7 @@ public struct AlertInputs: Sendable {
     public var pressure: ThermalPressure
     public var abnormalShutdown: ShutdownVerdict?        // set on the first evaluation after launch when abnormal
     public var batteryNeedsService: Bool
-    /// ADDED: smoothed values of the sensors that `.sensor` rules name, hidden ones included (`.anySensor` and `.group`
+    /// smoothed values of the sensors that `.sensor` rules name, hidden ones included (`.anySensor` and `.group`
     /// never see them); `.sensor` reads `sensorValues` first.
     public var namedSensorValues: [SensorID: Double] = [:]
     public init(date: Date, sensorValues: [SensorID: Double], sensorGroups: [SensorID: DisplayGroup],

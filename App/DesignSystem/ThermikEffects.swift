@@ -1,4 +1,4 @@
-//  ThermikEffects.swift — Thermik's decorative effects (MIT). OWNER: Unit 7.
+//  ThermikEffects.swift — Thermik's decorative effects (MIT).
 //  Effects policy (SPEC §4.10, DES §3.3): never in the menu bar; animate only while the host is visible and
 //  `EffectsPolicy.animate` holds; at most one effect animates at a time.
 //  Every effect is a bitmap drawn on the CPU (EffectFrames), never a Metal shader: any SwiftUI Metal effect on screen

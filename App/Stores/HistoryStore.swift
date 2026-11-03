@@ -1,4 +1,4 @@
-// HistoryStore.swift — Thermik (MIT). Created by Unit 0; OWNER: Unit 5 (tiers: raw 15 min, 10 s buckets 24 h). API FROZEN.
+// HistoryStore.swift — Thermik (MIT). Raw 15-minute samples and 10-second buckets for 24 hours.
 // In-memory only (SPEC §2.8; on-disk history is P2). Two tiers per series:
 //   raw      every recorded tick (Sample, 16 B), the newest 900 (= 15 min at 1 s)
 //   buckets  10 s min/avg/max, 24 h (8 640) for aggregates, fans, power, usage, pressure and pinned sensors,
@@ -146,24 +146,10 @@ import ThermikCore
         return SeriesStats(min: total.min, avg: Float(total.sum / Double(total.n)), max: total.max, count: total.n)
     }
 
-    /// P1: CSV or JSON export of a time range (raw samples for ≤ 15 min, 10 s bucket averages before that).
-    /// CSV: `timestamp,<series…>` with ISO 8601 local-offset times and "." decimals; one row per distinct time.
-    func export(_ ids: [SeriesID], window: HistoryWindow, json: Bool) -> Data {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        iso.timeZone = .current
-        let columns = ids.map { id in (key: id.exportKey, samples: series[id].map { merged($0, window: window) } ?? []) }
-        if json {
-            let file = HistoryExport(app: "Thermik", format: 1, generated: iso.string(from: Date()), windowSeconds: window.rawValue,
-                                     series: columns.map { c in
-                                         HistoryExport.Series(id: c.key, samples: c.samples.map {
-                                             HistoryExport.Point(t: iso.string(from: $0.time), v: (Double($0.value) * 100).rounded() / 100)
-                                         })
-                                     })
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-            return (try? encoder.encode(file)) ?? Data()
-        }
+    /// CSV export of a time range (raw samples for ≤ 15 min, 10 s bucket averages before that).
+    /// `timestamp,<series…>` with ISO 8601 local-offset times and "." decimals; one row per distinct time.
+    func exportCSV(_ ids: [SeriesID], window: HistoryWindow) -> Data {
+        let (iso, columns) = exportColumns(ids, window: window)
         var rows: [Date: [String?]] = [:]
         for (i, c) in columns.enumerated() {
             for s in c.samples {
@@ -175,6 +161,28 @@ import ThermikCore
             csv += ([iso.string(from: t)] + rows[t]!.map { $0 ?? "" }).joined(separator: ",") + "\n"
         }
         return Data(csv.utf8)
+    }
+
+    func exportJSON(_ ids: [SeriesID], window: HistoryWindow) -> Data {
+        let (iso, columns) = exportColumns(ids, window: window)
+        let file = HistoryExport(app: "Thermik", format: 1, generated: iso.string(from: Date()), windowSeconds: window.rawValue,
+                                 series: columns.map { c in
+                                     HistoryExport.Series(id: c.key, samples: c.samples.map {
+                                         HistoryExport.Point(t: iso.string(from: $0.time), v: (Double($0.value) * 100).rounded() / 100)
+                                     })
+                                 })
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return (try? encoder.encode(file)) ?? Data()
+    }
+
+    private func exportColumns(_ ids: [SeriesID], window: HistoryWindow)
+        -> (iso: ISO8601DateFormatter, columns: [(key: String, samples: [Sample])]) {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        iso.timeZone = .current
+        let columns = ids.map { id in (key: id.exportKey, samples: series[id].map { merged($0, window: window) } ?? []) }
+        return (iso, columns)
     }
 
     func clear() {
@@ -272,7 +280,7 @@ import ThermikCore
 
 // MARK: - Storage
 
-/// Fixed-capacity ring that allocates as it fills (the frozen `RingBuffer` preallocates its whole capacity).
+/// Fixed-capacity ring that allocates as it fills instead of preallocating its whole capacity.
 /// Elements are appended in time order; logical index 0 is the oldest.
 private struct HistoryRing<Element> {
     private var storage = ContiguousArray<Element>()

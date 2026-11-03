@@ -1,4 +1,4 @@
-// PMSetLog.swift — Thermik (MIT). OWNER: Unit 2.
+// PMSetLog.swift — Thermik (MIT).
 // Parsed `pmset -g log` events (SYS §7.3): ~36 k lines / 8 MB on this Mac, 1.4–3.4 s → on demand only (Diagnostics),
 // never on the main thread. The CLI output is not API: parsing is defensive and skips anything unexpected.
 import Foundation

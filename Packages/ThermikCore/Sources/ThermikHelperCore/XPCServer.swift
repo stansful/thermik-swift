@@ -1,4 +1,4 @@
-// XPCServer.swift — Thermik (MIT). HELPER ONLY. OWNER: Unit 4.
+// XPCServer.swift — Thermik (MIT). HELPER ONLY.
 // Port of research/helper/skeleton/Helper/XPCServer.swift (HELP §A.6): the NSXPCListener delegate validates each
 // peer (PeerValidator, I12), exports one `HelperEndpoint` per connection and reports connections coming and going
 // to HelperService (I4). Works with the daemon's Mach service listener and with `NSXPCListener.anonymous()`

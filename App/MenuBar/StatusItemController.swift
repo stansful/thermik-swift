@@ -1,4 +1,4 @@
-//  StatusItemController.swift — NSStatusItem + floating SwiftUI panel (MIT). OWNER: Unit 7.
+//  StatusItemController.swift — NSStatusItem + floating SwiftUI panel (MIT).
 //  Chosen over SwiftUI MenuBarExtra because we need: image labels updated at 1 Hz, programmatic open (alerts),
 //  right-click menu, multiple items, notch-occlusion detection, and (macOS 27) menu-bar keyboard navigation.
 //  Panel (SPEC §4.5, DES §2.4): borderless non-activating NSPanel, 360 pt wide, height = content ≤ 620 pt (and ≤ the
@@ -345,7 +345,7 @@ final class StatusPanel: NSPanel {
     override var canBecomeMain: Bool { false }
     override func cancelOperation(_ sender: Any?) { onCancel?() }   // Esc
 
-    /// Kit API (Unit 0): positions under `anchor` using the hosting view's fitting size and shows the panel.
+    /// Positions under `anchor` using the hosting view's fitting size and shows the panel.
     func show(below anchor: NSRect) {
         let screen = NSScreen.screens.first { $0.frame.contains(anchor.origin) } ?? NSScreen.main
         visibleArea = screen?.visibleFrame ?? .zero

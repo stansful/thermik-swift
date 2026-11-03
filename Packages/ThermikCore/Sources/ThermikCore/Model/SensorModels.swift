@@ -1,4 +1,4 @@
-// SensorModels.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). Sensor identity, catalog and grouping.
+// SensorModels.swift — Thermik (MIT). Sensor identity, catalog and grouping.
 import Foundation
 
 public enum Quantity: String, Codable, Sendable, CaseIterable { case temperature, power, voltage, current, fanRPM }

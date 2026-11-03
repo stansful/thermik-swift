@@ -1,4 +1,4 @@
-// PeerValidator.swift — Thermik (MIT). HELPER ONLY. OWNER: Unit 4.
+// PeerValidator.swift — Thermik (MIT). HELPER ONLY.
 // Port of research/helper/skeleton/Helper/PeerValidator.swift (HELP §5.3, §A.5); SPEC §2.6.4, invariant I12.
 //
 // Who may talk to the helper is derived at startup from the helper's OWN signature (`SecCodeCopySelf`), so nothing

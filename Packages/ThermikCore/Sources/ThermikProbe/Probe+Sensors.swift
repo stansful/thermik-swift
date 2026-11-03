@@ -1,4 +1,4 @@
-// Probe+Sensors.swift — OWNER: Unit 1. `thermik-probe sensors …` (READ-ONLY: SMC reads + HID events, no writes).
+// Probe+Sensors.swift — `thermik-probe sensors …` (READ-ONLY: SMC reads + HID events, no writes).
 //
 //   sensors groups              visible sensors by group, display-group stats, every HEADLINE aggregate, power, fans
 //   sensors snapshot            every inventory sensor: raw value, valid/INVALID/gated, group, role, visibility;
@@ -233,21 +233,21 @@ private enum SensorProbe {
         let all = s.inventory.sensors.filter { $0.id.source == .smc }.map(\.id)
         let hidIDs = s.inventory.sensors.filter { $0.id.source == .hid }.map(\.id)
 
-        func run(_ ids: [SensorID], fans: Bool, power: Bool, n: Int) async -> Stats {
+        func run(_ ids: [SensorID], components: SampleRequest.Components, n: Int) async -> Stats {
             var st = Stats()
             for _ in 0..<n {
                 let t0 = clock.now
-                _ = await s.sampler.sample(SampleRequest(sensorIDs: ids, includeFans: fans, includePower: power))
+                _ = await s.sampler.sample(SampleRequest(sensorIDs: ids, components: components))
                 st.add(clock.now - t0)
             }
             return st
         }
-        let vis = await run(visibleIDs, fans: false, power: false, n: 30)
-        let visFull = await run(visibleIDs, fans: true, power: true, n: 30)
-        let head = await run(headline, fans: false, power: false, n: 30)
-        let headFull = await run(headline, fans: true, power: true, n: 30)
-        let full = await run(all, fans: false, power: false, n: 10)
-        let fansOnly = await run([], fans: true, power: false, n: 30)
+        let vis = await run(visibleIDs, components: [], n: 30)
+        let visFull = await run(visibleIDs, components: [.fans, .power], n: 30)
+        let head = await run(headline, components: [], n: 30)
+        let headFull = await run(headline, components: [.fans, .power], n: 30)
+        let full = await run(all, components: [], n: 10)
+        let fansOnly = await run([], components: .fans, n: 30)
 
         // HID: a fresh sampler per pass, so each pass really reads (the sampler caches HID values for 5 s).
         var hid = Stats()
@@ -255,7 +255,7 @@ private enum SensorProbe {
             for _ in 0..<3 {
                 guard let fresh = await open() else { break }
                 let t0 = clock.now
-                _ = await fresh.sampler.sample(SampleRequest(sensorIDs: hidIDs, includeFans: false, includePower: false))
+                _ = await fresh.sampler.sample(SampleRequest(sensorIDs: hidIDs, components: []))
                 hid.add(clock.now - t0)
             }
         }

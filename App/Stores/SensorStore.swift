@@ -1,6 +1,5 @@
-// SensorStore.swift — Thermik (MIT). Minimal implementation by Unit 0; OWNER afterwards: Unit 5.
-// Public surface (properties/methods below) is FROZEN; Unit 5 adds EMA smoothing, statistics, stale detection,
-// spike rejection for hotspot roles and gated-cluster handling (SPEC §2.5.6).
+// SensorStore.swift — Thermik (MIT). EMA smoothing, statistics, stale detection,
+// spike rejection for hotspot roles and gated-cluster handling.
 //
 // Smoothing (SENS §5.4): per sensor `ema += α·(x − ema)`, `α = 1 − exp(−dt/τ)`, τ = 2.8 s (α ≈ 0.30 at 1 s,
 // 0.51 at 2 s; idle CPU-headline jitter 1.74 → 0.37 °C). Hotspot/maximum roles and the "hottest" aggregates first
@@ -87,7 +86,7 @@ struct SpikeFilter: Sendable {
     /// answer is `SensorStore.isExcludedFromHottest(_:)`.
     var isExcludedFromHottest: Bool
 
-    // Smoothing state (Unit 5; not observed).
+    // Smoothing state (not observed).
     @ObservationIgnored private var ema: Double?
     @ObservationIgnored private var spike = SpikeFilter()
     @ObservationIgnored private var lastStatDate: Date?
@@ -193,7 +192,7 @@ struct SpikeFilter: Sendable {
     private(set) var inventory: SensorInventory?
     private(set) var sensors: [LiveSensor] = []               // stable order after load(inventory:)
     private(set) var groups: [LiveSensorGroup] = []           // non-hidden sensors (or all with showHiddenSensors)
-    private(set) var aggregates: AggregateValues = .empty     // smoothed (Unit 5)
+    private(set) var aggregates: AggregateValues = .empty     // smoothed
     private(set) var rawAggregates: AggregateValues = .empty  // unsmoothed, this tick
     private(set) var power: PowerValues = .empty
     // Not observed: both change on every tick, and a view reading them would re-render every tick. Views use

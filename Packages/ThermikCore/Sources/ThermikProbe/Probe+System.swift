@@ -1,4 +1,4 @@
-// Probe+System.swift — OWNER: Unit 2. Manual verification of the System readers through the public `SystemSampler`.
+// Probe+System.swift — Manual verification of the System readers through the public `SystemSampler`.
 // READ-ONLY: no SMC, no root. `loadtest` spins in-process threads (they die with the probe) for at most 50 s.
 //   thermik-probe system all | machine | battery | load | ioreport | smart | boot | thermal | pmset [N] | top [N]
 //                        | bench | loadtest [seconds]
@@ -60,7 +60,7 @@ private enum SystemProbe {
 
     static func battery(_ s: SystemSampler) async {
         print("== battery")
-        let (frame, ms) = await timed { await s.sample(SystemSampleRequest(battery: true, powerSources: true)) }
+        let (frame, ms) = await timed { await s.sample([.battery, .powerSources]) }
         if let b = frame.battery {
             print("[\(f(ms, 3)) ms] charge \(b.chargePercent.map { "\($0) %" } ?? "—"), cycles \(b.cycleCount.map(String.init) ?? "—") / \(b.designCycleCount.map(String.init) ?? "—"), design \(b.designCapacity_mAh ?? -1) mAh, nominal \(b.nominalChargeCapacity_mAh ?? -1) mAh, raw max \(b.rawMaxCapacity_mAh ?? -1) mAh, raw current \(b.rawCurrentCapacity_mAh ?? -1) mAh")
             print("  health \(f(b.healthPercent, 1)) % (raw \(f(b.rawHealthPercent, 1)) %), temperature \(f(b.temperatureC, 2)) °C, \(b.voltage_mV ?? -1) mV, \(b.amperage_mA ?? 0) mA (\(f(b.batteryPowerW, 2)) W)")
@@ -88,7 +88,7 @@ private enum SystemProbe {
 
     static func load(_ s: SystemSampler, machine: MachineInfo) async {
         print("== load")
-        let req = SystemSampleRequest(cpuLoad: true, memory: true, gpuUsage: true)
+        let req: SystemSampleRequest = [.cpuLoad, .memory, .gpuUsage]
         _ = await s.sample(req)
         try? await Task.sleep(for: .seconds(1))
         let (frame, ms) = await timed { await s.sample(req) }
@@ -108,7 +108,7 @@ private enum SystemProbe {
 
     static func ioreport(_ s: SystemSampler) async {
         print("== ioreport")
-        let req = SystemSampleRequest(soc: true)
+        let req = SystemSampleRequest.soc
         let (_, firstMs) = await timed { await s.sample(req) }
         guard let setup = await s.socSetupTime() else { print("IOReport not attempted"); return }
         print("first soc request \(f(firstMs, 1)) ms (subscription setup \(f(setup, 1)) ms)")
@@ -157,7 +157,7 @@ private enum SystemProbe {
 
     static func thermal(_ s: SystemSampler) async {
         print("== thermal")
-        let (frame, ms) = await timed { await s.sample(SystemSampleRequest()) }
+        let (frame, ms) = await timed { await s.sample([]) }
         print("[\(f(ms, 3)) ms] pressure .\(frame.pressure) (raw \(frame.pressure.rawValue)), ProcessInfo.thermalState .\(frame.processThermalState)")
     }
 
@@ -175,11 +175,11 @@ private enum SystemProbe {
         for p in procs { print("  \(p.pid)\t\(f(p.cpuPercent, 1)) %\t\(p.name)") }
     }
 
-    // MARK: Timings (SPEC §5 Unit 2: ≤ 2 ms without soc, ≤ 10 ms with soc, first soc setup ≤ 300 ms)
+    // MARK: Timings (≤ 2 ms without soc, ≤ 10 ms with soc, first soc setup ≤ 300 ms)
 
     static func bench(_ s: SystemSampler) async {
         print("== bench (other builds may be running in parallel: numbers can be noisy)")
-        let all = SystemSampleRequest(cpuLoad: true, memory: true, gpuUsage: true, soc: false, battery: true, powerSources: true)
+        let all: SystemSampleRequest = [.cpuLoad, .memory, .gpuUsage, .battery, .powerSources]
         var plain: [Double] = []
         for _ in 0..<30 {
             let (_, ms) = await timed { await s.sample(all) }
@@ -187,12 +187,12 @@ private enum SystemProbe {
             try? await Task.sleep(for: .milliseconds(100))
         }
         print("sample(all except soc) ×30: \(stats(plain))")
-        let single: [(String, SystemSampleRequest)] = [("none (thermal only)", SystemSampleRequest()),
-                                                       ("cpuLoad", SystemSampleRequest(cpuLoad: true)),
-                                                       ("memory", SystemSampleRequest(memory: true)),
-                                                       ("gpuUsage", SystemSampleRequest(gpuUsage: true)),
-                                                       ("battery", SystemSampleRequest(battery: true)),
-                                                       ("powerSources", SystemSampleRequest(powerSources: true))]
+        let single: [(String, SystemSampleRequest)] = [("none (thermal only)", []),
+                                                       ("cpuLoad", .cpuLoad),
+                                                       ("memory", .memory),
+                                                       ("gpuUsage", .gpuUsage),
+                                                       ("battery", .battery),
+                                                       ("powerSources", .powerSources)]
         for (label, r) in single {
             var xs: [Double] = []
             for _ in 0..<15 {
@@ -202,7 +202,7 @@ private enum SystemProbe {
             }
             print("  \(label): \(stats(xs))")
         }
-        var withSoC = all; withSoC.soc = true
+        var withSoC = all; withSoC.insert(.soc)
         let (_, first) = await timed { await s.sample(withSoC) }
         print("first sample with soc: \(f(first, 1)) ms (IOReport setup \(f(await s.socSetupTime(), 1)) ms)")
         var soc: [Double] = []
@@ -215,7 +215,7 @@ private enum SystemProbe {
         var socOnly: [Double] = []
         for _ in 0..<10 {
             try? await Task.sleep(for: .milliseconds(500))
-            let (_, ms) = await timed { await s.sample(SystemSampleRequest(soc: true)) }
+            let (_, ms) = await timed { await s.sample(SystemSampleRequest.soc) }
             socOnly.append(ms)
         }
         print("sample(soc only) ×10: \(stats(socOnly))")
@@ -229,7 +229,7 @@ private enum SystemProbe {
     static func loadTest(_ s: SystemSampler, machine: MachineInfo, seconds: Int) async {
         let threads = max(machine.perfLevels.first?.logicalCPUs ?? 12, 1)
         print("== load test: \(threads) spinning threads for \(seconds) s (+ 3 s baseline, 4 s cool-down)")
-        let req = SystemSampleRequest(cpuLoad: true, gpuUsage: true, soc: true, battery: true)
+        let req: SystemSampleRequest = [.cpuLoad, .gpuUsage, .soc, .battery]
         _ = await s.sample(req)
         for i in 0..<3 { try? await Task.sleep(for: .seconds(1)); await row(s, req, machine, "idle \(i + 1)") }
         let stop = OSAllocatedUnfairLock(initialState: false)

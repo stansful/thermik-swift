@@ -1,4 +1,4 @@
-// AggregateModels.swift — Thermik (MIT). FROZEN CONTRACT (Unit 0). Headline numbers & temperature inputs.
+// AggregateModels.swift — Thermik (MIT). Headline numbers and temperature inputs.
 import Foundation
 
 /// Computed headline values (definitions: SPEC §2.5.4). All °C.

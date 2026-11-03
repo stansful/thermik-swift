@@ -1,4 +1,4 @@
-// PowerObserver.swift — Thermik (MIT). HELPER ONLY. OWNER: Unit 4.
+// PowerObserver.swift — Thermik (MIT). HELPER ONLY.
 // Port of research/helper/skeleton/Helper/PowerObserver.swift (HELP §A.7); invariant I6 (SPEC §2.6.2).
 // A daemon gets no NSWorkspace sleep notifications, so it registers with IORegisterForSystemPower and handles the
 // messages on its own dispatch queue. `onWillSleep` runs synchronously BEFORE the sleep is acknowledged

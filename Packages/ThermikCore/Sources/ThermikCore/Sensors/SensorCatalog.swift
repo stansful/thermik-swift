@@ -1,4 +1,4 @@
-// SensorCatalog.swift — Thermik (MIT). OWNER: Unit 1. Per-chip DB ∩ hardware, plus heuristics (SPEC §2.5.2 step 3–7, §3.2).
+// SensorCatalog.swift — Thermik (MIT). Per-chip database ∩ hardware, plus heuristics.
 //
 // Lookup is by IORegistry `platform-name` ("t6041"); Intel loads `intel.json`. A DB entry whose key the hardware does not
 // expose is skipped silently, so one file covers the 14", 16" and desktop variants of a SoC. Present keys the DB does

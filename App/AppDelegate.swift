@@ -1,5 +1,5 @@
-// AppDelegate.swift — Thermik (MIT). Wiring by Unit 0; OWNER: Unit 5 (lifecycle, single instance, launch at login,
-// sleep/wake orchestration, termination). The consumer ORDER below is part of the contract (SPEC §2.3.3).
+// AppDelegate.swift — Thermik (MIT). Lifecycle, single instance, launch at login and termination.
+// The consumer order below is part of the contract.
 // Lifecycle (SPEC §2.3.5):
 //   launch  single-instance guard → environment → windows, status item ("—"), CSV logging → helper.refresh() →
 //           sensor + system discovery, boot history → sampling loop → onboarding if needed
@@ -211,7 +211,7 @@ import ThermikCore
     #endif
 }
 
-/// SPEC §5 Unit 5: one Thermik per user session. A second launch (another copy, demo or not) shows the running
+/// One Thermik per user session. A second launch (another copy, demo or not) shows the running
 /// instance's main window and exits before it touches settings, the status item, the samplers or the helper.
 @MainActor enum SingleInstance {
     static let bundleID = Bundle.main.bundleIdentifier ?? "app.thermik.Thermik"
