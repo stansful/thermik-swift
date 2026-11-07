@@ -15,6 +15,7 @@ enum PopoverFocus: Hashable {
 
 struct PopoverSensorList: View {
     var maxHeight: CGFloat
+    var exactHeight: CGFloat?
     @Environment(SensorStore.self) private var sensors
     @Environment(SettingsStore.self) private var settings
     @AppStorage("popover.expandedGroups") private var expandedRaw = ""
@@ -59,7 +60,7 @@ struct PopoverSensorList: View {
                 .padding(.vertical, 6)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
-            .frame(height: max(min(measured, maxHeight), 1))
+            .frame(height: max(exactHeight ?? min(measured, maxHeight), 1))
             .scrollIndicators(overflow ? .automatic : .never)
             .scrollDisabled(!overflow)
             .modifier(ScrollEdgeFade(active: overflow))

@@ -239,18 +239,7 @@ enum ThermikFont {
 
 // MARK: - Metrics
 
-enum ThermikMetrics {
-    static let popoverWidth: CGFloat = 360
-    static let popoverMaxHeight: CGFloat = 620
-    static let popoverRadius: CGFloat = 18
-    static let cardRadius: CGFloat = 14
-    static let innerRadius: CGFloat = 10
-    static let gutter: CGFloat = 12
-    static let rowHeight: CGFloat = 26
-    static let compactRowHeight: CGFloat = 22        // popover density "compact" (P1)
-    static let groupHeaderHeight: CGFloat = 30
-    static let sparklineHeight: CGFloat = 18
-    static let sparklineWidth: CGFloat = 54
+extension ThermikMetrics {
     /// Menu bar labels are designed for this content box; never assume the menu bar height (DES §2.1).
     static let menuBarContentHeight: CGFloat = 22
 }

@@ -1,6 +1,6 @@
-// PopoverRoot.swift — Thermik (MIT). The menu bar popover: 360 pt wide,
-// height = content up to 620 pt (or the screen); header and fans stay pinned, the sensor list scrolls, footer pinned.
-// The content tree exists only while the panel is open (StatusPanelState.isOpen), so a closed popover costs nothing.
+// PopoverRoot.swift — Thermik (MIT). The menu bar popover: 360 pt wide by default and user-resizable.
+// Height = content up to 620 pt (or the screen) until the user chooses a size; header, fans and footer stay pinned,
+// the sensor list scrolls. The content tree exists only while the panel is open, so a closed popover costs nothing.
 import SwiftUI
 import ThermikCore
 
@@ -11,8 +11,13 @@ struct PopoverRoot: View {
     @State private var headerHeight: CGFloat = 260
     @State private var footerHeight: CGFloat = 80
 
+    private var panelSizing: PopoverPanelSizing {
+        if let height = panel?.customSize?.height { return .custom(height: height) }
+        return .automatic(maxHeight: panel?.maxHeight ?? ThermikMetrics.popoverMaxHeight)
+    }
+
     var body: some View {
-        let maxHeight = panel?.maxHeight ?? ThermikMetrics.popoverMaxHeight
+        let layout = panelSizing.listLayout(headerHeight: headerHeight, footerHeight: footerHeight)
         VStack(spacing: 0) {
             VStack(spacing: 0) {
                 PopoverHeader()
@@ -24,7 +29,7 @@ struct PopoverRoot: View {
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
 
-            PopoverSensorList(maxHeight: max(maxHeight - headerHeight - footerHeight, 88))
+            PopoverSensorList(maxHeight: layout.maxHeight, exactHeight: layout.exactHeight)
 
             VStack(spacing: 0) {
                 Divider().padding(.horizontal, ThermikMetrics.gutter)
@@ -32,7 +37,7 @@ struct PopoverRoot: View {
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
         }
-        .frame(width: ThermikMetrics.popoverWidth)
+        .frame(maxWidth: .infinity)
         .thermikDesignEnvironment(colorBlind: settings.colorBlindScale, animatedEffects: settings.animatedEffects,
                                   visible: panel?.isOpen ?? true)
         .accessibilityElement(children: .contain)

@@ -7107,6 +7107,18 @@
         }
       }
     },
+    "Resize window": {
+      "extractionState": "manual",
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Изменить размер окна"
+          }
+        }
+      },
+      "comment": "Accessibility label of the popover's bottom-right resize grip"
+    },
     "Restore": {
       "extractionState": "manual",
       "localizations": {

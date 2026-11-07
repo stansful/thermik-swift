@@ -14,5 +14,6 @@
   "the safety override could not be applied": {"ru": "не удалось включить защиту от перегрева", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
   "the safety override ended": {"ru": "защита от перегрева отключена", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
   "the safety override could not be released": {"ru": "не удалось отключить защиту от перегрева", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”)"},
-  "the helper was stopped": {"ru": "помощник остановлен", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”): the helper process was terminated"}
+  "the helper was stopped": {"ru": "помощник остановлен", "comment": "Why the helper returned the fans to Auto (after “Fans returned to Auto:”): the helper process was terminated"},
+  "Resize window": {"ru": "Изменить размер окна", "comment": "Accessibility label of the popover's bottom-right resize grip"}
 }

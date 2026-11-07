@@ -1,32 +1,15 @@
 //  StatusItemController.swift — NSStatusItem + floating SwiftUI panel (MIT).
 //  Chosen over SwiftUI MenuBarExtra because we need: image labels updated at 1 Hz, programmatic open (alerts),
 //  right-click menu, multiple items, notch-occlusion detection, and (macOS 27) menu-bar keyboard navigation.
-//  Panel (SPEC §4.5, DES §2.4): borderless non-activating NSPanel, 360 pt wide, height = content ≤ 620 pt (and ≤ the
-//  screen), top edge pinned under the item; closes on Esc, outside click, another of our windows taking key, or the
+//  Panel (SPEC §4.5, DES §2.4): borderless non-activating NSPanel, 360 pt wide by default and user-resizable.
+//  Automatic height = content ≤ 620 pt (and ≤ the screen), top edge pinned under the item; closes on Esc, outside click,
+//  another of our windows taking key, or the
 //  macOS 27 expanded-interface session ending. Content is built only while open (no SwiftUI work while closed).
 import AppKit
 import SwiftUI
 import os
 
 private let log = Logger(subsystem: "app.thermik.Thermik", category: "menubar")
-
-/// Presentation state shared with the hosted SwiftUI content (`@Environment(StatusPanelState.self)`).
-@MainActor @Observable final class StatusPanelState {
-    /// True from `open()` until `close()`; the content tree exists only while true.
-    private(set) var isOpen = false
-    /// Height budget for the content: 620 pt or less on short screens (the popover's sensor list scrolls inside it).
-    private(set) var maxHeight: CGFloat = ThermikMetrics.popoverMaxHeight
-    /// The panel is key: keyboard focus is inside it.
-    private(set) var isKey = false
-    @ObservationIgnored fileprivate var onContentSize: ((CGSize) -> Void)?
-    /// Asks the controller to close the panel (row clicks, "Open Thermik", Esc inside text fields…).
-    @ObservationIgnored var requestClose: () -> Void = {}
-
-    fileprivate func set(open: Bool) { if isOpen != open { isOpen = open } }
-    fileprivate func set(maxHeight h: CGFloat) { if maxHeight != h { maxHeight = h } }
-    fileprivate func set(key: Bool) { if isKey != key { isKey = key } }
-    fileprivate func reportSize(_ s: CGSize) { onContentSize?(s) }
-}
 
 @MainActor
 final class StatusItemController: NSObject {
@@ -195,7 +178,7 @@ final class StatusItemController: NSObject {
         // Building the content only while open keeps the closed popover at zero SwiftUI cost.
         panel.alphaValue = 0
         openedAt = Date()
-        panel.place(size: panel.lastContentSize)
+        panel.placeAtAnchor(size: panel.lastContentSize)
     }
 
     private func presentPreparedPanel() {
@@ -356,113 +339,3 @@ extension StatusItemController: NSStatusItemExpandedInterfaceDelegate {
 }
 
 extension Notification.Name { static let thermikOpenMainWindow = Notification.Name("thermik.openMainWindow") }
-
-/// Borderless, non-activating panel that hosts the SwiftUI popover content. On macOS 26+ the SwiftUI root applies
-/// `.glassEffect(.regular, in: .rect(cornerRadius: 18))`; on 14/15 an NSVisualEffectView(.popover) backs it.
-final class StatusPanel: NSPanel {
-    var onCancel: (() -> Void)?
-    /// Top-centre point the panel hangs from (screen coordinates) and the area it must stay inside.
-    var anchor = NSPoint.zero
-    var visibleArea = NSRect.zero
-    private(set) var lastContentSize = CGSize(width: ThermikMetrics.popoverWidth, height: 420)
-
-    init(content: AnyView, state: StatusPanelState? = nil) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: ThermikMetrics.popoverWidth, height: 420),
-                   styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView], backing: .buffered, defer: true)
-        isFloatingPanel = true
-        level = .popUpMenu
-        hidesOnDeactivate = false
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = true
-        isReleasedWhenClosed = false
-        animationBehavior = .utilityWindow
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
-        let host = NSHostingView(rootView: PanelChrome(content: content, state: state))
-        // The controller sizes the panel from the size SwiftUI reports (top edge pinned); automatic window sizing
-        // would grow the panel upwards from its bottom-left origin.
-        host.sizingOptions = []
-        host.autoresizingMask = [.width, .height]
-        contentView = host
-    }
-    override var canBecomeKey: Bool { true }                  // text fields / keyboard nav inside the panel
-    override var canBecomeMain: Bool { false }
-    override func cancelOperation(_ sender: Any?) { onCancel?() }   // Esc
-
-    /// Positions under `anchor` using the hosting view's fitting size and shows the panel.
-    func show(below anchor: NSRect) {
-        let screen = NSScreen.screens.first { $0.frame.contains(anchor.origin) } ?? NSScreen.main
-        visibleArea = screen?.visibleFrame ?? .zero
-        self.anchor = NSPoint(x: anchor.midX, y: anchor.minY - 6)
-        place(size: lastContentSize)
-        makeKeyAndOrderFront(nil)
-    }
-
-    /// Sizes the panel to `size` with its top edge on `anchor`, clamped to the visible area.
-    func place(size: CGSize) {
-        lastContentSize = size
-        var frame = NSRect(x: anchor.x - size.width / 2, y: anchor.y - size.height, width: size.width, height: size.height)
-        if visibleArea.width > 0 {
-            frame.origin.x = min(max(frame.origin.x, visibleArea.minX + 8), visibleArea.maxX - size.width - 8)
-            frame.origin.y = max(frame.origin.y, visibleArea.minY + 4)
-        }
-        frame = frame.integral
-        if frame != self.frame { setFrame(frame, display: true) }
-    }
-}
-
-/// Popover chrome: glass (26+), `.popover` material (14/15) or opaque (Reduce Transparency); radius 18.
-struct PanelChrome: View {
-    var content: AnyView
-    var state: StatusPanelState? = nil
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    var body: some View {
-        Group {
-            if let state {
-                if state.isOpen {
-                    chrome
-                        .fixedSize(horizontal: false, vertical: true)
-                        .onGeometryChange(for: CGSize.self) { $0.size } action: { state.reportSize($0) }
-                        .environment(state)
-                }
-            } else {
-                chrome
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    @ViewBuilder private var chrome: some View {
-        let shape = RoundedRectangle(cornerRadius: ThermikMetrics.popoverRadius, style: .continuous)
-        if reduceTransparency {
-            content.frame(width: ThermikMetrics.popoverWidth)
-                .background(Color(nsColor: .windowBackgroundColor), in: shape)
-                .clipShape(shape)
-                .overlay(shape.strokeBorder(.separator, lineWidth: 0.5))
-        } else if #available(macOS 26.0, *) {
-            content.frame(width: ThermikMetrics.popoverWidth)
-                .clipShape(shape)
-                .glassEffect(.regular, in: shape)
-        } else {
-            content.frame(width: ThermikMetrics.popoverWidth)
-                .background { VisualEffect(material: .popover) }
-                .clipShape(shape)
-                .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
-        }
-    }
-}
-
-struct VisualEffect: NSViewRepresentable {
-    var material: NSVisualEffectView.Material
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let v = NSVisualEffectView(); v.material = material; v.blendingMode = .behindWindow; v.state = .active; return v
-    }
-    func updateNSView(_ v: NSVisualEffectView, context: Context) { v.material = material }
-}
-
-/// Notch geometry for the screen that hosts the status item (nil on screens without a notch).
-@MainActor func notchRect(of screen: NSScreen) -> NSRect? {
-    guard let l = screen.auxiliaryTopLeftArea, let r = screen.auxiliaryTopRightArea, r.minX > l.maxX else { return nil }
-    return NSRect(x: l.maxX, y: min(l.minY, r.minY), width: r.minX - l.maxX, height: max(l.height, r.height))
-}

@@ -104,12 +104,27 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_ENTITLEMENTS: ""
 
+  ThermikTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: AppTests
+      - path: App/MenuBar/StatusPanel.swift
+      - path: App/Popover/PopoverLayout.swift
+      - path: App/DesignSystem/PopoverMetrics.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.thermik.ThermikTests
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   Thermik:
     build:
       targets:
         Thermik: all
         ThermikHelper: all
+    test:
+      targets: [ThermikTests]
     run:
       config: Debug
       commandLineArguments:
