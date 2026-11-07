@@ -76,23 +76,38 @@ private struct SensorInspectorContent: View {
         return VStack(alignment: .leading, spacing: 6) {
             Text("Statistics").font(ThermikFont.sectionTitle).foregroundStyle(.secondary)
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
-                GridRow {
-                    Text(verbatim: "")
-                    Text(verbatim: StatLabel.min).gridColumnAlignment(.trailing)
-                    Text(verbatim: StatLabel.avg).gridColumnAlignment(.trailing)
-                    Text(verbatim: StatLabel.max).gridColumnAlignment(.trailing)
-                }
-                .font(ThermikFont.caption).foregroundStyle(.secondary)
-                GridRow {
-                    Text("Since launch").font(ThermikFont.caption).foregroundStyle(.secondary)
-                    statText(sensor.minValue, unit); statText(sensor.averageValue, unit); statText(sensor.maxValue, unit)
-                }
-                GridRow {
-                    Text(model.historyWindow.title).font(ThermikFont.caption).foregroundStyle(.secondary)
-                    statText(range.map { Double($0.min) }, unit); statText(range.map { Double($0.avg) }, unit)
-                    statText(range.map { Double($0.max) }, unit)
-                }
+                statisticsHeader()
+                sessionStatistics(unit: unit)
+                rangeStatistics(range, unit: unit)
             }
+        }
+    }
+
+    private func statisticsHeader() -> some View {
+        GridRow {
+            Text(verbatim: "")
+            Text(verbatim: StatLabel.min).gridColumnAlignment(.trailing)
+            Text(verbatim: StatLabel.avg).gridColumnAlignment(.trailing)
+            Text(verbatim: StatLabel.max).gridColumnAlignment(.trailing)
+        }
+        .font(ThermikFont.caption).foregroundStyle(.secondary)
+    }
+
+    private func sessionStatistics(unit: UnitTemperature) -> some View {
+        GridRow {
+            Text("Since launch").font(ThermikFont.caption).foregroundStyle(.secondary)
+            statText(sensor.minValue, unit)
+            statText(sensor.averageValue, unit)
+            statText(sensor.maxValue, unit)
+        }
+    }
+
+    private func rangeStatistics(_ range: SeriesStats?, unit: UnitTemperature) -> some View {
+        GridRow {
+            Text(model.historyWindow.title).font(ThermikFont.caption).foregroundStyle(.secondary)
+            statText(range.map { Double($0.min) }, unit)
+            statText(range.map { Double($0.avg) }, unit)
+            statText(range.map { Double($0.max) }, unit)
         }
     }
 

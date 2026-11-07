@@ -86,20 +86,32 @@ private struct FanGauge: View {
     private static func image(step: Double, scale: CGFloat) -> CGImage? {
         let key = Key(step: step, scale: scale)
         if let hit = images[key] { return hit }
-        guard let symbol = NSImage(systemSymbolName: "fan.gauge.open", variableValue: step, accessibilityDescription: nil)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 24, weight: .regular)),
-              let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int((symbol.size.width * scale).rounded(.up)),
-                                         pixelsHigh: Int((symbol.size.height * scale).rounded(.up)), bitsPerSample: 8,
-                                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
-                                         bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        guard let symbol = gaugeSymbol(step: step),
+              let rep = bitmapRep(for: symbol, scale: scale) else { return nil }
+        draw(symbol, in: rep)
+        let image = rep.cgImage
+        images[key] = image
+        return image
+    }
+
+    private static func gaugeSymbol(step: Double) -> NSImage? {
+        NSImage(systemSymbolName: "fan.gauge.open", variableValue: step, accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 24, weight: .regular))
+    }
+
+    private static func bitmapRep(for symbol: NSImage, scale: CGFloat) -> NSBitmapImageRep? {
+        NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int((symbol.size.width * scale).rounded(.up)),
+                         pixelsHigh: Int((symbol.size.height * scale).rounded(.up)), bitsPerSample: 8,
+                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                         bytesPerRow: 0, bitsPerPixel: 0)
+    }
+
+    private static func draw(_ symbol: NSImage, in rep: NSBitmapImageRep) {
         rep.size = symbol.size
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         symbol.draw(in: NSRect(origin: .zero, size: symbol.size))
         NSGraphicsContext.restoreGraphicsState()
-        let image = rep.cgImage
-        images[key] = image
-        return image
     }
 }
 

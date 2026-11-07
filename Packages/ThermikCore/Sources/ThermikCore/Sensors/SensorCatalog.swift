@@ -48,21 +48,31 @@ package struct SensorCatalog: Sendable {
     /// `Bundle.module` resource `<platform>.json` (resources are flattened; the subdirectory lookup is a fallback for
     /// toolchains that keep the folder). Returns nil when absent, unreadable or for another platform / schema.
     package static func loadDatabase(platform: String) -> ChipSensorDatabase? {
-        guard !platform.isEmpty, platform.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") })
-        else { return nil }
-        guard let url = Bundle.module.url(forResource: platform, withExtension: "json")
-                ?? Bundle.module.url(forResource: platform, withExtension: "json", subdirectory: "SensorDB") else { return nil }
+        guard isDatabaseName(platform), let url = databaseURL(platform) else { return nil }
         do {
             let db = try JSONDecoder().decode(ChipSensorDatabase.self, from: Data(contentsOf: url))
-            guard db.schema == 1, db.platform == platform else {
-                log.error("sensor DB \(platform, privacy: .public): schema \(db.schema, privacy: .public) / platform mismatch, ignored")
-                return nil
-            }
-            return db
+            return validatedDatabase(db, platform: platform)
         } catch {
             log.error("sensor DB \(platform, privacy: .public) unreadable: \(String(describing: error), privacy: .public)")
             return nil
         }
+    }
+
+    private static func isDatabaseName(_ platform: String) -> Bool {
+        !platform.isEmpty && platform.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
+    }
+
+    private static func databaseURL(_ platform: String) -> URL? {
+        Bundle.module.url(forResource: platform, withExtension: "json")
+            ?? Bundle.module.url(forResource: platform, withExtension: "json", subdirectory: "SensorDB")
+    }
+
+    private static func validatedDatabase(_ db: ChipSensorDatabase, platform: String) -> ChipSensorDatabase? {
+        guard db.schema == 1, db.platform == platform else {
+            log.error("sensor DB \(platform, privacy: .public): schema \(db.schema, privacy: .public) / platform mismatch, ignored")
+            return nil
+        }
+        return db
     }
 
     /// Catalog file to try for an identity: `platform-name`, or `intel` on Intel Macs.
@@ -77,13 +87,18 @@ package struct SensorCatalog: Sendable {
                           smcTemperatureKeys: provider?.temperatureKeys.map { ($0.key.description, $0.info.type.description) } ?? [],
                           hidProducts: hidProducts)
         guard let provider else { return hw }
+        let probe = safeProbeKeys(provider: provider, identity: identity, database: database)
+        provider.readPass(probe) { k, v, _ in hw.initialValues[k.description] = v }
+        return hw
+    }
+
+    private static func safeProbeKeys(provider: SMCSensorProvider, identity: ChipIdentity,
+                                      database: ChipSensorDatabase?) -> [FourCC] {
         let described = Set(database?.sensors.map(\.key) ?? [])
-        let probe = provider.temperatureKeys.map(\.key).filter {
+        return provider.temperatureKeys.map(\.key).filter {
             !described.contains($0.description)
                 && Heuristics.safeGroups.contains(Heuristics.group(forKey: $0.description, appleSilicon: identity.isAppleSilicon))
         }
-        provider.readPass(probe) { k, v, _ in hw.initialValues[k.description] = v }
-        return hw
     }
 
     /// Schema-1 draft for contributors (`thermik-probe sensors discover`): this catalog's descriptors and headline,
@@ -184,24 +199,39 @@ package struct SensorCatalog: Sendable {
 
     /// Expands tiers (`|`) and wildcards (`?` any character, `#` digit) against the inventory keys (inventory order).
     package static func resolve(_ entries: [String], available: [String]) -> [String] {
-        var tiers: [[String]] = [[]]
-        for e in entries { if e == "|" { tiers.append([]) } else { tiers[tiers.count - 1].append(e) } }
         let availableSet = Set(available)
-        for tier in tiers {
-            var out: [String] = []
-            var seen = Set<String>()
-            for pattern in tier {
-                let matches: [String]
-                if pattern.contains("?") || pattern.contains("#") {
-                    matches = available.filter { matchesPattern($0, pattern) }
-                } else {
-                    matches = availableSet.contains(pattern) ? [pattern] : []
-                }
-                for m in matches where seen.insert(m).inserted { out.append(m) }
-            }
-            if !out.isEmpty { return out }
+        for tier in tiers(entries) {
+            let keys = resolveTier(tier, available: available, availableSet: availableSet)
+            if !keys.isEmpty { return keys }
         }
         return []
+    }
+
+    private static func tiers(_ entries: [String]) -> [[String]] {
+        var tiers: [[String]] = [[]]
+        for entry in entries {
+            if entry == "|" {
+                tiers.append([])
+                continue
+            }
+            tiers[tiers.count - 1].append(entry)
+        }
+        return tiers
+    }
+
+    private static func resolveTier(_ tier: [String], available: [String], availableSet: Set<String>) -> [String] {
+        var out: [String] = []
+        var seen = Set<String>()
+        for pattern in tier {
+            let matches = matchingKeys(pattern, available: available, availableSet: availableSet)
+            for match in matches where seen.insert(match).inserted { out.append(match) }
+        }
+        return out
+    }
+
+    private static func matchingKeys(_ pattern: String, available: [String], availableSet: Set<String>) -> [String] {
+        if pattern.contains("?") || pattern.contains("#") { return available.filter { matchesPattern($0, pattern) } }
+        return availableSet.contains(pattern) ? [pattern] : []
     }
 
     package static func matchesPattern(_ key: String, _ pattern: String) -> Bool {

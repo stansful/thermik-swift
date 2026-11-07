@@ -311,30 +311,9 @@ private struct MenuBarSettings: View {
 
     private func metricPicker(_ title: String, slot: Slot, value: MenuBarMetric, allowsFans: Bool,
                               allowsNone: Bool = true) -> some View {
-        Picker(selection: Binding<MetricChoice>(
-            get: { .metric(value) },
-            set: { choice in
-                switch choice {
-                case .metric(let m): assign(m, to: slot)
-                case .chooseSensor: choosing = slot
-                }
-            })) {
-            if allowsFans && fans.hasFans {
-                Section {
-                    Text("Average fan speed").tag(MetricChoice.metric(.fanAverage))
-                    Text("Fastest fan").tag(MetricChoice.metric(.fanMax))
-                    ForEach(fans.fans) { f in Text(verbatim: f.localizedName).tag(MetricChoice.metric(.fan(f.id))) }
-                }
-            }
-            Section {
-                ForEach(Self.temperatureAggregates, id: \.self) { k in
-                    Text(verbatim: k.title).tag(MetricChoice.metric(.temperature(.aggregate(k))))
-                }
-                if case .temperature(.sensor(let id)) = value {
-                    Text(verbatim: sensors.sensor(id)?.displayName ?? id.description).tag(MetricChoice.metric(value))
-                }
-                Text("Specific sensor…").tag(MetricChoice.chooseSensor)
-            }
+        Picker(selection: metricChoiceBinding(value, slot: slot)) {
+            if allowsFans && fans.hasFans { fanMetricChoices }
+            temperatureMetricChoices(value: value)
             if allowsFans {
                 Section {
                     Text("System power").tag(MetricChoice.metric(.systemPower))
@@ -342,6 +321,37 @@ private struct MenuBarSettings: View {
                 }
             }
         } label: { Text(verbatim: title) }
+    }
+
+    private func metricChoiceBinding(_ value: MenuBarMetric, slot: Slot) -> Binding<MetricChoice> {
+        Binding<MetricChoice>(
+            get: { .metric(value) },
+            set: { choice in
+                switch choice {
+                case .metric(let m): assign(m, to: slot)
+                case .chooseSensor: choosing = slot
+                }
+            })
+    }
+
+    @ViewBuilder private var fanMetricChoices: some View {
+        Section {
+            Text("Average fan speed").tag(MetricChoice.metric(.fanAverage))
+            Text("Fastest fan").tag(MetricChoice.metric(.fanMax))
+            ForEach(fans.fans) { f in Text(verbatim: f.localizedName).tag(MetricChoice.metric(.fan(f.id))) }
+        }
+    }
+
+    @ViewBuilder private func temperatureMetricChoices(value: MenuBarMetric) -> some View {
+        Section {
+            ForEach(Self.temperatureAggregates, id: \.self) { k in
+                Text(verbatim: k.title).tag(MetricChoice.metric(.temperature(.aggregate(k))))
+            }
+            if case .temperature(.sensor(let id)) = value {
+                Text(verbatim: sensors.sensor(id)?.displayName ?? id.description).tag(MetricChoice.metric(value))
+            }
+            Text("Specific sensor…").tag(MetricChoice.chooseSensor)
+        }
     }
 }
 

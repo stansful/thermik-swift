@@ -45,17 +45,23 @@ package enum Heuristics {
     static func role(forKey key: String, group: SensorGroup, appleSilicon: Bool) -> SensorRole {
         let c = Array(key)
         guard c.count == 4 else { return .probe }
-        if appleSilicon {
-            if key.hasPrefix("Tf"), c[3] == "6" { return .peakHold }          // Tf?6: running max since boot (SENS R11)
-            if key == "TCMb" { return .average }
-            if key == "TCMz" { return .maximum }
-            if key.hasPrefix("Tpx") || key.hasPrefix("Tex") || key.hasPrefix("Tsx") { return .maximum }  // firmware aggregates
-            // TCDX, TPDX, TRDX: legacy "X = max". Not in the indexed die families, where `Tp0X` is just probe index X.
-            if c[3] == "X", c[2].isLetter, !["Tp", "Te", "Tg", "Tf", "Ts"].contains(String(key.prefix(2))) { return .maximum }
-            return .probe
-        }
-        if c[3] == "X" || key == "TCXC" { return .maximum }                     // TCXC: package max (PECI)
-        if key.hasPrefix("TC"), c[3] == "c" { return .duplicate }                // TC0c…: raw (uncooked) core copies
+        if appleSilicon { return appleSiliconRole(forKey: key, characters: c) }
+        return intelRole(forKey: key, characters: c)
+    }
+
+    private static func appleSiliconRole(forKey key: String, characters c: [Character]) -> SensorRole {
+        if key.hasPrefix("Tf"), c[3] == "6" { return .peakHold }          // Tf?6: running max since boot (SENS R11)
+        if key == "TCMb" { return .average }
+        if key == "TCMz" { return .maximum }
+        if key.hasPrefix("Tpx") || key.hasPrefix("Tex") || key.hasPrefix("Tsx") { return .maximum }  // firmware aggregates
+        // TCDX, TPDX, TRDX: legacy "X = max". Not in the indexed die families, where `Tp0X` is just probe index X.
+        if c[3] == "X", c[2].isLetter, !["Tp", "Te", "Tg", "Tf", "Ts"].contains(String(key.prefix(2))) { return .maximum }
+        return .probe
+    }
+
+    private static func intelRole(forKey key: String, characters c: [Character]) -> SensorRole {
+        if c[3] == "X" || key == "TCXC" { return .maximum }              // TCXC: package max (PECI)
+        if key.hasPrefix("TC"), c[3] == "c" { return .duplicate }         // TC0c…: raw (uncooked) core copies
         return .probe
     }
 
@@ -77,40 +83,69 @@ package enum Heuristics {
         let hint = appleSilicon ? generationHint(platform: platform, key: key) : nil
         let group = hint?.group ?? group(forKey: key, appleSilicon: appleSilicon)
         let role = role(forKey: key, group: group, appleSilicon: appleSilicon)
-        let known = wellKnownNames[key]
-        let name = known?.en ?? "\(hint?.en ?? label(group).en) \(key)"
-        let nameRu = known?.ru ?? "\(hint?.ru ?? label(group).ru) \(key)"
+        let names = smcNames(forKey: key, hint: hint, group: group)
         // The die average / hotspot keep their meaning across generations (SENS §4.2): show them without a DB too.
         let wellKnownDie = !hasDatabase && appleSilicon && (key == "TCMb" || key == "TCMz")
-        return SensorDescriptor(key: key, name: name, nameRu: nameRu, group: group, role: role, cluster: nil,
+        return SensorDescriptor(key: key, name: names.en, nameRu: names.ru, group: group, role: role, cluster: nil,
                                 visible: wellKnownDie || isVisible(group: group, role: role, hasDatabase: hasDatabase),
                                 invalidValues: nil)
     }
+
+    private static func smcNames(forKey key: String, hint: Hint?, group: SensorGroup) -> (en: String, ru: String) {
+        let generic = hint.map { (en: $0.en, ru: $0.ru) } ?? label(group)
+        guard let known = wellKnownNames[key] else { return ("\(generic.en) \(key)", "\(generic.ru) \(key)") }
+        return known
+    }
+
+    private typealias HIDDetails = (group: SensorGroup, role: SensorRole, en: String, ru: String)
 
     /// HID product → descriptor (heuristic catalogs and the `*MTR*` die fallback, SENS §3.3).
     /// `dieFallback`: the chip has no SMC die keys, so HID die sensors are the CPU/GPU source and are shown.
     package static func descriptor(forHIDProduct product: String, dieFallback: Bool) -> SensorDescriptor {
         let n = trailingNumber(product)
         let suffix = n.map { " \($0)" } ?? ""
-        let (group, role, en, ru): (SensorGroup, SensorRole, String, String)
+        let details = hidDetails(product, suffix: suffix)
+        let isDie = [.cpuPerformance, .cpuEfficiency, .gpu].contains(details.group) || product.contains("SOC")
+        return SensorDescriptor(key: "hid:\(product)", name: "\(details.en) (HID)", nameRu: "\(details.ru) (HID)",
+                                group: details.group, role: details.role, cluster: nil,
+                                visible: dieFallback && isDie && !details.role.isNeverShown, invalidValues: nil)
+    }
+
+    private static func hidDetails(_ product: String, suffix: String) -> HIDDetails {
+        if let details = dieDetails(product, suffix: suffix) { return details }
+        if let details = pmuDetails(product, suffix: suffix) { return details }
+        if let details = deviceDetails(product, suffix: suffix) { return details }
+        return (.other, .probe, product, product)
+    }
+
+    private static func dieDetails(_ product: String, suffix: String) -> HIDDetails? {
         switch product {
-        case let p where p.hasPrefix("pACC MTR"): (group, role, en, ru) = (.cpuPerformance, .probe, "P-cluster die\(suffix)", "P-кластер, кристалл\(suffix)")
-        case let p where p.hasPrefix("eACC MTR"): (group, role, en, ru) = (.cpuEfficiency, .probe, "E-cluster die\(suffix)", "E-кластер, кристалл\(suffix)")
-        case let p where p.hasPrefix("GPU MTR"):  (group, role, en, ru) = (.gpu, .probe, "GPU die\(suffix)", "ГП, кристалл\(suffix)")
+        case let p where p.hasPrefix("pACC MTR"): return (.cpuPerformance, .probe, "P-cluster die\(suffix)", "P-кластер, кристалл\(suffix)")
+        case let p where p.hasPrefix("eACC MTR"): return (.cpuEfficiency, .probe, "E-cluster die\(suffix)", "E-кластер, кристалл\(suffix)")
+        case let p where p.hasPrefix("GPU MTR"): return (.gpu, .probe, "GPU die\(suffix)", "ГП, кристалл\(suffix)")
         case let p where p.hasPrefix("SOC MTR"), let p where p.hasPrefix("PMGR SOC Die"):
-            (group, role, en, ru) = (.soc, .probe, "SoC die\(suffix)", "Кристалл SoC\(suffix)")
-        case let p where p.hasPrefix("ANE MTR"):  (group, role, en, ru) = (.soc, .probe, "Neural Engine\(suffix)", "Neural Engine\(suffix)")
-        case let p where p.hasPrefix("ISP MTR"):  (group, role, en, ru) = (.soc, .probe, "Image processor\(suffix)", "Обработчик изображений\(suffix)")
-        case let p where p.contains("tcal"):      (group, role, en, ru) = (.powerDelivery, .reference, "PMU calibration", "PMU, эталон")
-        case let p where p.contains("tdie"):      (group, role, en, ru) = (.powerDelivery, .probe, "PMU die\(suffix)", "Кристалл PMU\(suffix)")
-        case let p where p.contains("tdev"):      (group, role, en, ru) = (.powerDelivery, .probe, "PMU sensor\(suffix)", "Датчик PMU\(suffix)")
-        case let p where p.hasPrefix("gas gauge"): (group, role, en, ru) = (.battery, .duplicate, "Battery gas gauge", "Контроллер АКБ")
-        case let p where p.hasPrefix("NAND"):     (group, role, en, ru) = (.storage, .probe, "SSD NAND\(suffix)", "SSD NAND\(suffix)")
-        default:                                  (group, role, en, ru) = (.other, .probe, product, product)
+            return (.soc, .probe, "SoC die\(suffix)", "Кристалл SoC\(suffix)")
+        case let p where p.hasPrefix("ANE MTR"): return (.soc, .probe, "Neural Engine\(suffix)", "Neural Engine\(suffix)")
+        case let p where p.hasPrefix("ISP MTR"): return (.soc, .probe, "Image processor\(suffix)", "Обработчик изображений\(suffix)")
+        default: return nil
         }
-        let isDie = [.cpuPerformance, .cpuEfficiency, .gpu].contains(group) || product.contains("SOC")
-        return SensorDescriptor(key: "hid:\(product)", name: "\(en) (HID)", nameRu: "\(ru) (HID)", group: group, role: role,
-                                cluster: nil, visible: dieFallback && isDie && !role.isNeverShown, invalidValues: nil)
+    }
+
+    private static func pmuDetails(_ product: String, suffix: String) -> HIDDetails? {
+        switch product {
+        case let p where p.contains("tcal"): return (.powerDelivery, .reference, "PMU calibration", "PMU, эталон")
+        case let p where p.contains("tdie"): return (.powerDelivery, .probe, "PMU die\(suffix)", "Кристалл PMU\(suffix)")
+        case let p where p.contains("tdev"): return (.powerDelivery, .probe, "PMU sensor\(suffix)", "Датчик PMU\(suffix)")
+        default: return nil
+        }
+    }
+
+    private static func deviceDetails(_ product: String, suffix: String) -> HIDDetails? {
+        switch product {
+        case let p where p.hasPrefix("gas gauge"): return (.battery, .duplicate, "Battery gas gauge", "Контроллер АКБ")
+        case let p where p.hasPrefix("NAND"): return (.storage, .probe, "SSD NAND\(suffix)", "SSD NAND\(suffix)")
+        default: return nil
+        }
     }
 
     /// True for HID die products that replace missing SMC die keys (M1/M2 layouts).
@@ -127,79 +162,131 @@ package enum Heuristics {
 
     /// `descriptors` are the present heuristic descriptors in inventory order (SMC and `hid:`).
     package static func headline(for descriptors: [SensorDescriptor], appleSilicon: Bool) -> [HeadlineSet: [String]] {
-        func keys(_ f: (SensorDescriptor) -> Bool) -> [String] { descriptors.filter { !$0.role.isNeverShown && f($0) }.map(\.key) }
+        let builder = HeadlineBuilder(descriptors: descriptors)
+        let headline = appleSilicon ? builder.appleSilicon() : builder.intel()
+        return headline.filter { !$0.value.isEmpty }
+    }
+
+    private struct HeadlineBuilder {
+        let descriptors: [SensorDescriptor]
+        let byKey: [String: SensorDescriptor]
+
+        init(descriptors: [SensorDescriptor]) {
+            self.descriptors = descriptors
+            byKey = Dictionary(descriptors.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+        }
+
+        func keys(_ predicate: (SensorDescriptor) -> Bool) -> [String] {
+            descriptors.filter { !$0.role.isNeverShown && predicate($0) }.map(\.key)
+        }
+
         func first(_ candidates: [String]) -> [String] {
             let present = Set(descriptors.map(\.key))
             return candidates.first { present.contains($0) }.map { [$0] } ?? []
         }
-        var h: [HeadlineSet: [String]] = [:]
-        if appleSilicon {
-            let smc = { (d: SensorDescriptor) in !d.key.hasPrefix("hid:") }
-            let hid = { (d: SensorDescriptor) in d.key.hasPrefix("hid:") && isHIDDieProduct(String(d.key.dropFirst(4))) }
-            // CPU: P0 = every Tp/Te probe (P1 `discover` narrows it to calibrated keys); hinted groups as fallback.
-            var cpu = keys { smc($0) && ($0.key.hasPrefix("Tp") || $0.key.hasPrefix("Te")) && $0.group != .cpuAggregate && $0.role.feedsAverages }
-            if cpu.isEmpty { cpu = keys { smc($0) && ($0.group == .cpuPerformance || $0.group == .cpuEfficiency) && $0.role.feedsAverages } }
-            if cpu.isEmpty { cpu = keys { hid($0) && ($0.group == .cpuPerformance || $0.group == .cpuEfficiency) } }
-            // P1: once the offset detector found calibrated keys (discover), average only the shown ones.
-            let byKey = Dictionary(descriptors.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
-            func narrowed(_ set: [String]) -> [String] {
-                guard set.contains(where: { byKey[$0]?.role == .calibrated }) else { return set }
-                return set.filter { byKey[$0]?.visible == true }
-            }
-            cpu = narrowed(cpu)
-            h[.cpu] = cpu
-            let aggregates = keys { smc($0) && ($0.key.hasPrefix("Tpx") || $0.key.hasPrefix("Tex")) }
-            h[.cpuHotspot] = aggregates.isEmpty ? cpu : aggregates
-            var gpu = keys { smc($0) && $0.key.hasPrefix("Tg") && $0.role.feedsAverages }
-            if gpu.isEmpty { gpu = keys { smc($0) && $0.group == .gpu && $0.role.feedsAverages } }
-            if gpu.isEmpty { gpu = keys { hid($0) && $0.group == .gpu } }
-            h[.gpu] = narrowed(gpu)
-            var soc = first(["TCMb"])
-            if soc.isEmpty { soc = keys { smc($0) && $0.key.hasPrefix("Ts") && $0.group == .soc && !$0.key.hasPrefix("Tsx") && $0.role.feedsAverages } }
-            if soc.isEmpty { soc = keys { hid($0) && $0.group == .soc } }
-            h[.soc] = soc
-            h[.battery] = first(["TB0T"])
-            h[.ssd] = first(["TH0x", "TH0a"])
-            var memory = first(["TVMR"])
-            if memory.isEmpty { memory = keys { smc($0) && $0.key.hasPrefix("Tm") && $0.role.feedsAverages } }
-            h[.memory] = memory
-        } else {
-            // Intel without intel.json entries (should not happen: intel.json ships). Same chains as §3.4.
-            let cores = keys { $0.key.count == 4 && $0.key.hasPrefix("TC") && $0.key.hasSuffix("C") && Array($0.key)[2].isNumber }
-            h[.cpu] = cores.isEmpty ? first(["TC0P", "TC0D"]) : cores
-            h[.cpuHotspot] = first(["TCXC"]).isEmpty ? (cores.isEmpty ? first(["TC0D"]) : cores) : ["TCXC"]
-            h[.gpu] = first(["TG0P", "TG0D", "TCGC"])
-            h[.memory] = first(["TM0P"]); h[.ssd] = first(["TH0P", "TH0x"]); h[.battery] = first(["TB0T"])
+
+        /// P1: once the offset detector found calibrated keys (discover), average only the shown ones.
+        func narrowed(_ set: [String]) -> [String] {
+            guard set.contains(where: { byKey[$0]?.role == .calibrated }) else { return set }
+            return set.filter { byKey[$0]?.visible == true }
         }
-        return h.filter { !$0.value.isEmpty }
+
+        func appleSilicon() -> [HeadlineSet: [String]] {
+            return [
+                .cpu: narrowed(cpu()),
+                .cpuHotspot: cpuHotspot(),
+                .gpu: narrowed(gpu()),
+                .soc: soc(),
+                .battery: first(["TB0T"]),
+                .ssd: first(["TH0x", "TH0a"]),
+                .memory: memory(),
+            ]
+        }
+
+        /// CPU: P0 = every Tp/Te probe (P1 `discover` narrows it to calibrated keys); hinted groups as fallback.
+        private func cpu() -> [String] {
+            var cpu = keys { isSMC($0) && ($0.key.hasPrefix("Tp") || $0.key.hasPrefix("Te")) && $0.group != .cpuAggregate && $0.role.feedsAverages }
+            if cpu.isEmpty { cpu = keys { isSMC($0) && ($0.group == .cpuPerformance || $0.group == .cpuEfficiency) && $0.role.feedsAverages } }
+            if cpu.isEmpty { cpu = keys { isHIDDie($0) && ($0.group == .cpuPerformance || $0.group == .cpuEfficiency) } }
+            return cpu
+        }
+
+        private func cpuHotspot() -> [String] {
+            let aggregates = keys { isSMC($0) && ($0.key.hasPrefix("Tpx") || $0.key.hasPrefix("Tex")) }
+            return aggregates.isEmpty ? narrowed(cpu()) : aggregates
+        }
+
+        private func gpu() -> [String] {
+            var gpu = keys { isSMC($0) && $0.key.hasPrefix("Tg") && $0.role.feedsAverages }
+            if gpu.isEmpty { gpu = keys { isSMC($0) && $0.group == .gpu && $0.role.feedsAverages } }
+            if gpu.isEmpty { gpu = keys { isHIDDie($0) && $0.group == .gpu } }
+            return gpu
+        }
+
+        private func soc() -> [String] {
+            var soc = first(["TCMb"])
+            if soc.isEmpty { soc = keys { isSMC($0) && $0.key.hasPrefix("Ts") && $0.group == .soc && !$0.key.hasPrefix("Tsx") && $0.role.feedsAverages } }
+            if soc.isEmpty { soc = keys { isHIDDie($0) && $0.group == .soc } }
+            return soc
+        }
+
+        private func memory() -> [String] {
+            var memory = first(["TVMR"])
+            if memory.isEmpty { memory = keys { isSMC($0) && $0.key.hasPrefix("Tm") && $0.role.feedsAverages } }
+            return memory
+        }
+
+        /// Intel without intel.json entries (should not happen: intel.json ships). Same chains as §3.4.
+        func intel() -> [HeadlineSet: [String]] {
+            let cores = keys { $0.key.count == 4 && $0.key.hasPrefix("TC") && $0.key.hasSuffix("C") && Array($0.key)[2].isNumber }
+            let hotspot = first(["TCXC"])
+            return [
+                .cpu: cores.isEmpty ? first(["TC0P", "TC0D"]) : cores,
+                .cpuHotspot: hotspot.isEmpty ? (cores.isEmpty ? first(["TC0D"]) : cores) : hotspot,
+                .gpu: first(["TG0P", "TG0D", "TCGC"]),
+                .memory: first(["TM0P"]),
+                .ssd: first(["TH0P", "TH0x"]),
+                .battery: first(["TB0T"]),
+            ]
+        }
+
+        private func isSMC(_ descriptor: SensorDescriptor) -> Bool {
+            !descriptor.key.hasPrefix("hid:")
+        }
+
+        private func isHIDDie(_ descriptor: SensorDescriptor) -> Bool {
+            descriptor.key.hasPrefix("hid:") && Heuristics.isHIDDieProduct(String(descriptor.key.dropFirst(4)))
+        }
     }
 
     // MARK: Names
 
     /// Generic group labels for heuristic names ("GPU Tg0A" / "ГП Tg0A"); RU follows the §4.12 glossary.
     static func label(_ g: SensorGroup) -> (en: String, ru: String) {
-        switch g {
-        case .cpuPerformance: return ("CPU P-cluster", "ЦП, P-кластер")
-        case .cpuEfficiency:  return ("CPU E-cluster", "ЦП, E-кластер")
-        case .cpuFabric:      return ("CPU fabric", "ЦП, шина")
-        case .cpuAggregate:   return ("CPU aggregate", "ЦП, агрегат")
-        case .gpu:            return ("GPU", "ГП")
-        case .gpuAggregate:   return ("GPU aggregate", "ГП, агрегат")
-        case .socFabric:      return ("SoC fabric", "SoC, шина")
-        case .soc:            return ("SoC", "SoC")
-        case .memory:         return ("Memory", "Память")
-        case .battery:        return ("Battery", "Аккумулятор")
-        case .storage:        return ("Storage", "Накопитель")
-        case .wireless:       return ("Wireless", "Беспроводная связь")
-        case .enclosure:      return ("Enclosure", "Корпус")
-        case .airflow:        return ("Airflow", "Воздушный поток")
-        case .ports:          return ("Port", "Порт")
-        case .powerDelivery:  return ("Power", "Питание")
-        case .board:          return ("Board", "Плата")
-        case .virtual:        return ("Virtual", "Виртуальный")
-        case .other:          return ("Sensor", "Датчик")
-        }
+        groupLabels[g] ?? ("Sensor", "Датчик")
     }
+
+    private static let groupLabels: [SensorGroup: (en: String, ru: String)] = [
+        .cpuPerformance: ("CPU P-cluster", "ЦП, P-кластер"),
+        .cpuEfficiency: ("CPU E-cluster", "ЦП, E-кластер"),
+        .cpuFabric: ("CPU fabric", "ЦП, шина"),
+        .cpuAggregate: ("CPU aggregate", "ЦП, агрегат"),
+        .gpu: ("GPU", "ГП"),
+        .gpuAggregate: ("GPU aggregate", "ГП, агрегат"),
+        .socFabric: ("SoC fabric", "SoC, шина"),
+        .soc: ("SoC", "SoC"),
+        .memory: ("Memory", "Память"),
+        .battery: ("Battery", "Аккумулятор"),
+        .storage: ("Storage", "Накопитель"),
+        .wireless: ("Wireless", "Беспроводная связь"),
+        .enclosure: ("Enclosure", "Корпус"),
+        .airflow: ("Airflow", "Воздушный поток"),
+        .ports: ("Port", "Порт"),
+        .powerDelivery: ("Power", "Питание"),
+        .board: ("Board", "Плата"),
+        .virtual: ("Virtual", "Виртуальный"),
+        .other: ("Sensor", "Датчик"),
+    ]
 
     /// Keys whose meaning is stable across Apple Silicon generations (SENS §4.2/§4.3: present in every public table
     /// and verified on M4 Max). Names match t6041.json.
@@ -221,34 +308,51 @@ package enum Heuristics {
     /// Per-generation naming hints (Stats `values.swift`, MIT; facts only). Platform IDs are the commonly known
     /// ones (SPEC §3.3) — they only select a hint table, so a wrong ID merely loses a name.
     private struct Hint { let group: SensorGroup; let en: String; let ru: String }
+    private static let pHint = Hint(group: .cpuPerformance, en: "P-core", ru: "P-ядро")
+    private static let eHint = Hint(group: .cpuEfficiency, en: "E-core", ru: "E-ядро")
+    private static let gHint = Hint(group: .gpu, en: "GPU", ru: "ГП")
+
     private static func generationHint(platform: String, key: String) -> Hint? {
-        let p = Hint(group: .cpuPerformance, en: "P-core", ru: "P-ядро")
-        let e = Hint(group: .cpuEfficiency, en: "E-core", ru: "E-ядро")
-        let g = Hint(group: .gpu, en: "GPU", ru: "ГП")
-        let table: [String: Hint]
-        func map(_ keys: String, _ h: Hint) -> [String: Hint] {
-            Dictionary(uniqueKeysWithValues: keys.split(separator: " ").map { (String($0), h) })
-        }
         switch platform {
-        case "t8103", "t6000", "t6001", "t6002":                       // M1 family
-            table = map("Tp01 Tp05 Tp0D Tp0H Tp0L Tp0P Tp0X Tp0b", p).merging(map("Tp09 Tp0T", e)) { a, _ in a }
-                .merging(map("Tg05 Tg0D Tg0L Tg0T", g)) { a, _ in a }
-        case "t8112", "t6020", "t6021", "t6022":                       // M2 family
-            table = map("Tp01 Tp05 Tp09 Tp0D Tp0X Tp0b Tp0f Tp0j", p).merging(map("Tp1h Tp1t Tp1p Tp1l", e)) { a, _ in a }
-                .merging(map("Tg0f Tg0j", g)) { a, _ in a }
-        case "t8122", "t6030", "t6031", "t6032", "t6034":              // M3 family: CPU/GPU probes live under Tf
-            table = map("Tf04 Tf09 Tf0A Tf0B Tf0D Tf0E Tf44 Tf49 Tf4A Tf4B Tf4D Tf4E", p)
-                .merging(map("Te05 Te0L Te0P Te0S", e)) { a, _ in a }
-                .merging(map("Tf14 Tf18 Tf19 Tf1A Tf24 Tf28 Tf29 Tf2A", g)) { a, _ in a }
-        case "t8132":                                                  // M4 (base)
-            table = map("Te08 Te09 Te0A Te0G Te0H Te0I", e)
-        case "t8142":                                                  // M5
-            table = map("Tp00 Tp04 Tp08 Tp0C Tp0G Tp0K", Hint(group: .cpuPerformance, en: "Super core", ru: "Супер-ядро"))
-                .merging(map("Tp0O Tp0R Tp0U Tp0X Tp0a Tp0d Tp0g Tp0j Tp0m Tp0p Tp0u Tp0y", p)) { a, _ in a }
-                .merging(map("Tg0U Tg0X Tg0d Tg0g Tg0j Tg1Y Tg1c Tg1g", g)) { a, _ in a }
+        case "t8103", "t6000", "t6001", "t6002": return m1Hints()[key]              // M1 family
+        case "t8112", "t6020", "t6021", "t6022": return m2Hints()[key]              // M2 family
+        case "t8122", "t6030", "t6031", "t6032", "t6034": return m3Hints()[key]     // M3 family: CPU/GPU probes under Tf
+        case "t8132": return m4Hints()[key]                                        // M4 (base)
+        case "t8142": return m5Hints()[key]                                        // M5
         default: return nil
         }
-        return table[key]
+    }
+
+    private static func hintMap(_ keys: String, _ hint: Hint) -> [String: Hint] {
+        Dictionary(uniqueKeysWithValues: keys.split(separator: " ").map { (String($0), hint) })
+    }
+
+    private static func m1Hints() -> [String: Hint] {
+        hintMap("Tp01 Tp05 Tp0D Tp0H Tp0L Tp0P Tp0X Tp0b", pHint)
+            .merging(hintMap("Tp09 Tp0T", eHint)) { a, _ in a }
+            .merging(hintMap("Tg05 Tg0D Tg0L Tg0T", gHint)) { a, _ in a }
+    }
+
+    private static func m2Hints() -> [String: Hint] {
+        hintMap("Tp01 Tp05 Tp09 Tp0D Tp0X Tp0b Tp0f Tp0j", pHint)
+            .merging(hintMap("Tp1h Tp1t Tp1p Tp1l", eHint)) { a, _ in a }
+            .merging(hintMap("Tg0f Tg0j", gHint)) { a, _ in a }
+    }
+
+    private static func m3Hints() -> [String: Hint] {
+        hintMap("Tf04 Tf09 Tf0A Tf0B Tf0D Tf0E Tf44 Tf49 Tf4A Tf4B Tf4D Tf4E", pHint)
+            .merging(hintMap("Te05 Te0L Te0P Te0S", eHint)) { a, _ in a }
+            .merging(hintMap("Tf14 Tf18 Tf19 Tf1A Tf24 Tf28 Tf29 Tf2A", gHint)) { a, _ in a }
+    }
+
+    private static func m4Hints() -> [String: Hint] {
+        hintMap("Te08 Te09 Te0A Te0G Te0H Te0I", eHint)
+    }
+
+    private static func m5Hints() -> [String: Hint] {
+        hintMap("Tp00 Tp04 Tp08 Tp0C Tp0G Tp0K", Hint(group: .cpuPerformance, en: "Super core", ru: "Супер-ядро"))
+            .merging(hintMap("Tp0O Tp0R Tp0U Tp0X Tp0a Tp0d Tp0g Tp0j Tp0m Tp0p Tp0u Tp0y", pHint)) { a, _ in a }
+            .merging(hintMap("Tg0U Tg0X Tg0d Tg0g Tg0j Tg1Y Tg1c Tg1g", gHint)) { a, _ in a }
     }
 
     private static func trailingNumber(_ s: String) -> Int? {
@@ -289,75 +393,129 @@ package struct HeuristicDetectors {
     /// Returns refined descriptors (same order). Keys that are not SMC keys pass through unchanged.
     package func refine(_ descriptors: [SensorDescriptor]) -> [SensorDescriptor] {
         guard samples > 0 else { return descriptors }
-        var out = descriptors
-        let index = Dictionary(uniqueKeysWithValues: out.enumerated().map { ($1.key, $0) })
-        func set(_ key: String, role: SensorRole, visible: Bool) {
-            guard let i = index[key], !out[i].role.isNeverShown else { return }
-            out[i].role = role; out[i].visible = visible
-        }
-        let smcKeys = out.map(\.key).filter { !$0.hasPrefix("hid:") && bytes[$0] != nil }.sorted { FourCC($0) < FourCC($1) }
+        var refinement = Refinement(descriptors: descriptors, samples: samples, bytes: bytes, values: values)
+        refinement.apply()
+        return refinement.descriptors
+    }
 
-        // Static / always invalid.
-        var unused = Set<String>()
-        for k in smcKeys {
-            if let i = index[k], out[i].group.rejectsExact40, samples < 600 { continue }
-            let b = bytes[k] ?? [], v = values[k] ?? []
+    private struct Refinement {
+        var descriptors: [SensorDescriptor]
+        let samples: Int
+        let bytes: [String: [[UInt8]]]
+        let values: [String: [Double?]]
+        let index: [String: Int]
+
+        init(descriptors: [SensorDescriptor], samples: Int, bytes: [String: [[UInt8]]], values: [String: [Double?]]) {
+            self.descriptors = descriptors
+            self.samples = samples
+            self.bytes = bytes
+            self.values = values
+            index = Dictionary(uniqueKeysWithValues: descriptors.enumerated().map { ($1.key, $0) })
+        }
+
+        mutating func apply() {
+            let keys = smcKeys()
+            let unused = markUnused(in: keys)
+            let duplicates = markMirrors(in: keys, excluding: unused)
+            let live = keys.filter { !unused.contains($0) && !duplicates.contains($0) }
+            refineOffsets(live)
+        }
+
+        private func smcKeys() -> [String] {
+            descriptors.map(\.key).filter { !$0.hasPrefix("hid:") && bytes[$0] != nil }.sorted { FourCC($0) < FourCC($1) }
+        }
+
+        private mutating func markUnused(in keys: [String]) -> Set<String> {
+            var unused = Set<String>()
+            for key in keys where !defersUnusedCheck(key) {
+                if isUnused(key) { unused.insert(key) }
+            }
+            for key in unused { set(key, role: .unused, visible: false) }
+            return unused
+        }
+
+        private func defersUnusedCheck(_ key: String) -> Bool {
+            guard let i = index[key] else { return false }
+            return descriptors[i].group.rejectsExact40 && samples < 600
+        }
+
+        private func isUnused(_ key: String) -> Bool {
+            let b = bytes[key] ?? [], v = values[key] ?? []
             let isStatic = Set(b).count == 1
             let first = v.compactMap { $0 }.first
-            if v.allSatisfy({ $0 == nil }) && isStatic { unused.insert(k) }
-            else if isStatic, let f = first, abs(f) < 1 { unused.insert(k) }
+            let alwaysInvalid = v.allSatisfy { $0 == nil }
+            let nearZero = first.map { abs($0) < 1 } ?? false
+            return isStatic && (alwaysInvalid || nearZero)
         }
-        unused.forEach { set($0, role: .unused, visible: false) }
 
-        // Mirrors.
-        var seen: [[[UInt8]]: String] = [:]
-        var duplicates = Set<String>()
-        if samples >= 10 {
-            for k in smcKeys where !unused.contains(k) {
-                let series = bytes[k] ?? []
-                guard Set(series).count >= 2, (values[k] ?? []).compactMap({ $0 }).count >= 10 else { continue }
-                if seen[series] != nil { duplicates.insert(k); set(k, role: .duplicate, visible: false) }
-                else { seen[series] = k }
+        private mutating func markMirrors(in keys: [String], excluding unused: Set<String>) -> Set<String> {
+            var seen: [[[UInt8]]: String] = [:]
+            var duplicates = Set<String>()
+            guard samples >= 10 else { return duplicates }
+            for key in keys where !unused.contains(key) {
+                guard isDuplicateMirror(key, seen: &seen) else { continue }
+                duplicates.insert(key)
+                set(key, role: .duplicate, visible: false)
+            }
+            return duplicates
+        }
+
+        private func isDuplicateMirror(_ key: String, seen: inout [[[UInt8]]: String]) -> Bool {
+            let series = bytes[key] ?? []
+            guard Set(series).count >= 2, (values[key] ?? []).compactMap({ $0 }).count >= 10 else { return false }
+            if seen[series] == nil {
+                seen[series] = key
+                return false
+            }
+            return true
+        }
+
+        /// Offset copies within a family (first two characters), on remaining keys in FourCC order.
+        private mutating func refineOffsets(_ live: [String]) {
+            var i = 0
+            while i + 1 < live.count {
+                i += refineOffsetFamily(live, at: i)
             }
         }
 
-        // Offset copies within a family (first two characters), on the remaining keys in FourCC order.
-        let live = smcKeys.filter { !unused.contains($0) && !duplicates.contains($0) }
-        var i = 0
-        while i + 1 < live.count {
+        private mutating func refineOffsetFamily(_ live: [String], at i: Int) -> Int {
             let a = live[i], b = live[i + 1]
-            guard a.prefix(2) == b.prefix(2), let d = constantOffset(a, b), abs(d) > 0.05 else { i += 1; continue }
+            guard a.prefix(2) == b.prefix(2), let d = constantOffset(a, b), abs(d) > 0.05 else { return 1 }
             set(a, role: .probe, visible: false)
             set(b, role: .calibrated, visible: true)
-            if i + 2 < live.count, live[i + 2].prefix(2) == b.prefix(2), isAlwaysAtLeast(live[i + 2], b) {
-                set(live[i + 2], role: .hotspot, visible: false)
-                i += 3
-            } else {
-                i += 2
+            guard i + 2 < live.count else { return 2 }
+            let c = live[i + 2]
+            guard c.prefix(2) == b.prefix(2), isAlwaysAtLeast(c, b) else { return 2 }
+            set(c, role: .hotspot, visible: false)
+            return 3
+        }
+
+        private mutating func set(_ key: String, role: SensorRole, visible: Bool) {
+            guard let i = index[key], !descriptors[i].role.isNeverShown else { return }
+            descriptors[i].role = role
+            descriptors[i].visible = visible
+        }
+
+        /// b − a if constant within 0.02 °C over ≥ 20 samples where both are valid and a moves by ≥ 0.2 °C.
+        private func constantOffset(_ a: String, _ b: String) -> Double? {
+            guard let va = values[a], let vb = values[b] else { return nil }
+            let pairs = zip(va, vb).compactMap { x, y -> (Double, Double)? in
+                guard let x, let y else { return nil }
+                return (x, y)
             }
+            let diffs = pairs.map { $0.1 - $0.0 }
+            guard diffs.count >= 20, let lo = diffs.min(), let hi = diffs.max(), hi - lo <= 0.02,
+                  let aLo = pairs.map(\.0).min(), let aHi = pairs.map(\.0).max(), aHi - aLo >= 0.2 else { return nil }
+            return (lo + hi) / 2
         }
-        return out
-    }
 
-    /// b − a if constant within 0.02 °C over ≥ 20 samples where both are valid and a moves by ≥ 0.2 °C.
-    private func constantOffset(_ a: String, _ b: String) -> Double? {
-        guard let va = values[a], let vb = values[b] else { return nil }
-        let pairs = zip(va, vb).compactMap { x, y -> (Double, Double)? in
-            guard let x, let y else { return nil }
-            return (x, y)
+        private func isAlwaysAtLeast(_ c: String, _ b: String) -> Bool {
+            guard let vc = values[c], let vb = values[b] else { return false }
+            let pairs = zip(vc, vb).compactMap { x, y -> (Double, Double)? in
+                guard let x, let y else { return nil }
+                return (x, y)
+            }
+            return pairs.count >= 20 && pairs.allSatisfy { $0.0 >= $0.1 }
         }
-        let diffs = pairs.map { $0.1 - $0.0 }
-        guard diffs.count >= 20, let lo = diffs.min(), let hi = diffs.max(), hi - lo <= 0.02,
-              let aLo = pairs.map(\.0).min(), let aHi = pairs.map(\.0).max(), aHi - aLo >= 0.2 else { return nil }
-        return (lo + hi) / 2
-    }
-
-    private func isAlwaysAtLeast(_ c: String, _ b: String) -> Bool {
-        guard let vc = values[c], let vb = values[b] else { return false }
-        let pairs = zip(vc, vb).compactMap { x, y -> (Double, Double)? in
-            guard let x, let y else { return nil }
-            return (x, y)
-        }
-        return pairs.count >= 20 && pairs.allSatisfy { $0.0 >= $0.1 }
     }
 }

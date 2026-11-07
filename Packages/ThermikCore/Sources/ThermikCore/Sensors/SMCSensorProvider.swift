@@ -72,21 +72,22 @@ package final class SMCSensorProvider {
     package func readPass(_ keys: [FourCC], _ body: (FourCC, Double, [UInt8]) -> Void) -> Bool {
         var reconnected = false
         for k in keys {
-            switch read(k) {
+            switch readRecovering(k, reconnected: &reconnected) {
             case .value(let v, let b): body(k, v, b)
             case .failed: continue
-            case .connectionLost:
-                guard !reconnected else { return false }
-                reconnected = true
-                guard (try? connection.reconnect()) != nil else { return false }
-                switch read(k) {
-                case .value(let v, let b): body(k, v, b)
-                case .failed: continue
-                case .connectionLost: return false
-                }
+            case .connectionLost: return false
             }
         }
         return true
+    }
+
+    private func readRecovering(_ key: FourCC, reconnected: inout Bool) -> ReadResult {
+        let result = read(key)
+        guard case .connectionLost = result else { return result }
+        guard !reconnected else { return .connectionLost }
+        reconnected = true
+        guard (try? connection.reconnect()) != nil else { return .connectionLost }
+        return read(key)
     }
 
     /// `PSTR`, `PDTR`, `PPBR`, `PHPC` (W, flt on Apple Silicon); Intel has `PCPC` (CPU package) instead of `PHPC`.

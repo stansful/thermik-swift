@@ -139,16 +139,18 @@ private struct ColorScaleEditor: View {
     private func binding(_ i: Int, unit: UnitTemperature) -> Binding<Double> {
         Binding(
             get: { ThermikFormat.convert(ThermalScale.scale(for: thermalClass).temps[i], to: unit).rounded() },
-            set: { shown in
-                guard shown.isFinite else { return }
-                var t = ThermalScale.scale(for: thermalClass).temps
-                // °F steps are 5/9 °C: keep a tenth of a degree so each step still moves the stop.
-                let celsius = unit == .fahrenheit ? ((shown - 32) * 5 / 9 * 10).rounded() / 10 : shown.rounded()
-                let lo = i > 0 ? t[i - 1] + 1 : -20
-                let hi = i < t.count - 1 ? t[i + 1] - 1 : 130
-                t[i] = min(max(celsius, lo), hi)
-                settings.colorScales[thermalClass.rawValue] = t == thermalClass.stops ? nil : t
-            })
+            set: { setStop($0, at: i, unit: unit) })
+    }
+
+    private func setStop(_ shown: Double, at i: Int, unit: UnitTemperature) {
+        guard shown.isFinite else { return }
+        var t = ThermalScale.scale(for: thermalClass).temps
+        // °F steps are 5/9 °C: keep a tenth of a degree so each step still moves the stop.
+        let celsius = unit == .fahrenheit ? ((shown - 32) * 5 / 9 * 10).rounded() / 10 : shown.rounded()
+        let lo = i > 0 ? t[i - 1] + 1 : -20
+        let hi = i < t.count - 1 ? t[i + 1] - 1 : 130
+        t[i] = min(max(celsius, lo), hi)
+        settings.colorScales[thermalClass.rawValue] = t == thermalClass.stops ? nil : t
     }
 }
 

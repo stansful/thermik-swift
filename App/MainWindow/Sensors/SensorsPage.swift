@@ -82,70 +82,86 @@ struct SensorsPage: View {
 
     private func table(_ rows: [LiveSensor]) -> some View {
         let unit = settings.effectiveUnit
-        return Table(rows, selection: $model.selectedSensor, sortOrder: $sortOrder, columnCustomization: $columns) {
-            TableColumn(Text(Image(systemName: "star")), sortUsing: SensorSortComparator(column: .pinned)) { s in
-                PinCell(sensor: s)
-            }
-            .width(22)
-            .customizationID("pin")
-            TableColumn("Name", sortUsing: SensorSortComparator(column: .name)) { s in NameCell(sensor: s) }
-                .width(min: 150, ideal: 240)
-                .customizationID("name")
-            TableColumn("Group", sortUsing: SensorSortComparator(column: .group)) { s in
-                Text(verbatim: s.sensor.displayGroup.title).foregroundStyle(.secondary).lineLimit(1)
-            }
-            .width(min: 60, ideal: 96)
-            .customizationID("group")
-            TableColumn("Value", sortUsing: SensorSortComparator(column: .value)) { s in ValueCell(sensor: s, unit: unit) }
-                .width(min: 56, ideal: 70)
-                .customizationID("value")
-            TableColumn(Text(verbatim: StatLabel.min), sortUsing: SensorSortComparator(column: .min)) { s in StatCell(sensor: s, stat: .min, unit: unit) }
-                .width(min: 44, ideal: 54)
-                .customizationID("min")
-            TableColumn(Text(verbatim: StatLabel.avg), sortUsing: SensorSortComparator(column: .avg)) { s in StatCell(sensor: s, stat: .avg, unit: unit) }
-                .width(min: 44, ideal: 54)
-                .customizationID("avg")
-            TableColumn(Text(verbatim: StatLabel.max), sortUsing: SensorSortComparator(column: .max)) { s in StatCell(sensor: s, stat: .max, unit: unit) }
-                .width(min: 44, ideal: 54)
-                .customizationID("max")
-            TableColumn("Last 5 min") { s in SparkCell(sensor: s) }
-                .width(min: 60, ideal: 90)
-                .customizationID("spark")
-            TableColumn("Key", sortUsing: SensorSortComparator(column: .key)) { s in
-                Text(verbatim: s.sensor.id.description).font(ThermikFont.mono).foregroundStyle(.secondary).textSelection(.enabled)
-            }
+        let table = Table(rows, selection: $model.selectedSensor, sortOrder: $sortOrder, columnCustomization: $columns) {
+            sensorColumns(unit: unit)
+        }
+        return tableInteractions(table)
+    }
+
+    @TableColumnBuilder<LiveSensor, SensorSortComparator>
+    private func sensorColumns(unit: UnitTemperature) -> some TableColumnContent<LiveSensor, SensorSortComparator> {
+        pinAndNameColumns()
+        groupAndValueColumns(unit: unit)
+        statisticsColumns(unit: unit)
+        sparkAndKeyColumns()
+    }
+
+    @TableColumnBuilder<LiveSensor, SensorSortComparator>
+    private func pinAndNameColumns() -> some TableColumnContent<LiveSensor, SensorSortComparator> {
+        TableColumn(Text(Image(systemName: "star")), sortUsing: SensorSortComparator(column: .pinned)) { s in
+            PinCell(sensor: s)
+        }
+        .width(22)
+        .customizationID("pin")
+        TableColumn("Name", sortUsing: SensorSortComparator(column: .name)) { s in NameCell(sensor: s) }
+            .width(min: 150, ideal: 240)
+            .customizationID("name")
+    }
+
+    @TableColumnBuilder<LiveSensor, SensorSortComparator>
+    private func groupAndValueColumns(unit: UnitTemperature) -> some TableColumnContent<LiveSensor, SensorSortComparator> {
+        TableColumn("Group", sortUsing: SensorSortComparator(column: .group)) { s in
+            Text(verbatim: s.sensor.displayGroup.title).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .width(min: 60, ideal: 96)
+        .customizationID("group")
+        TableColumn("Value", sortUsing: SensorSortComparator(column: .value)) { s in ValueCell(sensor: s, unit: unit) }
+            .width(min: 56, ideal: 70)
+            .customizationID("value")
+    }
+
+    @TableColumnBuilder<LiveSensor, SensorSortComparator>
+    private func statisticsColumns(unit: UnitTemperature) -> some TableColumnContent<LiveSensor, SensorSortComparator> {
+        TableColumn(Text(verbatim: StatLabel.min), sortUsing: SensorSortComparator(column: .min)) { s in StatCell(sensor: s, stat: .min, unit: unit) }
+            .width(min: 44, ideal: 54)
+            .customizationID("min")
+        TableColumn(Text(verbatim: StatLabel.avg), sortUsing: SensorSortComparator(column: .avg)) { s in StatCell(sensor: s, stat: .avg, unit: unit) }
+            .width(min: 44, ideal: 54)
+            .customizationID("avg")
+        TableColumn(Text(verbatim: StatLabel.max), sortUsing: SensorSortComparator(column: .max)) { s in StatCell(sensor: s, stat: .max, unit: unit) }
+            .width(min: 44, ideal: 54)
+            .customizationID("max")
+    }
+
+    @TableColumnBuilder<LiveSensor, SensorSortComparator>
+    private func sparkAndKeyColumns() -> some TableColumnContent<LiveSensor, SensorSortComparator> {
+        TableColumn("Last 5 min") { s in SparkCell(sensor: s) }
             .width(min: 60, ideal: 90)
-            .customizationID("key")
-            .defaultVisibility(.hidden)
+            .customizationID("spark")
+        TableColumn("Key", sortUsing: SensorSortComparator(column: .key)) { s in
+            Text(verbatim: s.sensor.id.description).font(ThermikFont.mono).foregroundStyle(.secondary).textSelection(.enabled)
         }
-        .contextMenu(forSelectionType: SensorID.self) { ids in
-            if let id = ids.first, let s = sensors.sensor(id) { contextMenu(s) }
-        } primaryAction: { ids in
-            guard let id = ids.first else { return }
-            model.selectedSensor = id
-            model.isInspectorShown = true
-        }
-        .thermikPlainRows()
+        .width(min: 60, ideal: 90)
+        .customizationID("key")
+        .defaultVisibility(.hidden)
+    }
+
+    private func tableInteractions<Content: View>(_ content: Content) -> some View {
+        content
+            .contextMenu(forSelectionType: SensorID.self) { ids in
+                if let id = ids.first, let s = sensors.sensor(id) { contextMenu(s) }
+            } primaryAction: { ids in
+                guard let id = ids.first else { return }
+                model.selectedSensor = id
+                model.isInspectorShown = true
+            }
+            .thermikPlainRows()
     }
 
     @ViewBuilder private func contextMenu(_ s: LiveSensor) -> some View {
         Button { sensors.setPinned(s.id, !s.isPinned) } label: { s.isPinned ? Text("Unpin") : Text("Pin") }
         Button { sensors.setHidden(s.id, !s.isHidden) } label: { s.isHidden ? Text("Show") : Text("Hide") }
-        if SensorStore.isHottestCandidate(s.sensor) {
-            // A block excluded in Settings › Sensors wins over the sensor's own switch (SensorStore.excludingBlocks:
-            // its block, or every excluded block for a die-wide maximum): offer to switch those back on instead.
-            let blocks = SensorStore.excludingBlocks(s.sensor, settings.hottestExcludedGroups)
-            if !blocks.isEmpty {
-                let single = blocks.count == 1 ? blocks.first : nil
-                Button { settings.hottestExcludedGroups.subtract(blocks) } label: {
-                    single.map { Text("Include the “\($0.title)” block in Hottest") } ?? Text("Include every block in Hottest")
-                }
-            } else {
-                Button { sensors.setExcludedFromHottest(s.id, !s.isExcludedFromHottest) } label: {
-                    s.isExcludedFromHottest ? Text("Include in Hottest") : Text("Exclude from Hottest")
-                }
-            }
-        }
+        hottestMenuItem(s)
         Button { beginRename(s) } label: { Text("Rename…") }
         Divider()
         Button { model.createAlert(for: .sensor(s.id)) } label: { Text("Set alert…") }
@@ -153,6 +169,32 @@ struct SensorsPage: View {
             .disabled(s.value == nil)
         Divider()
         Button { model.selectedSensor = s.id; model.isInspectorShown = true } label: { Text("Show in inspector") }
+    }
+
+    /// A block excluded in Settings › Sensors wins over the sensor's own switch (SensorStore.excludingBlocks:
+    /// its block, or every excluded block for a die-wide maximum): offer to switch those back on instead.
+    @ViewBuilder private func hottestMenuItem(_ s: LiveSensor) -> some View {
+        if SensorStore.isHottestCandidate(s.sensor) {
+            let blocks = SensorStore.excludingBlocks(s.sensor, settings.hottestExcludedGroups)
+            if !blocks.isEmpty {
+                hottestBlockButton(blocks)
+            } else {
+                hottestToggle(s)
+            }
+        }
+    }
+
+    private func hottestBlockButton(_ blocks: Set<SensorGroup>) -> some View {
+        let single = blocks.count == 1 ? blocks.first : nil
+        return Button { settings.hottestExcludedGroups.subtract(blocks) } label: {
+            single.map { Text("Include the “\($0.title)” block in Hottest") } ?? Text("Include every block in Hottest")
+        }
+    }
+
+    private func hottestToggle(_ s: LiveSensor) -> some View {
+        Button { sensors.setExcludedFromHottest(s.id, !s.isExcludedFromHottest) } label: {
+            s.isExcludedFromHottest ? Text("Include in Hottest") : Text("Exclude from Hottest")
+        }
     }
 
     private func beginRename(_ s: LiveSensor) {
@@ -313,16 +355,19 @@ struct SensorSortComparator: SortComparator {
         switch c {
         case .pinned: return compareBool(a.isPinned, b.isPinned, tie: a.displayName, b.displayName)
         case .name: return a.displayName.localizedStandardCompare(b.displayName)
-        case .group:
-            let ga = DisplayGroup.allCases.firstIndex(of: a.sensor.displayGroup) ?? 0
-            let gb = DisplayGroup.allCases.firstIndex(of: b.sensor.displayGroup) ?? 0
-            return ga == gb ? a.displayName.localizedStandardCompare(b.displayName) : (ga < gb ? .orderedAscending : .orderedDescending)
+        case .group: return compareGroup(a, b)
         case .value: return compareOptional(a.value, b.value)
         case .min: return compareOptional(a.minValue, b.minValue)
         case .avg: return compareOptional(a.averageValue, b.averageValue)
         case .max: return compareOptional(a.maxValue, b.maxValue)
         case .key: return a.sensor.id.description.localizedStandardCompare(b.sensor.id.description)
         }
+    }
+
+    @MainActor private static func compareGroup(_ a: LiveSensor, _ b: LiveSensor) -> ComparisonResult {
+        let ga = DisplayGroup.allCases.firstIndex(of: a.sensor.displayGroup) ?? 0
+        let gb = DisplayGroup.allCases.firstIndex(of: b.sensor.displayGroup) ?? 0
+        return ga == gb ? a.displayName.localizedStandardCompare(b.displayName) : (ga < gb ? .orderedAscending : .orderedDescending)
     }
 
     /// Pinned first in forward order.

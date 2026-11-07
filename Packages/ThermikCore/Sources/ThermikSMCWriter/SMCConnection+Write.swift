@@ -9,16 +9,25 @@ extension SMCConnection: SMCReadWriting {
     public func writeRaw(_ key: FourCC, _ bytes: [UInt8]) throws {
         guard geteuid() == 0 else { throw SMCError.notPrivileged(key: key) }
         let info = try keyInfo(key)
+        try validateWrite(key, bytes, info: info)
+        let block = writeBlock(key, bytes, info: info)
+        let output = try perform(block)
+        guard output.result == 0 else { throw SMCError.firmware(output.result, key: key) }
+    }
+
+    private func validateWrite(_ key: FourCC, _ bytes: [UInt8], info: SMCKeyInfo) throws {
         guard info.isWritable else { throw SMCError.notWritable(key) }
         guard bytes.count == Int(info.size), bytes.count <= 32 else {
             throw SMCError.sizeMismatch(key: key, expected: Int(info.size), actual: bytes.count)
         }
-        var b = SMCParamBlock()
-        b.key = key
-        b.dataSize = info.size
-        b.command = SMCCommand.writeKey.rawValue
-        b.setPayload(bytes)
-        let o = try perform(b)
-        guard o.result == 0 else { throw SMCError.firmware(o.result, key: key) }
+    }
+
+    private func writeBlock(_ key: FourCC, _ bytes: [UInt8], info: SMCKeyInfo) -> SMCParamBlock {
+        var block = SMCParamBlock()
+        block.key = key
+        block.dataSize = info.size
+        block.command = SMCCommand.writeKey.rawValue
+        block.setPayload(bytes)
+        return block
     }
 }

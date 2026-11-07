@@ -6,42 +6,51 @@ import IOKit
 enum MachineInfoReader {
     static func read() -> MachineInfo {
         let arm = (SysctlReader.int("hw.optional.arm64") ?? 0) == 1
-        var levels: [PerfLevel] = []
-        for i in 0..<max(SysctlReader.int("hw.nperflevels") ?? 0, 0) {      // M5/M6 may add a third tier: never assume 2
-            let p = "hw.perflevel\(i)."
-            levels.append(PerfLevel(name: SysctlReader.string(p + "name") ?? "Level \(i)",
-                                    logicalCPUs: SysctlReader.int(p + "logicalcpu") ?? 0,
-                                    physicalCPUs: SysctlReader.int(p + "physicalcpu") ?? 0,
-                                    l2CacheBytes: SysctlReader.int(p + "l2cachesize")))
-        }
-
-        // Apple Silicon: IODeviceTree:/product › product-name "MacBook Pro (16-inch, Nov 2024)", product-soc-name.
-        var marketing: String?, soc: String?
-        let product = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/product")
-        if product != 0 {
-            marketing = IOKitHelpers.deviceTreeStrings(product, "product-name").first.flatMap(nonEmpty)
-            soc = IOKitHelpers.deviceTreeStrings(product, "product-soc-name").first.flatMap(nonEmpty)
-            IOObjectRelease(product)
-        }
-
+        let levels = performanceLevels()
+        let product = productInfo()
         let model = SysctlReader.string("hw.model").flatMap(nonEmpty) ?? "Mac"
-        if marketing == nil { marketing = intelMarketingName(model, language: preferredLanguage()) }
+        let marketing = product.marketing ?? intelMarketingName(model, language: preferredLanguage())
         let gpus = GPUReader.read()
-        let gpuNames = gpus.compactMap(\.model).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        return makeInfo(model: model, marketing: marketing, product: product, arm: arm, levels: levels, gpus: gpus)
+    }
+
+    private static func performanceLevels() -> [PerfLevel] {
+        let count = max(SysctlReader.int("hw.nperflevels") ?? 0, 0) // M5/M6 may add a third tier: never assume 2
+        return (0..<count).map { i in
+            let prefix = "hw.perflevel\(i)."
+            return PerfLevel(name: SysctlReader.string(prefix + "name") ?? "Level \(i)",
+                             logicalCPUs: SysctlReader.int(prefix + "logicalcpu") ?? 0,
+                             physicalCPUs: SysctlReader.int(prefix + "physicalcpu") ?? 0,
+                             l2CacheBytes: SysctlReader.int(prefix + "l2cachesize"))
+        }
+    }
+
+    /// Apple Silicon: IODeviceTree:/product › product-name "MacBook Pro (16-inch, Nov 2024)", product-soc-name.
+    private static func productInfo() -> (marketing: String?, soc: String?) {
+        let product = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/product")
+        guard product != 0 else { return (nil, nil) }
+        defer { IOObjectRelease(product) }
+        return (IOKitHelpers.deviceTreeStrings(product, "product-name").first.flatMap(nonEmpty),
+                IOKitHelpers.deviceTreeStrings(product, "product-soc-name").first.flatMap(nonEmpty))
+    }
+
+    /// Dual-GPU Intel Macs show both model names.
+    private static func makeInfo(model: String, marketing: String?, product: (marketing: String?, soc: String?),
+                                 arm: Bool, levels: [PerfLevel], gpus: [GPUUtilization]) -> MachineInfo {
+        let names = gpus.compactMap(\.model).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         let v = ProcessInfo.processInfo.operatingSystemVersion
-        return MachineInfo(modelIdentifier: model,
-                           marketingName: marketing,
-                           boardID: SysctlReader.string("hw.target").flatMap(nonEmpty) ?? platformBoardID(),
-                           chip: soc ?? SysctlReader.string("machdep.cpu.brand_string").flatMap(nonEmpty) ?? "Unknown",
-                           isAppleSilicon: arm,
-                           isTranslated: (SysctlReader.int("sysctl.proc_translated") ?? 0) == 1,
-                           osVersion: "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion) (\(SysctlReader.string("kern.osversion") ?? "?"))",
-                           memoryBytes: UInt64(max(SysctlReader.int("hw.memsize") ?? 0, 0)),
-                           logicalCPUs: SysctlReader.int("hw.logicalcpu") ?? ProcessInfo.processInfo.activeProcessorCount,
-                           perfLevels: levels,
-                           cpuTopology: cpuTopology(),
-                           gpuName: gpuNames.isEmpty ? nil : gpuNames.joined(separator: " + "),     // Intel dual-GPU: both
-                           gpuCores: gpus.lazy.compactMap(\.coreCount).first)
+        return MachineInfo(
+            modelIdentifier: model, marketingName: marketing,
+            boardID: SysctlReader.string("hw.target").flatMap(nonEmpty) ?? platformBoardID(),
+            chip: product.soc ?? SysctlReader.string("machdep.cpu.brand_string").flatMap(nonEmpty) ?? "Unknown", isAppleSilicon: arm,
+            isTranslated: (SysctlReader.int("sysctl.proc_translated") ?? 0) == 1, osVersion: osVersion(v),
+            memoryBytes: UInt64(max(SysctlReader.int("hw.memsize") ?? 0, 0)),
+            logicalCPUs: SysctlReader.int("hw.logicalcpu") ?? ProcessInfo.processInfo.activeProcessorCount, perfLevels: levels,
+            cpuTopology: cpuTopology(), gpuName: names.isEmpty ? nil : names.joined(separator: " + "), gpuCores: gpus.lazy.compactMap(\.coreCount).first)
+    }
+
+    private static func osVersion(_ version: OperatingSystemVersion) -> String {
+        "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion) (\(SysctlReader.string("kern.osversion") ?? "?"))"
     }
 
     /// Apple Silicon: logical CPU id → cluster type ("E" / "P" / …) and cluster id from IODeviceTree:/cpus. Empty on Intel.
@@ -49,15 +58,18 @@ enum MachineInfoReader {
         let cpus = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/cpus")
         guard cpus != 0 else { return [] }
         defer { IOObjectRelease(cpus) }
-        var out: [CPUCoreInfo] = []
-        for c in IOKitHelpers.children(cpus, plane: kIODeviceTreePlane) {
-            defer { IOObjectRelease(c) }
-            guard let id = integer(IOKitHelpers.property(c, "logical-cpu-id", as: AnyObject.self)) else { continue }
-            out.append(CPUCoreInfo(id: id,
-                                   type: IOKitHelpers.deviceTreeStrings(c, "cluster-type").first.flatMap(nonEmpty) ?? "?",
-                                   cluster: integer(IOKitHelpers.property(c, "logical-cluster-id", as: AnyObject.self)) ?? -1))
+        let out = IOKitHelpers.children(cpus, plane: kIODeviceTreePlane).compactMap { child -> CPUCoreInfo? in
+            defer { IOObjectRelease(child) }
+            return coreInfo(child)
         }
         return out.sorted { $0.id < $1.id }
+    }
+
+    private static func coreInfo(_ entry: io_registry_entry_t) -> CPUCoreInfo? {
+        guard let id = integer(IOKitHelpers.property(entry, "logical-cpu-id", as: AnyObject.self)) else { return nil }
+        return CPUCoreInfo(id: id,
+                           type: IOKitHelpers.deviceTreeStrings(entry, "cluster-type").first.flatMap(nonEmpty) ?? "?",
+                           cluster: integer(IOKitHelpers.property(entry, "logical-cluster-id", as: AnyObject.self)) ?? -1)
     }
 
     // MARK: Intel marketing names

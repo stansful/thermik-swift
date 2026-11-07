@@ -7,24 +7,23 @@ import IOKit
 
 enum BootHistoryReader {
     /// ~0.3 ms. `intelShutdownCause` comes from `IntelShutdownCauseCache` (nil on Apple Silicon).
+    /// Raw reasons include " wdog,reset_in_1 … ap_restart" (leading space), "Software Sleep", "Clamshell Sleep",
+    /// and "UserActivity Assertion".
     static func read(intelShutdownCause: Int? = nil) -> BootHistory {
         let rootDomain = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
         defer { if rootDomain != 0 { IOObjectRelease(rootDomain) } }
-        func pm<T>(_ key: String) -> T? { rootDomain == 0 ? nil : IOKitHelpers.property(rootDomain, key) }
         let uuid = trimmed(SysctlReader.string("kern.bootsessionuuid"))
-        return BootHistory(bootTime: SysctlReader.timeval("kern.boottime"),
-                           lastSleepTime: SysctlReader.timeval("kern.sleeptime"),
-                           lastWakeTime: SysctlReader.timeval("kern.waketime"),
-                           bootSessionUUID: uuid,
-                           // e.g. " wdog,reset_in_1 rst_in,reset_in_1_deassert wdog,reset_in_1 ap_restart" (leading space)
-                           shutdownReason: trimmed(SysctlReader.string("kern.shutdownreason")),
-                           bootReason: trimmed(SysctlReader.string("kern.bootreason")),
-                           wakeReason: trimmed(SysctlReader.string("kern.wakereason")) ?? trimmed(pm("Wake Reason")),
-                           lastSleepReason: trimmed(pm("Last Sleep Reason")),        // "Software Sleep", "Clamshell Sleep", …
-                           wakeType: trimmed(pm("Wake Type")),                       // "UserActivity Assertion", …
-                           lidClosed: (pm("AppleClamshellState") as NSNumber?)?.boolValue,
-                           panicLogPath: uuid.flatMap(panicLogPath(bootSession:)),
-                           intelShutdownCause: intelShutdownCause)
+        return BootHistory(
+            bootTime: SysctlReader.timeval("kern.boottime"), lastSleepTime: SysctlReader.timeval("kern.sleeptime"),
+            lastWakeTime: SysctlReader.timeval("kern.waketime"), bootSessionUUID: uuid,
+            shutdownReason: trimmed(SysctlReader.string("kern.shutdownreason")), bootReason: trimmed(SysctlReader.string("kern.bootreason")),
+            wakeReason: trimmed(SysctlReader.string("kern.wakereason")) ?? trimmed(pm(rootDomain, "Wake Reason")),
+            lastSleepReason: trimmed(pm(rootDomain, "Last Sleep Reason")), wakeType: trimmed(pm(rootDomain, "Wake Type")),
+            lidClosed: (pm(rootDomain, "AppleClamshellState") as NSNumber?)?.boolValue, panicLogPath: uuid.flatMap(panicLogPath(bootSession:)), intelShutdownCause: intelShutdownCause)
+    }
+
+    private static func pm<T>(_ rootDomain: io_registry_entry_t, _ key: String) -> T? {
+        rootDomain == 0 ? nil : IOKitHelpers.property(rootDomain, key)
     }
 
     /// `/var/db/com.apple.DumpPanic.panicLogPathBreadcrumb` (0644): plist `{ <boot session UUID>: <panic report path or ""> }`.

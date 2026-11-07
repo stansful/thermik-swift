@@ -92,42 +92,71 @@ enum NotificationAuthorization: Sendable, Equatable { case unknown, notDetermine
         let raised = engine.raisedRuleIDs
         if raised != activeRuleIDs { activeRuleIDs = raised }
         guard !fired.isEmpty else { return }
+        append(fired)
+        let rulesByID = Dictionary(rules.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for event in fired { process(event, rulesByID: rulesByID) }
+    }
 
-        recent.append(contentsOf: fired)
-        if recent.count > Self.capacity { recent.removeFirst(recent.count - Self.capacity) }
-        let byID = Dictionary(rules.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        for e in fired {
-            switch e.kind {
-            case .raised:
-                events.record(.alertRaised(ruleID: e.ruleID, subject: e.subject, value: e.value, sensorID: e.sensorID), date: e.date)
-                log.info("alert raised: \(String(describing: e.subject), privacy: .public) \(e.value ?? .nan, privacy: .public)")
-                if case .abnormalShutdown = e.subject, let boot = pendingShutdownBoot {
-                    UserDefaults.standard.set(boot, forKey: Self.lastShutdownAlertBootKey)
-                }
-                if let rule = byID[e.ruleID] { react(to: e, rule: rule) }
-            case .cleared:
-                events.record(.alertCleared(ruleID: e.ruleID), date: e.date)
-            }
+    private func append(_ events: [AlertEvent]) {
+        recent.append(contentsOf: events)
+        guard recent.count > Self.capacity else { return }
+        recent.removeFirst(recent.count - Self.capacity)
+    }
+
+    private func process(_ event: AlertEvent, rulesByID: [UUID: AlertRule]) {
+        switch event.kind {
+        case .raised: recordRaised(event, rule: rulesByID[event.ruleID])
+        case .cleared: events.record(.alertCleared(ruleID: event.ruleID), date: event.date)
         }
     }
 
+    private func recordRaised(_ event: AlertEvent, rule: AlertRule?) {
+        events.record(.alertRaised(ruleID: event.ruleID, subject: event.subject, value: event.value, sensorID: event.sensorID), date: event.date)
+        log.info("alert raised: \(String(describing: event.subject), privacy: .public) \(event.value ?? .nan, privacy: .public)")
+        persistShutdownBoot(for: event)
+        if let rule { react(to: event, rule: rule) }
+    }
+
+    private func persistShutdownBoot(for event: AlertEvent) {
+        guard case .abnormalShutdown = event.subject, let boot = pendingShutdownBoot else { return }
+        UserDefaults.standard.set(boot, forKey: Self.lastShutdownAlertBootKey)
+    }
+
     private func makeInputs(now: Date) -> AlertInputs {
-        // Visible temperature sensors READ THIS TICK (a sensor not requested keeps an old value in its LiveSensor).
         let fresh = sensors.lastFrame?.values ?? [:]
+        let values = sensorValues(from: fresh)
+        let named = namedSensorValues(from: fresh, visibleValues: values)
+        updateModeChange()
+        var inputs = AlertInputs(date: now, sensorValues: values, sensorGroups: sensorGroups(), aggregates: sensors.aggregates,
+                                 stalledFans: diagnostics?.stalledFans ?? [], fanModeChange: modeChange, pressure: system.pressure,
+                                 abnormalShutdown: shutdownInput(), batteryNeedsService: batteryNeedsService())
+        inputs.namedSensorValues = named
+        return inputs
+    }
+
+    private func sensorValues(from fresh: [SensorID: Double]) -> [SensorID: Double] {
+        // Visible temperature sensors READ THIS TICK (a sensor not requested keeps an old value in its LiveSensor).
         var values: [SensorID: Double] = [:]
         values.reserveCapacity(fresh.count)
-        for s in sensors.sensors where !s.isHidden {
-            guard let raw = fresh[s.id] else { continue }
-            values[s.id] = s.value ?? raw
+        for sensor in sensors.sensors where !sensor.isHidden {
+            guard let raw = fresh[sensor.id] else { continue }
+            values[sensor.id] = sensor.value ?? raw
         }
+        return values
+    }
+
+    private func namedSensorValues(from fresh: [SensorID: Double], visibleValues: [SensorID: Double]) -> [SensorID: Double] {
         // A `.sensor` rule watches its sensor even when it is hidden (SamplingCoordinator reads it either way); these
         // values stay out of `sensorValues`, so `.anySensor` and `.group` still see visible sensors only.
         var named: [SensorID: Double] = [:]
         for rule in settings.alertRules where rule.enabled {
-            guard case .sensor(let id) = rule.subject, values[id] == nil, let raw = fresh[id] else { continue }
+            guard case .sensor(let id) = rule.subject, visibleValues[id] == nil, let raw = fresh[id] else { continue }
             named[id] = sensors.sensor(id)?.value ?? raw
         }
+        return named
+    }
 
+    private func updateModeChange() {
         // Fan mode change since the previous tick (with the reason FanStore recorded).
         let mode = fans.mode
         modeChange = nil
@@ -135,15 +164,12 @@ enum NotificationAuthorization: Sendable, Equatable { case unknown, notDetermine
             modeChange = FanModeChange(from: last, to: mode, reason: latestModeChangeReason() ?? .user)
         }
         lastMode = mode
+    }
 
-        let pf = (system.battery?.permanentFailureStatus ?? 0) != 0
+    private func batteryNeedsService() -> Bool {
+        let permanentFailure = (system.battery?.permanentFailureStatus ?? 0) != 0
         let condition = system.appleBatteryHealth?.condition
-        var inputs = AlertInputs(date: now, sensorValues: values, sensorGroups: sensorGroups(), aggregates: sensors.aggregates,
-                                 stalledFans: diagnostics?.stalledFans ?? [], fanModeChange: modeChange, pressure: system.pressure,
-                                 abnormalShutdown: shutdownInput(),
-                                 batteryNeedsService: pf || condition == .serviceRecommended || condition == .permanentFailure)
-        inputs.namedSensorValues = named
-        return inputs
+        return permanentFailure || condition == .serviceRecommended || condition == .permanentFailure
     }
 
     private func sensorGroups() -> [SensorID: DisplayGroup] {
@@ -182,71 +208,93 @@ enum NotificationAuthorization: Sendable, Equatable { case unknown, notDetermine
             fans.setMode(.max, reason: .notificationAction)
         }
         guard rule.channels.contains(.local), !isSnoozed else { return }
-        let n = notification(for: e, rule: rule)
-        let wantsTop = rule.subject.isTemperature
-        Task { [weak self] in await self?.deliver(n, withTopProcesses: wantsTop) }
+        let notification = notification(for: e, rule: rule)
+        Task { [weak self] in await self?.deliver(notification, for: rule.subject) }
     }
 
-    private func deliver(_ base: AlertNotification, withTopProcesses: Bool) async {
-        var n = base
-        if withTopProcesses, let sampler = systemSampler {
-            let top = await sampler.topProcesses(limit: 3).map(\.name).filter { !$0.isEmpty }.joined(separator: ", ")
-            if !top.isEmpty { n.body += " " + String(localized: "Top CPU: \(top).") }
-        }
+    private func deliver(_ base: AlertNotification, for subject: AlertRule.Subject) async {
+        let notification = await addingTopProcesses(to: base, for: subject)
         if authorization == .notDetermined || authorization == .unknown { await requestAuthorization() }
         guard authorization == .authorized || authorization == .provisional else {
             log.info("alert notification suppressed: notifications not authorized")
             return
         }
-        await notifications.post(n)
+        await notifications.post(notification)
+    }
+
+    private func addingTopProcesses(to base: AlertNotification, for subject: AlertRule.Subject) async -> AlertNotification {
+        guard subject.isTemperature, let sampler = systemSampler else { return base }
+        let top = await sampler.topProcesses(limit: 3).map(\.name).filter { !$0.isEmpty }.joined(separator: ", ")
+        guard !top.isEmpty else { return base }
+        var notification = base
+        notification.body += " " + String(localized: "Top CPU: \(top).")
+        return notification
     }
 
     private func notification(for e: AlertEvent, rule: AlertRule) -> AlertNotification {
-        let title: String, body: String
-        var route: Route? = .alerts
         switch rule.subject {
-        case .anySensor, .group, .sensor, .aggregate:
-            let name = subjectName(e, rule)
-            let value = e.value.map(temperature) ?? "—"
-            title = String(format: String(localized: "%1$@ is %2$@", comment: "Alert title: subject name, temperature"), name, value)
-            body = fanSummary()
-            route = e.sensorID.map { .sensors($0) } ?? .overview
-        case .fanStalled:
-            let ids = diagnostics?.stalledFans ?? []
-            let names = fans.fans.filter { ids.contains($0.id) }.map(\.displayName)
-            let which = names.isEmpty ? String(localized: "Fan") : names.joined(separator: ", ")
-            title = String(localized: "A fan is not spinning")
-            body = String(localized: "\(which) reports 0 rpm although it should be running.")
-            route = .fans
-        case .fanModeChanged:
-            title = String(localized: "Fan mode changed")
-            if let c = modeChange {
-                body = String(format: String(localized: "%1$@ → %2$@.", comment: "Fan mode change: old mode, new mode"), c.from.title, c.to.title)
-            } else {
-                body = fans.mode.title
-            }
-            route = .fans
-        case .thermalPressure:
-            title = String(localized: "Thermal pressure: \(system.pressure.title)")
-            body = system.pressure >= .heavy ? String(localized: "macOS is throttling performance") + "."
-                                             : String(localized: "Your Mac may slow down to cool itself.")
-            route = .system
-        case .abnormalShutdown:
-            title = String(localized: "Your Mac shut down unexpectedly")
-            body = String(localized: "Last shutdown: \((system.shutdownVerdict ?? .unknown).title). Details are on the Diagnostics page.")
-            route = .diagnostics
-        case .batteryService:
-            title = String(localized: "Battery needs service")
-            if (system.battery?.permanentFailureStatus ?? 0) != 0 {
-                body = String(localized: "The battery reports a permanent failure.")
-            } else {
-                body = String(localized: "Battery health: \((system.appleBatteryHealth?.condition ?? .serviceRecommended).title).")
-            }
-            route = .battery
+        case .anySensor, .group, .sensor, .aggregate: return temperatureNotification(for: e, rule: rule)
+        case .fanStalled: return fanStalledNotification(rule: rule)
+        case .fanModeChanged: return fanModeNotification(rule: rule)
+        case .thermalPressure: return thermalPressureNotification(rule: rule)
+        case .abnormalShutdown: return shutdownNotification(rule: rule)
+        case .batteryService: return batteryNotification(rule: rule)
         }
-        return AlertNotification(id: "alert.\(rule.id.uuidString)", title: title, body: body, threadID: rule.subject.description,
-                                 route: route, offerFanActions: fans.canControl && rule.subject.isTemperature,
-                                 soundName: rule.soundName ?? settings.alertSoundName)
+    }
+
+    private func temperatureNotification(for event: AlertEvent, rule: AlertRule) -> AlertNotification {
+        let name = subjectName(event, rule)
+        let value = event.value.map(temperature) ?? "—"
+        let title = String(format: String(localized: "%1$@ is %2$@", comment: "Alert title: subject name, temperature"), name, value)
+        let route = event.sensorID.map { Route.sensors($0) } ?? .overview
+        return makeNotification(rule: rule, title: title, body: fanSummary(), route: route)
+    }
+
+    private func fanStalledNotification(rule: AlertRule) -> AlertNotification {
+        let ids = diagnostics?.stalledFans ?? []
+        let names = fans.fans.filter { ids.contains($0.id) }.map(\.displayName)
+        let which = names.isEmpty ? String(localized: "Fan") : names.joined(separator: ", ")
+        let body = String(localized: "\(which) reports 0 rpm although it should be running.")
+        return makeNotification(rule: rule, title: String(localized: "A fan is not spinning"), body: body, route: .fans)
+    }
+
+    private func fanModeNotification(rule: AlertRule) -> AlertNotification {
+        let body: String
+        if let change = modeChange {
+            body = String(format: String(localized: "%1$@ → %2$@.", comment: "Fan mode change: old mode, new mode"), change.from.title, change.to.title)
+        } else {
+            body = fans.mode.title
+        }
+        return makeNotification(rule: rule, title: String(localized: "Fan mode changed"), body: body, route: .fans)
+    }
+
+    private func thermalPressureNotification(rule: AlertRule) -> AlertNotification {
+        let title = String(localized: "Thermal pressure: \(system.pressure.title)")
+        let body = system.pressure >= .heavy ? String(localized: "macOS is throttling performance") + "."
+                                             : String(localized: "Your Mac may slow down to cool itself.")
+        return makeNotification(rule: rule, title: title, body: body, route: .system)
+    }
+
+    private func shutdownNotification(rule: AlertRule) -> AlertNotification {
+        let title = String(localized: "Your Mac shut down unexpectedly")
+        let body = String(localized: "Last shutdown: \((system.shutdownVerdict ?? .unknown).title). Details are on the Diagnostics page.")
+        return makeNotification(rule: rule, title: title, body: body, route: .diagnostics)
+    }
+
+    private func batteryNotification(rule: AlertRule) -> AlertNotification {
+        let body: String
+        if (system.battery?.permanentFailureStatus ?? 0) != 0 {
+            body = String(localized: "The battery reports a permanent failure.")
+        } else {
+            body = String(localized: "Battery health: \((system.appleBatteryHealth?.condition ?? .serviceRecommended).title).")
+        }
+        return makeNotification(rule: rule, title: String(localized: "Battery needs service"), body: body, route: .battery)
+    }
+
+    private func makeNotification(rule: AlertRule, title: String, body: String, route: Route?) -> AlertNotification {
+        AlertNotification(id: "alert.\(rule.id.uuidString)", title: title, body: body, threadID: rule.subject.description,
+                          route: route, offerFanActions: fans.canControl && rule.subject.isTemperature,
+                          soundName: rule.soundName ?? settings.alertSoundName)
     }
 
     private func subjectName(_ e: AlertEvent, _ rule: AlertRule) -> String {
@@ -271,16 +319,16 @@ enum NotificationAuthorization: Sendable, Equatable { case unknown, notDetermine
     /// "Fans: Curve · 4 200 rpm." or the fanless sentence.
     private func fanSummary() -> String {
         guard fans.hasFans else { return String(localized: "Your Mac may slow down to cool itself.") }
-        let spinning = fans.fans.filter { !$0.isOff }
-        let speed: String
-        if spinning.isEmpty {
-            speed = String(localized: "Off", comment: "Fan is not spinning")
-        } else {
-            let rpm = (spinning.map(\.actualRPM).reduce(0, +) / Double(spinning.count)).formatted(.number.precision(.fractionLength(0)))
-            speed = String(localized: "\(rpm) rpm")
-        }
-        let summary = [fans.mode.title, speed].joined(separator: " · ")
+        let summary = [fans.mode.title, fanSpeedSummary()].joined(separator: " · ")
         return String(localized: "Fans: \(summary).")
+    }
+
+    private func fanSpeedSummary() -> String {
+        let spinning = fans.fans.filter { !$0.isOff }
+        guard !spinning.isEmpty else { return String(localized: "Off", comment: "Fan is not spinning") }
+        let average = spinning.map(\.actualRPM).reduce(0, +) / Double(spinning.count)
+        let rpm = average.formatted(.number.precision(.fractionLength(0)))
+        return String(localized: "\(rpm) rpm")
     }
 
     private func handle(_ action: NotificationAction) {

@@ -143,60 +143,92 @@ public struct FanHardwareProfile: Sendable, Equatable {
 
     /// Same, with the CPU family given explicitly: the offline simulator (`thermik-probe fans sim`) runs the real
     /// discovery against fake Intel and Apple Silicon SMCs on any host. Production code uses `discover(_:)`.
+    // Discovery runs once per process: a transient read error (the SMC settling after boot or wake) must not
+    // become "passively cooled" or a missing fan for the whole session. Missing keys are final; others retry.
     public static func discover(_ smc: SMCReading, appleSilicon: Bool) -> FanHardwareProfile {
-        // Discovery runs once per process: a transient read error (the SMC settling after boot or wake) must not
-        // become "passively cooled" or a missing fan for the whole session. Missing keys are final; others retry.
         guard case .value(let fnum) = read({ try smc.readUInt8("FNum") }), fnum > 0 else {
             return FanHardwareProfile(fans: [], scheme: .none)
         }
-        let count = Int(fnum)
+        let layout = probeLayout(smc)
+        let selection = appleSilicon ? appleSiliconSelection(layout) : intelSelection(layout)
+        let found = discoverFans(smc, count: Int(fnum), template: selection.template)
+        return makeProfile(found.fans, unreadable: found.unreadable, scheme: selection.scheme, layout: layout)
+    }
 
-        func isUI8(_ k: FourCC) -> Bool {
-            guard case .value(let i) = read({ try smc.keyInfo(k) }) else { return false }
-            return i.size == 1 && (i.type == .ui8 || i.type == .flag || i.type == .hex)
+    private typealias DiscoveryLayout = (hasFtst: Bool, hasForceBits: Bool, upper: Bool, lower: Bool)
+    private typealias DiscoverySelection = (scheme: FanControlScheme, template: String?)
+
+    private static func probeLayout(_ smc: SMCReading) -> DiscoveryLayout {
+        let hasFtst = isUI8(ftstKey, on: smc)
+        let hasForceBits = probeForceBits(smc)
+        let upper = isUI8(.fan(modeUpper, 0), on: smc)
+        let lower = isUI8(.fan(modeLower, 0), on: smc)
+        return (hasFtst, hasForceBits, upper, lower)
+    }
+
+    private static func isUI8(_ key: FourCC, on smc: SMCReading) -> Bool {
+        guard case .value(let info) = read({ try smc.keyInfo(key) }) else { return false }
+        return info.size == 1 && (info.type == .ui8 || info.type == .flag || info.type == .hex)
+    }
+
+    private static func probeForceBits(_ smc: SMCReading) -> Bool {
+        guard case .value(let info) = read({ try smc.keyInfo(forceBitsKey) }) else { return false }
+        return info.size == 2
+    }
+
+    private static func appleSiliconSelection(_ layout: DiscoveryLayout) -> DiscoverySelection {
+        // Prefer lowercase if both exist (M5 firmware); M1–M4 expose only uppercase.
+        if layout.lower {
+            return (.appleSilicon(modeKeyTemplate: modeLower, hasFtst: layout.hasFtst), modeLower)
         }
-        let hasFtst = isUI8(ftstKey)
-        let hasForceBits: Bool = { if case .value(let i) = read({ try smc.keyInfo(forceBitsKey) }) { return i.size == 2 }; return false }()
-        let upper = isUI8(.fan(modeUpper, 0))
-        let lower = isUI8(.fan(modeLower, 0))
-
-        let scheme: FanControlScheme
-        let template: String?
-        if appleSilicon {
-            // Prefer lowercase if both exist (M5 firmware); M1–M4 expose only uppercase.
-            if lower { template = modeLower; scheme = .appleSilicon(modeKeyTemplate: modeLower, hasFtst: hasFtst) }
-            else if upper { template = modeUpper; scheme = .appleSilicon(modeKeyTemplate: modeUpper, hasFtst: hasFtst) }
-            else { template = nil; scheme = .none }
-        } else {
-            if upper { template = modeUpper; scheme = .intelModeKey }
-            else if hasForceBits { template = nil; scheme = .intelForceBits }
-            else { template = nil; scheme = .intelMinimumOnly }
+        if layout.upper {
+            return (.appleSilicon(modeKeyTemplate: modeUpper, hasFtst: layout.hasFtst), modeUpper)
         }
+        return (.none, nil)
+    }
 
+    private static func intelSelection(_ layout: DiscoveryLayout) -> DiscoverySelection {
+        if layout.upper { return (.intelModeKey, modeUpper) }
+        if layout.hasForceBits { return (.intelForceBits, nil) }
+        return (.intelMinimumOnly, nil)
+    }
+
+    private static func discoverFans(
+        _ smc: SMCReading, count: Int, template: String?
+    ) -> (fans: [FanDescriptor], unreadable: [Int]) {
         var fans: [FanDescriptor] = []
         var unreadable: [Int] = []
         for i in 0..<min(count, 10) {
-            let fan = read { () throws -> FanDescriptor in
-                let mn = try smc.readNumber(.fan("F%dMn", i))
-                let mx = try smc.readNumber(.fan("F%dMx", i))
-                let tInfo = try smc.keyInfo(.fan("F%dTg", i))
-                guard mn.isFinite, mx.isFinite, mn >= 0, mx > mn, mx < 20_000, tInfo.type == .flt || tInfo.type == .fpe2 else {
-                    throw SMCError.invalidValue("fan \(i): Mn \(mn), Mx \(mx), Tg \(tInfo.type)")
-                }
-                return FanDescriptor(index: i, name: fanName(smc, index: i, count: count), minRPM: mn, maxRPM: mx,
-                                     targetType: tInfo.type, modeKey: template.map { FourCC.fan($0, i) })
-            }
-            switch fan {
-            case .value(let f): fans.append(f)
-            case .missing: continue                        // FNum counts a slot without fan keys: no such fan
-            case .failed: unreadable.append(i)             // the fan exists but its limits cannot be read
+            switch read({ try fanDescriptor(smc, index: i, count: count, template: template) }) {
+            case .value(let fan): fans.append(fan)
+            case .missing: continue                    // FNum counts a slot without fan keys: no such fan
+            case .failed: unreadable.append(i)         // the fan exists but its limits cannot be read
             }
         }
-        var p = FanHardwareProfile(fans: fans, scheme: fans.isEmpty ? .none : scheme)
-        p.hasFtstKey = hasFtst
-        p.hasForceBitsKey = hasForceBits
-        p.unreadableFans = unreadable
-        return p
+        return (fans, unreadable)
+    }
+
+    private static func fanDescriptor(
+        _ smc: SMCReading, index: Int, count: Int, template: String?
+    ) throws -> FanDescriptor {
+        let mn = try smc.readNumber(.fan("F%dMn", index))
+        let mx = try smc.readNumber(.fan("F%dMx", index))
+        let tInfo = try smc.keyInfo(.fan("F%dTg", index))
+        guard mn.isFinite, mx.isFinite, mn >= 0, mx > mn, mx < 20_000, tInfo.type == .flt || tInfo.type == .fpe2 else {
+            throw SMCError.invalidValue("fan \(index): Mn \(mn), Mx \(mx), Tg \(tInfo.type)")
+        }
+        return FanDescriptor(index: index, name: fanName(smc, index: index, count: count), minRPM: mn, maxRPM: mx,
+                             targetType: tInfo.type, modeKey: template.map { FourCC.fan($0, index) })
+    }
+
+    private static func makeProfile(
+        _ fans: [FanDescriptor], unreadable: [Int], scheme: FanControlScheme, layout: DiscoveryLayout
+    ) -> FanHardwareProfile {
+        var profile = FanHardwareProfile(fans: fans, scheme: fans.isEmpty ? .none : scheme)
+        profile.hasFtstKey = layout.hasFtst
+        profile.hasForceBitsKey = layout.hasForceBits
+        profile.unreadableFans = unreadable
+        return profile
     }
 
     private enum ReadOutcome<T> { case value(T), missing, failed }
@@ -262,20 +294,26 @@ public struct FanControlState: Sendable, Equatable {
 
 public enum FanReader {
     public static func snapshot(_ smc: SMCReading, profile: FanHardwareProfile, now: Date = Date()) -> FanControlState {
-        let fans = profile.fans.map { f -> FanSnapshot in
-            FanSnapshot(index: f.index,
-                        actualRPM: max(0, (try? smc.readNumber(.fan("F%dAc", f.index))) ?? 0),
-                        targetRPM: max(0, (try? smc.readNumber(.fan("F%dTg", f.index))) ?? 0),
-                        mode: f.modeKey.flatMap { try? smc.readUInt8($0) }.map(FanModeValue.init),
-                        dutyCycle: try? smc.readNumber(.fan("F%dDc", f.index)),
-                        timestamp: now)
-        }
+        let fans = profile.fans.map { fanSnapshot(smc, fan: $0, now: now) }
         let ftst: UInt8? = profile.hasFtstKey ? (try? smc.readUInt8(FanHardwareProfile.ftstKey)) : nil
-        var fs: UInt16? = nil
-        if profile.hasForceBitsKey, let (info, b) = try? smc.readRaw(FanHardwareProfile.forceBitsKey), info.size == 2, b.count == 2 {
-            fs = UInt16(b[0]) << 8 | UInt16(b[1])
-        }
+        let fs = readForceBits(smc, profile: profile)
         return FanControlState(ftst: ftst, forceBits: fs, fans: fans)
+    }
+
+    private static func fanSnapshot(_ smc: SMCReading, fan: FanDescriptor, now: Date) -> FanSnapshot {
+        FanSnapshot(index: fan.index,
+                    actualRPM: max(0, (try? smc.readNumber(.fan("F%dAc", fan.index))) ?? 0),
+                    targetRPM: max(0, (try? smc.readNumber(.fan("F%dTg", fan.index))) ?? 0),
+                    mode: fan.modeKey.flatMap { try? smc.readUInt8($0) }.map(FanModeValue.init),
+                    dutyCycle: try? smc.readNumber(.fan("F%dDc", fan.index)),
+                    timestamp: now)
+    }
+
+    private static func readForceBits(_ smc: SMCReading, profile: FanHardwareProfile) -> UInt16? {
+        guard profile.hasForceBitsKey,
+              let (info, bytes) = try? smc.readRaw(FanHardwareProfile.forceBitsKey),
+              info.size == 2, bytes.count == 2 else { return nil }
+        return UInt16(bytes[0]) << 8 | UInt16(bytes[1])
     }
 }
 

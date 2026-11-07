@@ -48,14 +48,7 @@ public actor GitHubReleaseChecker: ReleaseChecking {
         if let inFlight { return try await result(of: inFlight) }
         let task = Task { try await fetch() }
         inFlight = task
-        do {
-            let result = try await result(of: task)
-            inFlight = nil
-            return result
-        } catch {
-            inFlight = nil
-            throw error
-        }
+        return try await finish(task)
     }
 
     private func result(of task: Task<UpdateCheckResult, Error>) async throws -> UpdateCheckResult {
@@ -66,42 +59,72 @@ public actor GitHubReleaseChecker: ReleaseChecking {
         }
     }
 
+    private func finish(_ task: Task<UpdateCheckResult, Error>) async throws -> UpdateCheckResult {
+        defer { inFlight = nil }
+        return try await result(of: task)
+    }
+
     private func fetch() async throws -> UpdateCheckResult {
         let cached = await cache.load(repository: configuration.repository)
         let response = try await request(path: "/repos/\(configuration.repository)/releases/latest", entityTag: cached?.entityTag)
+        return try await handle(response, cached: cached)
+    }
+
+    private func handle(_ response: ReleaseResponse, cached: CachedRelease?) async throws -> UpdateCheckResult {
         switch response.statusCode {
         case 200:
-            let release: GitHubRelease
-            do { release = try JSONDecoder().decode(GitHubRelease.self, from: response.data) }
-            catch { throw UpdateCheckError.invalidResponse }
-            let result = try evaluate(release)
-            if let tag = response.entityTag, !tag.isEmpty, tag.utf8.count <= 1024,
-               !tag.contains("\r"), !tag.contains("\n") {
-                await cache.save(CachedRelease(repository: configuration.repository, entityTag: tag, release: release))
-            } else {
-                await cache.save(nil)
-            }
-            return result
+            return try await handleLatest(response)
         case 304:
-            guard let cached else { throw UpdateCheckError.invalidResponse }
-            return try evaluate(cached.release)
+            return try handleNotModified(cached)
         case 404:
-            // The latest endpoint also returns 404 for an existing repo with no stable release yet.
-            let fallback = try await request(path: "/repos/\(configuration.repository)/releases", query: [URLQueryItem(name: "per_page", value: "1")])
-            guard fallback.statusCode == 200 else { throw Self.failure(status: fallback.statusCode) }
-            let releases: [GitHubRelease]
-            do { releases = try JSONDecoder().decode([GitHubRelease].self, from: fallback.data) }
-            catch { throw UpdateCheckError.invalidResponse }
-            await cache.save(nil)
-            // GitHub can briefly serve a published release in the list before /latest catches up.
-            for release in releases {
-                let result = try evaluate(release)
-                if case .available = result { return result }
-            }
-            return .upToDate
+            return try await fetchFallback()
         default:
             throw Self.failure(status: response.statusCode)
         }
+    }
+
+    private func handleLatest(_ response: ReleaseResponse) async throws -> UpdateCheckResult {
+        let release = try decode(GitHubRelease.self, from: response.data)
+        let result = try evaluate(release)
+        await cache.save(cachedRelease(for: response, release: release))
+        return result
+    }
+
+    private func cachedRelease(for response: ReleaseResponse, release: GitHubRelease) -> CachedRelease? {
+        guard let tag = response.entityTag, !tag.isEmpty, tag.utf8.count <= 1024,
+              !tag.contains("\r"), !tag.contains("\n") else { return nil }
+        return CachedRelease(repository: configuration.repository, entityTag: tag, release: release)
+    }
+
+    private func handleNotModified(_ cached: CachedRelease?) throws -> UpdateCheckResult {
+        guard let cached else { throw UpdateCheckError.invalidResponse }
+        return try evaluate(cached.release)
+    }
+
+    private func fetchFallback() async throws -> UpdateCheckResult {
+        // The latest endpoint also returns 404 for an existing repo with no stable release yet.
+        let fallback = try await request(path: "/repos/\(configuration.repository)/releases", query: [URLQueryItem(name: "per_page", value: "1")])
+        guard fallback.statusCode == 200 else { throw Self.failure(status: fallback.statusCode) }
+        let releases = try decode([GitHubRelease].self, from: fallback.data)
+        await cache.save(nil)
+        return try firstAvailableUpdate(in: releases)
+    }
+
+    private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            throw UpdateCheckError.invalidResponse
+        }
+    }
+
+    private func firstAvailableUpdate(in releases: [GitHubRelease]) throws -> UpdateCheckResult {
+        // GitHub can briefly serve a published release in the list before /latest catches up.
+        for release in releases {
+            let result = try evaluate(release)
+            if case .available = result { return result }
+        }
+        return .upToDate
     }
 
     private func evaluate(_ release: GitHubRelease) throws -> UpdateCheckResult {
@@ -118,12 +141,16 @@ public actor GitHubReleaseChecker: ReleaseChecking {
 
     private func request(path: String, entityTag: String? = nil,
                          query: [URLQueryItem] = []) async throws -> ReleaseResponse {
-        var endpoint = URLComponents()
-        endpoint.scheme = "https"
-        endpoint.host = "api.github.com"
-        endpoint.path = path
-        if !query.isEmpty { endpoint.queryItems = query }
-        guard let url = endpoint.url else { throw UpdateCheckError.invalidConfiguration }
+        let request = try makeRequest(path: path, entityTag: entityTag, query: query)
+        do {
+            return try await validatedResponse(to: request)
+        } catch {
+            throw requestError(error)
+        }
+    }
+
+    private func makeRequest(path: String, entityTag: String?, query: [URLQueryItem]) throws -> URLRequest {
+        let url = try endpoint(path: path, query: query)
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         request.httpShouldHandleCookies = false
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -131,16 +158,32 @@ public actor GitHubReleaseChecker: ReleaseChecking {
         request.setValue("Thermik", forHTTPHeaderField: "User-Agent")
         request.setValue("en", forHTTPHeaderField: "Accept-Language")
         if let entityTag { request.setValue(entityTag, forHTTPHeaderField: "If-None-Match") }
-        do {
-            try Task.checkCancellation()
-            let response = try await transport.fetch(request)
-            try Task.checkCancellation()
-            guard response.data.count <= ReleaseLimits.maximumResponseBytes else { throw UpdateCheckError.responseTooLarge }
-            return response
-        } catch let failure as UpdateCheckError { throw failure }
-        catch is CancellationError { throw CancellationError() }
-        catch let error as URLError where error.code == .cancelled { throw CancellationError() }
-        catch { throw UpdateCheckError.offline }
+        return request
+    }
+
+    private func endpoint(path: String, query: [URLQueryItem]) throws -> URL {
+        var endpoint = URLComponents()
+        endpoint.scheme = "https"
+        endpoint.host = "api.github.com"
+        endpoint.path = path
+        if !query.isEmpty { endpoint.queryItems = query }
+        guard let url = endpoint.url else { throw UpdateCheckError.invalidConfiguration }
+        return url
+    }
+
+    private func validatedResponse(to request: URLRequest) async throws -> ReleaseResponse {
+        try Task.checkCancellation()
+        let response = try await transport.fetch(request)
+        try Task.checkCancellation()
+        guard response.data.count <= ReleaseLimits.maximumResponseBytes else { throw UpdateCheckError.responseTooLarge }
+        return response
+    }
+
+    private func requestError(_ error: Error) -> Error {
+        if let failure = error as? UpdateCheckError { return failure }
+        if error is CancellationError { return CancellationError() }
+        if let error = error as? URLError, error.code == .cancelled { return CancellationError() }
+        return UpdateCheckError.offline
     }
 
     private static func failure(status: Int) -> UpdateCheckError {

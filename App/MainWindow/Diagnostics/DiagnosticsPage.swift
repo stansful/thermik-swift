@@ -150,49 +150,91 @@ private struct DiagnosticCard: View {
 enum DiagnosticFindingText {
     @MainActor static func finding(_ f: DiagnosticFinding, fanName: (Int) -> String, sensorName: (SensorID) -> String,
                                    unit: UnitTemperature) -> String {
+        if let text = fanFinding(f, fanName: fanName) { return text }
+        if let text = sensorFinding(f, sensorName: sensorName) { return text }
+        if let text = batteryFinding(f) { return text }
+        if let text = storageFinding(f, unit: unit) { return text }
+        return otherFinding(f)
+    }
+
+    private static func fanFinding(_ f: DiagnosticFinding, fanName: (Int) -> String) -> String? {
         switch f {
-        case .shutdown(let verdict, let panicLog):
-            let base = String(localized: "Last shutdown: \(verdict.title).")
-            return panicLog ? base + " " + String(localized: "A panic report was saved by macOS.") : base
-        case .fansOK(let count):
-            return String(localized: "\(count) fans respond normally.")
-        case .fanless:
-            return String(localized: "Passively cooled — no fans")
-        case .fansStalled(let ids):
-            let names = ids.map(fanName).joined(separator: ", ")
-            return String(localized: "Not spinning although asked to: \(names).")
-        case .fansNotReachingTarget(let ids):
-            let names = ids.map(fanName).joined(separator: ", ")
-            return String(localized: "Not reaching the requested speed: \(names).")
-        case .sensorsOK(let count):
-            return String(localized: "\(count) sensors report plausible values.")
-        case .sensorsSuspect(let ids):
-            let names = ids.prefix(5).map(sensorName).joined(separator: ", ")
-            let more = ids.count > 5 ? " " + String(localized: "and \(ids.count - 5) more") : ""
-            return String(localized: "Suspicious readings (stuck, out of range or missing): \(names)\(more).")
-        case .battery(let condition, let health, let cycles, let rated):
-            var parts = [condition.title]
-            if let health { parts.append(String(localized: "health \(WindowFormat.percent(health))")) }
-            if let cycles { parts.append(String(localized: "\(cycles) of \(rated ?? 1000) cycles")) }
-            return parts.joined(separator: " · ")
-        case .noBattery:
-            return String(localized: "This Mac has no battery.")
-        case .thermal(let p, let events):
-            return String(localized: "Thermal pressure now: \(p.title). Pressure events today: \(events).")
-        case .storage(let used, let temp, let critical):
-            if critical { return String(localized: "The drive reports a critical warning. Back up your data.") }
-            var parts: [String] = []
-            if let used { parts.append(String(localized: "wear \(WindowFormat.percent(Double(used)))")) }
-            if let temp { parts.append(String(localized: "temperature \(ThermikFormat.temp(Double(temp), unit: unit))")) }
-            return parts.isEmpty ? String(localized: "Drive health is not available.") : parts.joined(separator: " · ")
-        case .helper(let h):
-            return helperText(h)
-        case .smc(let available, let keyCount, let catalog):
-            return available ? String(localized: "SMC readable: \(keyCount) keys. \(catalog.title).")
+        case .fansOK(let count): return String(localized: "\(count) fans respond normally.")
+        case .fanless: return String(localized: "Passively cooled — no fans")
+        case .fansStalled(let ids): return stalledFans(ids, fanName: fanName)
+        case .fansNotReachingTarget(let ids): return notReachingFans(ids, fanName: fanName)
+        default: return nil
+        }
+    }
+
+    private static func stalledFans(_ ids: [Int], fanName: (Int) -> String) -> String {
+        let names = ids.map(fanName).joined(separator: ", ")
+        return String(localized: "Not spinning although asked to: \(names).")
+    }
+
+    private static func notReachingFans(_ ids: [Int], fanName: (Int) -> String) -> String {
+        let names = ids.map(fanName).joined(separator: ", ")
+        return String(localized: "Not reaching the requested speed: \(names).")
+    }
+
+    private static func sensorFinding(_ f: DiagnosticFinding, sensorName: (SensorID) -> String) -> String? {
+        switch f {
+        case .sensorsOK(let count): return String(localized: "\(count) sensors report plausible values.")
+        case .sensorsSuspect(let ids): return suspectSensors(ids, sensorName: sensorName)
+        default: return nil
+        }
+    }
+
+    private static func suspectSensors(_ ids: [SensorID], sensorName: (SensorID) -> String) -> String {
+        let names = ids.prefix(5).map(sensorName).joined(separator: ", ")
+        let more = ids.count > 5 ? " " + String(localized: "and \(ids.count - 5) more") : ""
+        return String(localized: "Suspicious readings (stuck, out of range or missing): \(names)\(more).")
+    }
+
+    private static func batteryFinding(_ f: DiagnosticFinding) -> String? {
+        switch f {
+        case .battery(let condition, let health, let cycles, let rated): return batteryText(condition, health, cycles, rated)
+        case .noBattery: return String(localized: "This Mac has no battery.")
+        default: return nil
+        }
+    }
+
+    private static func batteryText(_ condition: BatteryCondition, _ health: Double?, _ cycles: Int?, _ rated: Int?) -> String {
+        var parts = [condition.title]
+        if let health { parts.append(String(localized: "health \(WindowFormat.percent(health))")) }
+        if let cycles { parts.append(String(localized: "\(cycles) of \(rated ?? 1000) cycles")) }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func storageFinding(_ f: DiagnosticFinding, unit: UnitTemperature) -> String? {
+        guard case .storage(let used, let temp, let critical) = f else { return nil }
+        return storageText(used: used, temp: temp, critical: critical, unit: unit)
+    }
+
+    private static func storageText(used: Int?, temp: Int?, critical: Bool, unit: UnitTemperature) -> String {
+        if critical { return String(localized: "The drive reports a critical warning. Back up your data.") }
+        var parts: [String] = []
+        if let used { parts.append(String(localized: "wear \(WindowFormat.percent(Double(used)))")) }
+        if let temp { parts.append(String(localized: "temperature \(ThermikFormat.temp(Double(temp), unit: unit))")) }
+        return parts.isEmpty ? String(localized: "Drive health is not available.") : parts.joined(separator: " · ")
+    }
+
+    private static func otherFinding(_ f: DiagnosticFinding) -> String {
+        switch f {
+        case .shutdown(let verdict, let panicLog): return shutdownText(verdict, panicLog: panicLog)
+        case .thermal(let p, let events): return String(localized: "Thermal pressure now: \(p.title). Pressure events today: \(events).")
+        case .helper(let h): return helperText(h)
+        case .smc(let available, let keyCount, let catalog): return available ? String(localized: "SMC readable: \(keyCount) keys. \(catalog.title).")
                              : String(localized: "The SMC could not be opened, so temperatures are unavailable.")
-        case .unknown:
+        case .fansOK, .fanless, .fansStalled, .fansNotReachingTarget, .sensorsOK, .sensorsSuspect,
+             .battery, .noBattery, .storage, .unknown:
             return String(localized: "Not checked yet.")
         }
+    }
+
+    private static func shutdownText(_ verdict: ShutdownVerdict, panicLog: Bool) -> String {
+        let base = String(localized: "Last shutdown: \(verdict.title).")
+        return panicLog ? base + " " + String(localized: "A panic report was saved by macOS.") : base
     }
 
     static func helperText(_ h: HelperHealth) -> String {

@@ -92,13 +92,17 @@ public final class SMCFanController: FanControlling {
         defer { noteLink() }
         let hadFtst = sequencer.ftstSetByUs
         do {
-            let applied = try sequencer.setTarget(index, rpm: targetRPM)
-            restoreInterrupted = false            // a command that got through supersedes the interrupted restore
-            return applied
+            return try applyManualTarget(index, targetRPM: targetRPM)
         } catch {
             dropUnappliedFtst(hadFtst: hadFtst)
             throw error
         }
+    }
+
+    private func applyManualTarget(_ index: Int, targetRPM: Double) throws -> Double {
+        let applied = try sequencer.setTarget(index, rpm: targetRPM)
+        restoreInterrupted = false            // a command that got through supersedes the interrupted restore
+        return applied
     }
 
     public func setAutomatic(_ index: Int) throws {
@@ -173,13 +177,18 @@ public final class SMCFanController: FanControlling {
         guard let link else { safetyKeysTrusted = true; return true }
         if !link.isOpen { _ = try? link.keyCount() }                 // reopens once the backoff has passed
         guard link.isOpen else { return false }
+        guard discoverSafetyKeys(on: link) else { return false }
+        safetyKeysTrusted = true
+        return true
+    }
+
+    private func discoverSafetyKeys(on link: SMCConnection) -> Bool {
         let failures = link.connectionFailureCount
         _ = safety.monitoredKeys
         guard link.connectionFailureCount == failures else {
             safety = ThermalSafetyMonitor(smc: smc, appleSilicon: appleSilicon, clock: sequencer.clock)
             return false
         }
-        safetyKeysTrusted = true
         return true
     }
 
@@ -203,13 +212,18 @@ public final class SMCFanController: FanControlling {
         let reopens = link.reopenCount
         let down = !link.isOpen
         defer { linkReopens = reopens; linkReportedDown = down }
-        if down, !linkReportedDown {
-            Self.linkLog.error("SMC connection lost and cannot be reopened yet: fan writes and restores fail until it is back (retried with backoff)")
-        } else if !down, linkReportedDown {
-            Self.linkLog.notice("SMC connection restored")
-        } else if !down, reopens != linkReopens {
-            Self.linkLog.notice("SMC connection was stale: reopened")
-        }
+        if down { noteLinkDown(); return }
+        noteLinkUp(reopens: reopens)
+    }
+
+    private func noteLinkDown() {
+        guard !linkReportedDown else { return }
+        Self.linkLog.error("SMC connection lost and cannot be reopened yet: fan writes and restores fail until it is back (retried with backoff)")
+    }
+
+    private func noteLinkUp(reopens: Int) {
+        if linkReportedDown { Self.linkLog.notice("SMC connection restored") }
+        else if reopens != linkReopens { Self.linkLog.notice("SMC connection was stale: reopened") }
     }
 }
 

@@ -44,13 +44,18 @@ public actor URLSessionReleaseTransport: ReleaseTransport {
         guard response.expectedContentLength <= Int64(ReleaseLimits.maximumResponseBytes) else {
             throw UpdateCheckError.responseTooLarge
         }
+        let data = try await read(bytes)
+        return ReleaseResponse(data: data, statusCode: response.statusCode,
+                               entityTag: response.value(forHTTPHeaderField: "ETag"))
+    }
+
+    private func read(_ bytes: URLSession.AsyncBytes) async throws -> Data {
         var data = Data()
         for try await byte in bytes {
             guard data.count < ReleaseLimits.maximumResponseBytes else { throw UpdateCheckError.responseTooLarge }
             data.append(byte)
         }
-        return ReleaseResponse(data: data, statusCode: response.statusCode,
-                               entityTag: response.value(forHTTPHeaderField: "ETag"))
+        return data
     }
 
     deinit { session.invalidateAndCancel() }

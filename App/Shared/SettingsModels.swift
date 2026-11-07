@@ -23,30 +23,30 @@ enum MenuBarIcon: String, Codable, CaseIterable, Sendable {
     case fan, fanBlades, wind, bolt
     case ring, level, graph                       // graphics drawn from the value (inline layout only)
 
+    private static let fixedSymbols: [MenuBarIcon: String] = [
+        .thermometer: "thermometer.medium", .cpu: "cpu", .memory: "memorychip", .drive: "internaldrive",
+        .battery: "battery.75percent", .flame: "flame.fill", .heatWaves: "heat.waves", .fan: "fan.fill",
+        .fanBlades: "fanblades.fill", .wind: "wind", .bolt: "bolt.fill",
+    ]
+
     /// SF Symbol, or nil for none and the drawn graphics. `auto` picks by what the value is.
     func symbol(for kind: MenuBarMetric) -> String? {
         switch self {
-        case .auto:
-            switch kind {
-            case .temperature: "thermometer.medium"
-            case .fanAverage, .fanMax, .fan: "fan.fill"
-            case .systemPower: "bolt.fill"
-            case .none: nil
-            }
+        case .auto: automaticSymbol(for: kind)
         case .none, .ring, .level, .graph: nil
-        case .thermometer: "thermometer.medium"
-        case .cpu: "cpu"
-        case .memory: "memorychip"
-        case .drive: "internaldrive"
-        case .battery: "battery.75percent"
-        case .flame: "flame.fill"
-        case .heatWaves: "heat.waves"
-        case .fan: "fan.fill"
-        case .fanBlades: "fanblades.fill"
-        case .wind: "wind"
-        case .bolt: "bolt.fill"
+        default: Self.fixedSymbols[self]
         }
     }
+
+    private func automaticSymbol(for kind: MenuBarMetric) -> String? {
+        switch kind {
+        case .temperature: "thermometer.medium"
+        case .fanAverage, .fanMax, .fan: "fan.fill"
+        case .systemPower: "bolt.fill"
+        case .none: nil
+        }
+    }
+
     var isGraphic: Bool { self == .ring || self == .level || self == .graph }
 }
 
@@ -99,58 +99,113 @@ extension MenuBarStyle {
     /// The label a composed style stands for, filled with the configured values (`custom`: the user's own);
     /// nil for the styles that draw themselves.
     func composition(_ cfg: MenuBarConfig) -> MenuBarCustomLabel? {
-        let t = cfg.primary
-        let f: MenuBarMetric = cfg.secondary == .none ? .fanAverage : cfg.secondary
-        let cpu = MenuBarMetric.temperature(.aggregate(.cpuAverage)), gpu = MenuBarMetric.temperature(.aggregate(.gpuAverage))
-        func item(_ m: MenuBarMetric, _ icon: MenuBarIcon, caption: String = "", unit: Bool = false) -> MenuBarLabelItem {
-            MenuBarLabelItem(metric: m, icon: icon, caption: caption, showUnit: unit)
-        }
-        let preset: MenuBarCustomLabel
         switch self {
-        case .iconTempFan: preset = MenuBarCustomLabel(items: [item(t, .thermometer), item(f, .fan)])
-        case .chipTempFan: preset = MenuBarCustomLabel(items: [item(t, .cpu), item(f, .fan)])
-        case .flameTempFan: preset = MenuBarCustomLabel(items: [item(t, .flame), item(f, .fanBlades)])
-        case .stackedIcons: preset = MenuBarCustomLabel(items: [item(t, .thermometer), item(f, .fan)], layout: .stacked)
-        case .stackedUnits: preset = MenuBarCustomLabel(items: [item(t, .none), item(f, .none, unit: true)], layout: .stacked)
-        case .tempRPM: preset = MenuBarCustomLabel(items: [item(t, .none), item(f, .none, unit: true)])
-        case .compact: preset = MenuBarCustomLabel(items: [item(t, .none), item(f, .none)], size: .small, separator: .dot)
-        case .badgeFan: preset = MenuBarCustomLabel(items: [item(t, .none), item(f, .fan)], badge: true)
-        case .ringFan: preset = MenuBarCustomLabel(items: [item(t, .ring), item(f, .fan)])
-        case .cpuGpu:
-            preset = MenuBarCustomLabel(items: [item(cpu, .none, caption: String(localized: "CPU")),
-                                              item(gpu, .none, caption: String(localized: "GPU"))], separator: .bar)
-        case .cpuGpuStacked:
-            preset = MenuBarCustomLabel(items: [item(cpu, .none, caption: String(localized: "CPU")),
-                                              item(gpu, .none, caption: String(localized: "GPU"))], layout: .stacked)
-        case .fanOnly: preset = MenuBarCustomLabel(items: [item(f, .fan)])
         case .custom: return cfg.custom ?? .standard
         case .stacked, .temp, .iconTemp, .chip, .tempFan, .pill, .ringTemp, .bar, .sparkline, .gauge, .iconOnly: return nil
+        case .fanOnly:
+            let (_, fan) = configuredMetrics(cfg)
+            return MenuBarCustomLabel(items: [item(fan, .fan)]).withStableIDs()
+        default: return composedPreset(cfg)?.withStableIDs()
         }
-        return preset.withStableIDs()
+    }
+
+    private func composedPreset(_ cfg: MenuBarConfig) -> MenuBarCustomLabel? {
+        if let preset = decoratedTemperatureAndFanComposition(cfg) { return preset }
+        if let preset = plainTemperatureAndFanComposition(cfg) { return preset }
+        return processorComposition()
+    }
+
+    private func decoratedTemperatureAndFanComposition(_ cfg: MenuBarConfig) -> MenuBarCustomLabel? {
+        let (temperature, fan) = configuredMetrics(cfg)
+        switch self {
+        case .iconTempFan: return MenuBarCustomLabel(items: [item(temperature, .thermometer), item(fan, .fan)])
+        case .chipTempFan: return MenuBarCustomLabel(items: [item(temperature, .cpu), item(fan, .fan)])
+        case .flameTempFan: return MenuBarCustomLabel(items: [item(temperature, .flame), item(fan, .fanBlades)])
+        case .badgeFan: return MenuBarCustomLabel(items: [item(temperature, .none), item(fan, .fan)], badge: true)
+        case .ringFan: return MenuBarCustomLabel(items: [item(temperature, .ring), item(fan, .fan)])
+        default: return nil
+        }
+    }
+
+    private func plainTemperatureAndFanComposition(_ cfg: MenuBarConfig) -> MenuBarCustomLabel? {
+        let (temperature, fan) = configuredMetrics(cfg)
+        switch self {
+        case .stackedIcons: return MenuBarCustomLabel(items: [item(temperature, .thermometer), item(fan, .fan)], layout: .stacked)
+        case .stackedUnits: return MenuBarCustomLabel(items: [item(temperature, .none), item(fan, .none, showUnit: true)], layout: .stacked)
+        case .tempRPM: return MenuBarCustomLabel(items: [item(temperature, .none), item(fan, .none, showUnit: true)])
+        case .compact: return MenuBarCustomLabel(items: [item(temperature, .none), item(fan, .none)], size: .small, separator: .dot)
+        default: return nil
+        }
+    }
+
+    private func processorComposition() -> MenuBarCustomLabel? {
+        let items = processorItems()
+        switch self {
+        case .cpuGpu: return MenuBarCustomLabel(items: items, separator: .bar)
+        case .cpuGpuStacked: return MenuBarCustomLabel(items: items, layout: .stacked)
+        default: return nil
+        }
+    }
+
+    private func processorItems() -> [MenuBarLabelItem] {
+        let cpu = MenuBarMetric.temperature(.aggregate(.cpuAverage))
+        let gpu = MenuBarMetric.temperature(.aggregate(.gpuAverage))
+        return [item(cpu, .none, caption: String(localized: "CPU")),
+                item(gpu, .none, caption: String(localized: "GPU"))]
+    }
+
+    private func configuredMetrics(_ cfg: MenuBarConfig) -> (temperature: MenuBarMetric, fan: MenuBarMetric) {
+        let fan: MenuBarMetric = cfg.secondary == .none ? .fanAverage : cfg.secondary
+        return (cfg.primary, fan)
+    }
+
+    private func item(_ metric: MenuBarMetric, _ icon: MenuBarIcon,
+                      caption: String = "", showUnit: Bool = false) -> MenuBarLabelItem {
+        MenuBarLabelItem(metric: metric, icon: icon, caption: caption, showUnit: showUnit)
     }
 }
 
 extension MenuBarStyle {
     /// Where «Свой вариант» starts when the user customises this style: its own composition, or the closest one.
     func editableComposition(_ cfg: MenuBarConfig) -> MenuBarCustomLabel {
-        if let c = composition(cfg) { return c.withFreshIDs() }
-        let t = cfg.primary, f: MenuBarMetric = cfg.secondary == .none ? .fanAverage : cfg.secondary
-        func one(_ icon: MenuBarIcon, badge: Bool = false) -> MenuBarCustomLabel {
-            MenuBarCustomLabel(items: [MenuBarLabelItem(metric: t, icon: icon)], badge: badge)
-        }
+        if let composition = composition(cfg) { return composition.withFreshIDs() }
+        if let composition = temperatureAndFanEditableComposition(cfg) { return composition }
+        if let composition = iconEditableComposition(cfg) { return composition }
+        return graphicEditableComposition(cfg) ?? .standard
+    }
+
+    private func temperatureAndFanEditableComposition(_ cfg: MenuBarConfig) -> MenuBarCustomLabel? {
+        let (temperature, fan) = configuredMetrics(cfg)
         switch self {
-        case .stacked: return MenuBarCustomLabel(items: [MenuBarLabelItem(metric: t, icon: .none), MenuBarLabelItem(metric: f, icon: .fan)],
-                                                 layout: .stacked)
-        case .tempFan: return MenuBarCustomLabel(items: [MenuBarLabelItem(metric: t, icon: .none), MenuBarLabelItem(metric: f, icon: .fan)])
-        case .temp: return one(.none)
-        case .iconTemp, .iconOnly: return one(.thermometer)
-        case .chip: return one(.cpu)
-        case .pill: return one(.none, badge: true)
-        case .ringTemp, .gauge: return one(.ring)
-        case .bar: return one(.level)
-        case .sparkline: return one(.graph)
-        default: return .standard
+        case .stacked: return MenuBarCustomLabel(items: [item(temperature, .none), item(fan, .fan)], layout: .stacked)
+        case .tempFan: return MenuBarCustomLabel(items: [item(temperature, .none), item(fan, .fan)])
+        default: return nil
         }
+    }
+
+    private func iconEditableComposition(_ cfg: MenuBarConfig) -> MenuBarCustomLabel? {
+        let (temperature, _) = configuredMetrics(cfg)
+        switch self {
+        case .iconTemp, .iconOnly: return singleMetric(temperature, icon: .thermometer)
+        case .chip: return singleMetric(temperature, icon: .cpu)
+        case .pill: return singleMetric(temperature, icon: .none, badge: true)
+        default: return nil
+        }
+    }
+
+    private func graphicEditableComposition(_ cfg: MenuBarConfig) -> MenuBarCustomLabel? {
+        let (temperature, _) = configuredMetrics(cfg)
+        switch self {
+        case .temp: return singleMetric(temperature, icon: .none)
+        case .ringTemp, .gauge: return singleMetric(temperature, icon: .ring)
+        case .bar: return singleMetric(temperature, icon: .level)
+        case .sparkline: return singleMetric(temperature, icon: .graph)
+        default: return nil
+        }
+    }
+
+    private func singleMetric(_ metric: MenuBarMetric, icon: MenuBarIcon, badge: Bool = false) -> MenuBarCustomLabel {
+        MenuBarCustomLabel(items: [MenuBarLabelItem(metric: metric, icon: icon)], badge: badge)
     }
 
     /// Glyph shown next to an icon choice in the editor (the drawn graphics get a stand-in).

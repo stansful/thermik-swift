@@ -104,39 +104,57 @@ public enum SMCClientInspector {
     static let ownHelperNames: Set<String> = ["app.thermik.helper", "Thermik.helper", "Thermik.helper.app", "thermik-helper"]
 
     public static func openClients() -> [SMCClientInfo] {
-        var result: [SMCClientInfo] = []
         for className in ["AppleSMCKeysEndpoint", "AppleSMC"] {
-            var iter: io_iterator_t = 0
-            guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching(className), &iter) == KERN_SUCCESS else { continue }
-            defer { IOObjectRelease(iter) }
-            var service = IOIteratorNext(iter)
-            while service != 0 {
-                result += clients(under: service)
-                IOObjectRelease(service)
-                service = IOIteratorNext(iter)
-            }
-            if !result.isEmpty { break }
+            let result = clients(matching: className)
+            if !result.isEmpty { return result }
+        }
+        return []
+    }
+
+    private static func clients(matching className: String) -> [SMCClientInfo] {
+        var iter: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching(className), &iter) == KERN_SUCCESS else {
+            return []
+        }
+        defer { IOObjectRelease(iter) }
+        return clients(in: iter)
+    }
+
+    private static func clients(in iter: io_iterator_t) -> [SMCClientInfo] {
+        var result: [SMCClientInfo] = []
+        var service = IOIteratorNext(iter)
+        while service != 0 {
+            result += clients(under: service)
+            IOObjectRelease(service)
+            service = IOIteratorNext(iter)
         }
         return result
     }
 
     private static func clients(under service: io_object_t) -> [SMCClientInfo] {
-        var out: [SMCClientInfo] = []
         var children: io_iterator_t = 0
-        guard IORegistryEntryGetChildIterator(service, kIOServicePlane, &children) == KERN_SUCCESS else { return out }
+        guard IORegistryEntryGetChildIterator(service, kIOServicePlane, &children) == KERN_SUCCESS else { return [] }
         defer { IOObjectRelease(children) }
+        return clients(inChildren: children)
+    }
+
+    private static func clients(inChildren children: io_iterator_t) -> [SMCClientInfo] {
+        var result: [SMCClientInfo] = []
         var child = IOIteratorNext(children)
         while child != 0 {
-            if IOObjectConformsTo(child, "AppleSMCClient") != 0,
-               let creator = IORegistryEntryCreateCFProperty(child, "IOUserClientCreator" as CFString, kCFAllocatorDefault, 0)?
-                    .takeRetainedValue() as? String,
-               let info = parse(creator) {
-                out.append(info)
-            }
+            if let info = clientInfo(child) { result.append(info) }
             IOObjectRelease(child)
             child = IOIteratorNext(children)
         }
-        return out
+        return result
+    }
+
+    private static func clientInfo(_ child: io_object_t) -> SMCClientInfo? {
+        guard IOObjectConformsTo(child, "AppleSMCClient") != 0,
+              let creator = IORegistryEntryCreateCFProperty(child, "IOUserClientCreator" as CFString, kCFAllocatorDefault, 0)?
+                .takeRetainedValue() as? String,
+              let info = parse(creator) else { return nil }
+        return info
     }
 
     /// "pid 858, Example App" -> (858, "Example App")
@@ -160,28 +178,39 @@ public enum SMCClientInspector {
 
     /// Classifies one client. `executablePath` is the result of `proc_pidpath` (nil when unavailable).
     public static func classify(processName: String, executablePath: String?) -> SMCClientClassification {
-        if let app = knownFanControllers.first(where: { k in
-            k.processNames.contains { k.processPrefix ? processName.hasPrefix($0) : processName == $0 }
-        }) {
+        if let app = knownApp(matching: processName) {
             return .fanControllerApp(product: app.product)
         }
         if let path = executablePath {
             guard path.hasPrefix(privilegedHelperDirectory) else { return .other }
             return classifyHelper(label: (path as NSString).lastPathComponent)
         }
-        // No path: a helper's p_comm is its label truncated to 15–16 characters ("com.tunabellysof").
-        if processName.count >= 15 {
-            if ownHelperNames.contains(where: { $0.hasPrefix(processName) }) { return .thermikHelper }
-            if knownNonFanClients.contains(where: { processName.hasPrefix($0) || $0.hasPrefix(processName) }) {
-                return .nonFanHelper(label: processName)
+        return classifyWithoutExecutablePath(processName)
+    }
+
+    private static func knownApp(matching processName: String) -> KnownFanController? {
+        knownFanControllers.first { controller in
+            controller.processNames.contains {
+                controller.processPrefix ? processName.hasPrefix($0) : processName == $0
             }
-            for k in knownFanControllers {
-                if let label = k.helperLabels.first(where: { $0.hasPrefix(processName) }) {
-                    return .fanControllerHelper(product: k.product, label: label)
-                }
+        }
+    }
+
+    // No path: a helper's p_comm is its label truncated to 15–16 characters ("com.tunabellysof").
+    private static func classifyWithoutExecutablePath(_ processName: String) -> SMCClientClassification {
+        guard processName.count >= 15 else { return .other }
+        if ownHelperNames.contains(where: { $0.hasPrefix(processName) }) { return .thermikHelper }
+        if isKnownNonFanTruncatedName(processName) { return .nonFanHelper(label: processName) }
+        for controller in knownFanControllers {
+            if let label = controller.helperLabels.first(where: { $0.hasPrefix(processName) }) {
+                return .fanControllerHelper(product: controller.product, label: label)
             }
         }
         return .other
+    }
+
+    private static func isKnownNonFanTruncatedName(_ processName: String) -> Bool {
+        knownNonFanClients.contains { processName.hasPrefix($0) || $0.hasPrefix(processName) }
     }
 
     /// Classifies a privileged helper by its launchd label (= executable file name).
@@ -212,16 +241,31 @@ public enum SMCClientInspector {
         var helpers: [String] = []
         var unknown: [String] = []
         for (_, kind) in classifiedClients(excludingPID: own) {
-            switch kind {
-            case .fanControllerApp(let p): if !apps.contains(p) { apps.append(p) }
-            case .fanControllerHelper(let p, _): if !helpers.contains(p) { helpers.append(p) }
-            case .unknownFanHelper(let l): if !unknown.contains(l) { unknown.append(l) }
-            case .nonFanHelper, .thermikHelper, .other: break
-            }
+            recordSuspect(kind, apps: &apps, helpers: &helpers, unknown: &unknown)
         }
-        var out = apps
-        for n in helpers + unknown where !out.contains(n) { out.append(n) }
-        return out
+        return mergeSuspects(apps, helpers, unknown)
+    }
+
+    private static func recordSuspect(
+        _ kind: SMCClientClassification, apps: inout [String], helpers: inout [String], unknown: inout [String]
+    ) {
+        switch kind {
+        case .fanControllerApp(let product): appendUnique(product, to: &apps)
+        case .fanControllerHelper(let product, _): appendUnique(product, to: &helpers)
+        case .unknownFanHelper(let label): appendUnique(label, to: &unknown)
+        case .nonFanHelper, .thermikHelper, .other: break
+        }
+    }
+
+    private static func appendUnique(_ value: String, to values: inout [String]) {
+        guard !values.contains(value) else { return }
+        values.append(value)
+    }
+
+    private static func mergeSuspects(_ apps: [String], _ helpers: [String], _ unknown: [String]) -> [String] {
+        var result = apps
+        for name in helpers + unknown where !result.contains(name) { result.append(name) }
+        return result
     }
 
     /// Known fan-control products whose launchd daemon plist is installed (presence only, the file is not read).

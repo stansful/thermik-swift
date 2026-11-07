@@ -155,63 +155,94 @@ private struct CurveCard: View {
     }
 
     @ViewBuilder private func controls(_ curve: FanCurve) -> some View {
-        let unit = settings.effectiveUnit
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
-            GridRow {
-                Text("Driving sensor").foregroundStyle(.secondary)
-                drivingPicker(curve).frame(maxWidth: 320)
-            }
-            GridRow {
-                Text("Hysteresis").foregroundStyle(.secondary)
-                Stepper(value: Binding(get: { curve.hysteresisC }, set: { v in edit { $0.hysteresisC = v } }), in: 1...10, step: 1) {
-                    Text(verbatim: WindowFormat.tempDelta(curve.hysteresisC, unit))
-                        .font(ThermikFont.valueSmall)
-                }
-                .help(Text("How far the temperature must fall before the fans slow down again."))
-            }
-            GridRow {
-                Text("Ramp-up time").foregroundStyle(.secondary)
-                Stepper(value: Binding(get: { Self.rampSeconds(curve.slew.upPercentPerSecond) },
-                                       set: { s in edit { $0.slew.upPercentPerSecond = 100 / s } }), in: 1...120, step: 1) {
-                    Text("\(Int(Self.rampSeconds(curve.slew.upPercentPerSecond))) s").font(ThermikFont.valueSmall)
-                }
-                .help(Text("Time to go from minimum to maximum speed."))
-            }
-            GridRow {
-                Text("Ramp-down time").foregroundStyle(.secondary)
-                Stepper(value: Binding(get: { Self.rampSeconds(curve.slew.downPercentPerSecond) },
-                                       set: { s in edit { $0.slew.downPercentPerSecond = 100 / s } }), in: 1...120, step: 1) {
-                    Text("\(Int(Self.rampSeconds(curve.slew.downPercentPerSecond))) s").font(ThermikFont.valueSmall)
-                }
-                .help(Text("Time to go from maximum to minimum speed."))
-            }
-            GridRow {
-                Text("Below the first point").foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    Picker(selection: Binding(get: { curve.below }, set: { v in edit { $0.below = v } })) {
-                        Text("Minimum").tag(BelowFirstPoint.minimum)
-                        Text(verbatim: "macOS").tag(BelowFirstPoint.system)
-                        if fans.profile.scheme.allowsFanStop || curve.below == .stop {
-                            Text("Stop").tag(BelowFirstPoint.stop)
-                        }
-                    } label: { EmptyView() }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
-                    Text(stopUnsupported(curve) ? "This Mac cannot stop its fans: below the first point they run at the minimum."
-                                                : Self.belowExplanation(curve.below))
-                        .font(ThermikFont.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if stopHeld(curve) {
-                        Label { Text("The chip is hot, so the fans keep their minimum; they stop once it cools below 85 °C.") }
-                            icon: { Image(systemName: "thermometer.high") }
-                            .font(ThermikFont.caption).foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
+            drivingSensorRow(curve)
+            hysteresisRow(curve)
+            rampUpRow(curve)
+            rampDownRow(curve)
+            belowFirstPointRow(curve)
         }
         .font(.system(size: 12))
+    }
+
+    private func drivingSensorRow(_ curve: FanCurve) -> some View {
+        GridRow {
+            Text("Driving sensor").foregroundStyle(.secondary)
+            drivingPicker(curve).frame(maxWidth: 320)
+        }
+    }
+
+    private func hysteresisRow(_ curve: FanCurve) -> some View {
+        GridRow {
+            Text("Hysteresis").foregroundStyle(.secondary)
+            Stepper(value: Binding(get: { curve.hysteresisC }, set: { v in edit { $0.hysteresisC = v } }), in: 1...10, step: 1) {
+                Text(verbatim: WindowFormat.tempDelta(curve.hysteresisC, settings.effectiveUnit))
+                    .font(ThermikFont.valueSmall)
+            }
+            .help(Text("How far the temperature must fall before the fans slow down again."))
+        }
+    }
+
+    private func rampUpRow(_ curve: FanCurve) -> some View {
+        GridRow {
+            Text("Ramp-up time").foregroundStyle(.secondary)
+            Stepper(value: Binding(get: { Self.rampSeconds(curve.slew.upPercentPerSecond) },
+                                   set: { s in edit { $0.slew.upPercentPerSecond = 100 / s } }), in: 1...120, step: 1) {
+                Text("\(Int(Self.rampSeconds(curve.slew.upPercentPerSecond))) s").font(ThermikFont.valueSmall)
+            }
+            .help(Text("Time to go from minimum to maximum speed."))
+        }
+    }
+
+    private func rampDownRow(_ curve: FanCurve) -> some View {
+        GridRow {
+            Text("Ramp-down time").foregroundStyle(.secondary)
+            Stepper(value: Binding(get: { Self.rampSeconds(curve.slew.downPercentPerSecond) },
+                                   set: { s in edit { $0.slew.downPercentPerSecond = 100 / s } }), in: 1...120, step: 1) {
+                Text("\(Int(Self.rampSeconds(curve.slew.downPercentPerSecond))) s").font(ThermikFont.valueSmall)
+            }
+            .help(Text("Time to go from maximum to minimum speed."))
+        }
+    }
+
+    private func belowFirstPointRow(_ curve: FanCurve) -> some View {
+        GridRow {
+            Text("Below the first point").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                belowPicker(curve)
+                belowExplanationText(curve)
+                stopHeldNotice(curve)
+            }
+        }
+    }
+
+    @ViewBuilder private func belowPicker(_ curve: FanCurve) -> some View {
+        Picker(selection: Binding(get: { curve.below }, set: { v in edit { $0.below = v } })) {
+            Text("Minimum").tag(BelowFirstPoint.minimum)
+            Text(verbatim: "macOS").tag(BelowFirstPoint.system)
+            if fans.profile.scheme.allowsFanStop || curve.below == .stop {
+                Text("Stop").tag(BelowFirstPoint.stop)
+            }
+        } label: { EmptyView() }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+    }
+
+    private func belowExplanationText(_ curve: FanCurve) -> some View {
+        Text(stopUnsupported(curve) ? "This Mac cannot stop its fans: below the first point they run at the minimum."
+                                    : Self.belowExplanation(curve.below))
+            .font(ThermikFont.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private func stopHeldNotice(_ curve: FanCurve) -> some View {
+        if stopHeld(curve) {
+            Label { Text("The chip is hot, so the fans keep their minimum; they stop once it cools below 85 °C.") }
+                icon: { Image(systemName: "thermometer.high") }
+                .font(ThermikFont.caption).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func stopUnsupported(_ c: FanCurve) -> Bool { c.below == .stop && !fans.profile.scheme.allowsFanStop }
@@ -233,25 +264,37 @@ private struct CurveCard: View {
     }
 
     private func drivingPicker(_ curve: FanCurve) -> some View {
-        Picker(selection: Binding<DrivingChoice>(
+        Picker(selection: drivingBinding(curve)) {
+            drivingAggregateChoices()
+            currentSensorChoice(curve)
+            Divider()
+            Text("Specific sensor…").tag(DrivingChoice.chooseSensor)
+        } label: { Text("Driving sensor") }
+        .labelsHidden()
+    }
+
+    private func drivingBinding(_ curve: FanCurve) -> Binding<DrivingChoice> {
+        Binding<DrivingChoice>(
             get: { .source(curve.input) },
             set: { choice in
                 switch choice {
                 case .source(let s): edit { $0.input = s }
                 case .chooseSensor: model.choosingSensor = true
                 }
-            })) {
-            ForEach(Self.drivingAggregates, id: \.self) { k in
-                Text(verbatim: k.title).tag(DrivingChoice.source(.aggregate(k)))
-            }
-            if case .sensor(let id) = curve.input {
-                Divider()
-                Text(verbatim: sensors.sensor(id)?.displayName ?? id.description).tag(DrivingChoice.source(curve.input))
-            }
+            })
+    }
+
+    private func drivingAggregateChoices() -> some View {
+        ForEach(Self.drivingAggregates, id: \.self) { k in
+            Text(verbatim: k.title).tag(DrivingChoice.source(.aggregate(k)))
+        }
+    }
+
+    @ViewBuilder private func currentSensorChoice(_ curve: FanCurve) -> some View {
+        if case .sensor(let id) = curve.input {
             Divider()
-            Text("Specific sensor…").tag(DrivingChoice.chooseSensor)
-        } label: { Text("Driving sensor") }
-        .labelsHidden()
+            Text(verbatim: sensors.sensor(id)?.displayName ?? id.description).tag(DrivingChoice.source(curve.input))
+        }
     }
 
     private enum DrivingChoice: Hashable { case source(TemperatureSource), chooseSensor }
@@ -330,9 +373,13 @@ enum CurveSanitizer {
             floor = max(floor, min(max(p.percent.rounded(), 0), 100))
             out.append(CurvePoint(c, floor))
         }
-        if out.count < 2, let only = out.first {
-            out.append(CurvePoint(min(only.celsius + 10, 130), 100))
-        }
+        return ensuringMinimumPointCount(out)
+    }
+
+    private static func ensuringMinimumPointCount(_ points: [CurvePoint]) -> [CurvePoint] {
+        var out = points
+        guard out.count < 2, let only = out.first else { return out }
+        out.append(CurvePoint(min(only.celsius + 10, 130), 100))
         return out
     }
 }

@@ -103,14 +103,38 @@ enum EventFilter: CaseIterable, Hashable {
     func matches(_ p: AppEventPayload) -> Bool {
         switch self {
         case .all: true
-        case .alerts: if case .alertRaised = p { true } else if case .alertCleared = p { true } else { false }
-        case .fanMode: if case .fanModeChanged = p { true } else if case .safetyOverride = p { true } else { false }
-        case .power:
-            switch p {
-            case .systemWillSleep, .systemDidWake, .powerSourceChanged, .thermalPressureChanged: true
-            default: false
-            }
-        case .helper: if case .helperReverted = p { true } else if case .helperStatus = p { true } else { false }
+        case .alerts: Self.isAlert(p)
+        case .fanMode: Self.isFanModeEvent(p)
+        case .power: Self.isPowerEvent(p)
+        case .helper: Self.isHelperEvent(p)
+        }
+    }
+
+    private static func isAlert(_ p: AppEventPayload) -> Bool {
+        switch p {
+        case .alertRaised, .alertCleared: true
+        default: false
+        }
+    }
+
+    private static func isFanModeEvent(_ p: AppEventPayload) -> Bool {
+        switch p {
+        case .fanModeChanged, .safetyOverride: true
+        default: false
+        }
+    }
+
+    private static func isPowerEvent(_ p: AppEventPayload) -> Bool {
+        switch p {
+        case .systemWillSleep, .systemDidWake, .powerSourceChanged, .thermalPressureChanged: true
+        default: false
+        }
+    }
+
+    private static func isHelperEvent(_ p: AppEventPayload) -> Bool {
+        switch p {
+        case .helperReverted, .helperStatus: true
+        default: false
         }
     }
 }
@@ -119,71 +143,97 @@ enum EventFilter: CaseIterable, Hashable {
 enum EventLogText {
     static func kind(_ p: AppEventPayload) -> String {
         switch p {
-        case .alertRaised: String(localized: "Alert")
-        case .alertCleared: String(localized: "Alert cleared")
-        case .fanModeChanged: String(localized: "Fan mode")
-        case .helperReverted, .helperStatus: String(localized: "Helper")
-        case .safetyOverride: String(localized: "Safety")
-        case .systemWillSleep: String(localized: "Sleep")
-        case .systemDidWake: String(localized: "Wake")
-        case .powerSourceChanged: String(localized: "Power")
-        case .thermalPressureChanged: String(localized: "Thermal pressure")
-        case .appLaunched: String(localized: "Launch")
-        case .error: String(localized: "Error")
+        case .alertRaised, .alertCleared, .fanModeChanged, .helperReverted, .helperStatus, .safetyOverride:
+            return interactionKind(p)
+        case .systemWillSleep: return String(localized: "Sleep")
+        case .systemDidWake: return String(localized: "Wake")
+        case .powerSourceChanged: return String(localized: "Power")
+        case .thermalPressureChanged: return String(localized: "Thermal pressure")
+        case .appLaunched: return String(localized: "Launch")
+        case .error: return String(localized: "Error")
+        }
+    }
+
+    private static func interactionKind(_ p: AppEventPayload) -> String {
+        switch p {
+        case .alertRaised: return String(localized: "Alert")
+        case .alertCleared: return String(localized: "Alert cleared")
+        case .fanModeChanged: return String(localized: "Fan mode")
+        case .helperReverted, .helperStatus: return String(localized: "Helper")
+        case .safetyOverride: return String(localized: "Safety")
+        default: return ""
         }
     }
 
     static func symbol(_ p: AppEventPayload) -> String {
         switch p {
-        case .alertRaised: "bell.badge"
-        case .alertCleared: "bell"
-        case .fanModeChanged: "fan"
-        case .helperReverted, .helperStatus: "lock.shield"
-        case .safetyOverride: "exclamationmark.octagon"
-        case .systemWillSleep: "moon.zzz"
-        case .systemDidWake: "sun.max"
-        case .powerSourceChanged: "powerplug"
-        case .thermalPressureChanged: "gauge.with.dots.needle.50percent"
-        case .appLaunched: "play.fill"
-        case .error: "exclamationmark.triangle"
+        case .alertRaised, .alertCleared, .fanModeChanged, .helperReverted, .helperStatus, .safetyOverride:
+            return interactionSymbol(p)
+        case .systemWillSleep: return "moon.zzz"
+        case .systemDidWake: return "sun.max"
+        case .powerSourceChanged: return "powerplug"
+        case .thermalPressureChanged: return "gauge.with.dots.needle.50percent"
+        case .appLaunched: return "play.fill"
+        case .error: return "exclamationmark.triangle"
+        }
+    }
+
+    private static func interactionSymbol(_ p: AppEventPayload) -> String {
+        switch p {
+        case .alertRaised: return "bell.badge"
+        case .alertCleared: return "bell"
+        case .fanModeChanged: return "fan"
+        case .helperReverted, .helperStatus: return "lock.shield"
+        case .safetyOverride: return "exclamationmark.octagon"
+        default: return ""
         }
     }
 
     @MainActor static func details(_ p: AppEventPayload, sensorName: (SensorID) -> String?, unit: UnitTemperature) -> String {
         switch p {
-        case .alertRaised(_, let subject, let value, let sensorID):
-            var name = subject.title(sensorName: sensorName)
-            if let id = sensorID, let s = sensorName(id) { name += " (\(s))" }
-            if let value { return String(localized: "\(name) reached \(ThermikFormat.temp(value, unit: unit, decimals: 1))") }
-            return name
-        case .alertCleared:
-            return String(localized: "Back to normal")
-        case .fanModeChanged(let c):
-            return String(localized: "\(c.from.title) → \(c.to.title) (\(c.reason.title))")
-        case .helperReverted(let reason):
-            let why = HelperRevertReason.title(reason)            // machine token → phrase ("leaseExpired" → …)
-            return String(localized: "Fans returned to Auto: \(why)")
-        case .helperStatus(let a):
-            return a?.title ?? String(localized: "Helper ready")
-        case .safetyOverride(let engaged, let t):
-            if engaged {
-                let temp = t.map { ThermikFormat.temp($0, unit: unit) } ?? "—"
-                return String(localized: "Safety override: fans at maximum (\(temp))")
-            }
-            return String(localized: "Safety override released")
-        case .systemWillSleep:
-            return String(localized: "The Mac went to sleep; fans returned to Auto")
-        case .systemDidWake:
-            return String(localized: "The Mac woke up")
-        case .powerSourceChanged(let k):
-            return String(localized: "Power source: \(k.title)")
-        case .thermalPressureChanged(let pr):
-            return String(localized: "Thermal pressure: \(pr.title)")
-        case .appLaunched(let v):
-            return String(localized: "Thermik \(v) started")
-        case .error(let e):
-            return errorText(e)
+        case .alertRaised, .alertCleared, .fanModeChanged, .helperReverted, .helperStatus, .safetyOverride:
+            return interactionDetails(p, sensorName: sensorName, unit: unit)
+        case .systemWillSleep: return String(localized: "The Mac went to sleep; fans returned to Auto")
+        case .systemDidWake: return String(localized: "The Mac woke up")
+        case .powerSourceChanged(let k): return String(localized: "Power source: \(k.title)")
+        case .thermalPressureChanged(let pr): return String(localized: "Thermal pressure: \(pr.title)")
+        case .appLaunched(let v): return String(localized: "Thermik \(v) started")
+        case .error(let e): return errorText(e)
         }
+    }
+
+    @MainActor private static func interactionDetails(_ p: AppEventPayload, sensorName: (SensorID) -> String?,
+                                                      unit: UnitTemperature) -> String {
+        switch p {
+        case .alertRaised(_, let s, let v, let id): return alertDetails(s, value: v, sensorID: id, sensorName: sensorName, unit: unit)
+        case .alertCleared: return String(localized: "Back to normal")
+        case .fanModeChanged(let c): return String(localized: "\(c.from.title) → \(c.to.title) (\(c.reason.title))")
+        case .helperReverted(let reason): return helperRevertDetails(reason)
+        case .helperStatus(let a): return a?.title ?? String(localized: "Helper ready")
+        case .safetyOverride(let engaged, let t): return safetyDetails(engaged: engaged, temperatureC: t, unit: unit)
+        default: return ""
+        }
+    }
+
+    private static func alertDetails(_ subject: AlertRule.Subject, value: Double?, sensorID: SensorID?,
+                                     sensorName: (SensorID) -> String?, unit: UnitTemperature) -> String {
+        var name = subject.title(sensorName: sensorName)
+        if let id = sensorID, let s = sensorName(id) { name += " (\(s))" }
+        if let value { return String(localized: "\(name) reached \(ThermikFormat.temp(value, unit: unit, decimals: 1))") }
+        return name
+    }
+
+    private static func helperRevertDetails(_ reason: String) -> String {
+        let why = HelperRevertReason.title(reason)            // machine token → phrase ("leaseExpired" → …)
+        return String(localized: "Fans returned to Auto: \(why)")
+    }
+
+    private static func safetyDetails(engaged: Bool, temperatureC: Double?, unit: UnitTemperature) -> String {
+        if engaged {
+            let temp = temperatureC.map { ThermikFormat.temp($0, unit: unit) } ?? "—"
+            return String(localized: "Safety override: fans at maximum (\(temp))")
+        }
+        return String(localized: "Safety override released")
     }
 
     /// `.error` payloads are free text. FanStore records localized ones; the sampler and the CSV logger record a fixed

@@ -193,27 +193,48 @@ struct FanCurveEditor: View {
 
     private func drag(_ g: DragGesture.Value) {
         if state.dragging == nil {
-            guard !state.dragMissed else { return }
-            guard let i = nearest(to: g.startLocation) else {
-                state.dragMissed = true
-                state.selected = nil
-                return
-            }
-            state.dragging = i
-            state.selected = i
-            state.dragOrigin = points
-            // Grab offset: the point moves by the pointer's travel, not to the cursor (a handle is 11–14 pt wide,
-            // ≈ 5 % / 1.5 °C), so a click off-centre does not move it.
-            let pos = position(points[i])
-            state.grabOffset = CGSize(width: pos.x - g.startLocation.x, height: pos.y - g.startLocation.y)
-            state.dragMoved = false
-            focused = true
+            guard beginDrag(g) else { return }
         }
         // A plain click only selects (for arrow-key nudging): the curve changes once the pointer travelled > 2 pt.
-        if !state.dragMoved {
-            guard hypot(g.translation.width, g.translation.height) > 2 else { return }
-            state.dragMoved = true
+        guard registerDragMovement(g) else { return }
+        updateDraggedPoint(g)
+    }
+
+    private func beginDrag(_ g: DragGesture.Value) -> Bool {
+        guard !state.dragMissed else { return false }
+        guard let i = nearest(to: g.startLocation) else {
+            missDrag()
+            return false
         }
+        startDrag(i, gesture: g)
+        return true
+    }
+
+    private func missDrag() {
+        state.dragMissed = true
+        state.selected = nil
+    }
+
+    private func startDrag(_ i: Int, gesture g: DragGesture.Value) {
+        state.dragging = i
+        state.selected = i
+        state.dragOrigin = points
+        // Grab offset: the point moves by the pointer's travel, not to the cursor (a handle is 11–14 pt wide,
+        // ≈ 5 % / 1.5 °C), so a click off-centre does not move it.
+        let pos = position(points[i])
+        state.grabOffset = CGSize(width: pos.x - g.startLocation.x, height: pos.y - g.startLocation.y)
+        state.dragMoved = false
+        focused = true
+    }
+
+    private func registerDragMovement(_ g: DragGesture.Value) -> Bool {
+        if state.dragMoved { return true }
+        guard hypot(g.translation.width, g.translation.height) > 2 else { return false }
+        state.dragMoved = true
+        return true
+    }
+
+    private func updateDraggedPoint(_ g: DragGesture.Value) {
         let target = CGPoint(x: g.location.x + state.grabOffset.width, y: g.location.y + state.grabOffset.height)
         guard let i = state.dragging, points.indices.contains(i), let v = value(at: target) else { return }
         let b = xBounds(i)
@@ -237,13 +258,22 @@ struct FanCurveEditor: View {
     private func addPoint(at loc: CGPoint) {
         guard nearest(to: loc) == nil, let v = value(at: loc) else { return }
         let c = v.celsius.rounded()
-        guard points.count < Self.maxPoints, tempDomain.contains(c), !points.contains(where: { abs($0.celsius - c) < 2 }) else {
+        guard canAddPoint(at: c) else {
             NSSound.beep()
             return
         }
+        insertPoint(celsius: c, percent: v.percent)
+    }
+
+    private func canAddPoint(at celsius: Double) -> Bool {
+        points.count < Self.maxPoints && tempDomain.contains(celsius)
+            && !points.contains(where: { abs($0.celsius - celsius) < 2 })
+    }
+
+    private func insertPoint(celsius: Double, percent: Double) {
         var p = points
-        let i = p.firstIndex { $0.celsius > c } ?? p.count
-        p.insert(CurvePoint(c, min(max(v.percent.rounded(), 0), 100)), at: i)
+        let i = p.firstIndex { $0.celsius > celsius } ?? p.count
+        p.insert(CurvePoint(celsius, min(max(percent.rounded(), 0), 100)), at: i)
         undoTarget.set(p, binding: $points, undoManager: undoManager, name: String(localized: "Add Curve Point"))
         state.selected = i
         focused = true
@@ -276,18 +306,27 @@ struct FanCurveEditor: View {
         guard let i = state.selected, points.indices.contains(i) else { return false }
         let dc = big ? 5.0 : 1.0, dp = big ? 20.0 : 5.0
         var p = points
-        let b = xBounds(i)
+        guard applyNudge(key, to: &p[i], celsiusDelta: dc, percentDelta: dp, bounds: xBounds(i)) else { return false }
+        commitNudge(p)
+        return true
+    }
+
+    private func applyNudge(_ key: KeyEquivalent, to p: inout CurvePoint, celsiusDelta dc: Double,
+                            percentDelta dp: Double, bounds b: ClosedRange<Double>) -> Bool {
         switch key {
-        case .leftArrow: p[i].celsius = max(p[i].celsius - dc, b.lowerBound)
-        case .rightArrow: p[i].celsius = min(p[i].celsius + dc, b.upperBound)
-        case .upArrow: p[i].percent = min(p[i].percent + dp, 100)
-        case .downArrow: p[i].percent = max(p[i].percent - dp, 0)
+        case .leftArrow: p.celsius = max(p.celsius - dc, b.lowerBound)
+        case .rightArrow: p.celsius = min(p.celsius + dc, b.upperBound)
+        case .upArrow: p.percent = min(p.percent + dp, 100)
+        case .downArrow: p.percent = max(p.percent - dp, 0)
         default: return false
         }
+        return true
+    }
+
+    private func commitNudge(_ p: [CurvePoint]) {
         if p != points {
             undoTarget.set(p, binding: $points, undoManager: undoManager, name: String(localized: "Move Curve Point"))
         }
-        return true
     }
 
     /// Tab / ⇧Tab: next / previous point; at the ends the key is passed on so focus can leave the editor.

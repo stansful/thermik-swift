@@ -168,50 +168,69 @@ final class MenuBarLabelRenderer {
     // MARK: Content (strings + colours)
 
     func content(for s: MenuBarSnapshot, style: MenuBarStyle, options: MenuBarRenderOptions) -> MenuBarLabelContent {
+        let fraction = primaryFraction(for: s)
+        let composed = composedContent(for: s, style: style, options: options)
+        return makeContent(for: s, style: style, options: options, fraction: fraction, composed: composed)
+    }
+
+    // The stacked label marks its second line with a glyph (fan / bolt) instead of a unit.
+    private func makeContent(for s: MenuBarSnapshot, style: MenuBarStyle, options: MenuBarRenderOptions, fraction: Double,
+                             composed: (layout: ComposedLayout?, values: [ComposedValueContent])) -> MenuBarLabelContent {
         let primary = s.resolvedPrimary, secondary = s.resolvedSecondary
-        let useColor = options.colored || (options.alertColor && s.alert)
-        let dark = options.appearance == .darkAqua || options.appearance == .vibrantDark
-            || options.appearance == .accessibilityHighContrastDarkAqua || options.appearance == .accessibilityHighContrastVibrantDark
-        var tint: Double?
-        var fraction = 0.0
-        switch primary {
-        case .temperature(let c, let scale):
-            let t = scale.normalized(c)
-            fraction = t
-            if useColor { tint = (t * 50).rounded() / 50 }
-        case .rpm, .watts, .unavailable, .none:
-            fraction = min(max(s.normalized, 0), 1)
-            if useColor { tint = (fraction * 50).rounded() / 50 }
-        }
-        let template = !useColor && s.badge == .none
-        var composedLayout: ComposedLayout?
-        var composed: [ComposedValueContent] = []
-        if let comp = s.composition, style.isComposed {
-            composedLayout = ComposedLayout(layout: comp.layout, size: comp.size, bold: comp.bold, separator: comp.separator,
-                                            badge: comp.badge, tintIcons: comp.tintIcons)
-            composed = s.composed.map { v in
-                var itemTint: Double?
-                if useColor, case .temperature(let c, let scale) = v.reading { itemTint = (scale.normalized(c) * 50).rounded() / 50 }
-                return ComposedValueContent(
-                    text: Self.text(v.reading, unit: s.unit, withUnit: v.showUnit, gauge: false), kind: v.reading.kind,
-                    showUnit: v.showUnit, symbol: v.symbol, graphic: v.graphic, caption: v.caption, tint: itemTint,
-                    fraction: (min(max(v.fraction, 0), 1) * 50).rounded() / 50,
-                    spark: v.graphic == .graph ? Self.sparkPoints(v.history, kind: v.reading.kind) : [])
-            }
-        }
         return MenuBarLabelContent(
-            style: style,
-            primaryText: Self.text(primary, unit: s.unit, withUnit: false, gauge: style == .gauge),
-            primaryKind: primary.kind,
-            // The stacked label marks its second line with a glyph (fan / bolt) instead of a unit.
-            secondaryText: Self.text(secondary, unit: s.unit, withUnit: false, gauge: false),
-            secondaryKind: secondary.kind,
+            style: style, primaryText: Self.text(primary, unit: s.unit, withUnit: false, gauge: style == .gauge), primaryKind: primary.kind,
+            secondaryText: Self.text(secondary, unit: s.unit, withUnit: false, gauge: false), secondaryKind: secondary.kind,
             widthKey: ThermikFormat.rpmUnit + "|" + ThermikFormat.wattUnit + "|" + String(localized: "Off"),
-            fraction: (fraction * 50).rounded() / 50,
-            tint: tint, alert: s.alert, stale: s.stale, badge: s.badge, template: template,
-            dark: template ? false : dark, colorBlind: options.colorBlind,
-            spark: style == .sparkline ? Self.sparkPoints(s.history, kind: primary.kind) : [],
-            composedLayout: composedLayout, composed: composed)
+            fraction: (fraction * 50).rounded() / 50, tint: tint(for: fraction, snapshot: s, options: options),
+            alert: s.alert, stale: s.stale, badge: s.badge, template: !usesColor(s, options: options) && s.badge == .none,
+            dark: usesColor(s, options: options) || s.badge != .none ? Self.isDarkAppearance(options.appearance) : false,
+            colorBlind: options.colorBlind, spark: style == .sparkline ? Self.sparkPoints(s.history, kind: primary.kind) : [],
+            composedLayout: composed.layout, composed: composed.values)
+    }
+
+    private func primaryFraction(for s: MenuBarSnapshot) -> Double {
+        switch s.resolvedPrimary {
+        case .temperature(let c, let scale): scale.normalized(c)
+        case .rpm, .watts, .unavailable, .none: min(max(s.normalized, 0), 1)
+        }
+    }
+
+    private func usesColor(_ s: MenuBarSnapshot, options: MenuBarRenderOptions) -> Bool {
+        options.colored || (options.alertColor && s.alert)
+    }
+
+    private func tint(for fraction: Double, snapshot s: MenuBarSnapshot, options: MenuBarRenderOptions) -> Double? {
+        guard usesColor(s, options: options) else { return nil }
+        return (fraction * 50).rounded() / 50
+    }
+
+    private static func isDarkAppearance(_ appearance: NSAppearance.Name) -> Bool {
+        appearance == .darkAqua || appearance == .vibrantDark || appearance == .accessibilityHighContrastDarkAqua
+            || appearance == .accessibilityHighContrastVibrantDark
+    }
+
+    private func composedContent(for s: MenuBarSnapshot, style: MenuBarStyle, options: MenuBarRenderOptions)
+            -> (layout: ComposedLayout?, values: [ComposedValueContent]) {
+        guard let comp = s.composition, style.isComposed else { return (nil, []) }
+        let layout = ComposedLayout(layout: comp.layout, size: comp.size, bold: comp.bold, separator: comp.separator,
+                                    badge: comp.badge, tintIcons: comp.tintIcons)
+        return (layout, s.composed.map { composedValue($0, snapshot: s, options: options) })
+    }
+
+    private func composedValue(_ v: MenuBarComposedValue, snapshot s: MenuBarSnapshot,
+                               options: MenuBarRenderOptions) -> ComposedValueContent {
+        ComposedValueContent(
+            text: Self.text(v.reading, unit: s.unit, withUnit: v.showUnit, gauge: false), kind: v.reading.kind,
+            showUnit: v.showUnit, symbol: v.symbol, graphic: v.graphic, caption: v.caption,
+            tint: composedTint(for: v.reading, snapshot: s, options: options),
+            fraction: (min(max(v.fraction, 0), 1) * 50).rounded() / 50,
+            spark: v.graphic == .graph ? Self.sparkPoints(v.history, kind: v.reading.kind) : [])
+    }
+
+    private func composedTint(for reading: MenuBarReading, snapshot s: MenuBarSnapshot,
+                              options: MenuBarRenderOptions) -> Double? {
+        guard usesColor(s, options: options), case .temperature(let c, let scale) = reading else { return nil }
+        return (scale.normalized(c) * 50).rounded() / 50
     }
 
     /// Auto-ranged 0…1 points; a minimum span (4 °C, 300 rpm) keeps sensor noise from looking like a trend.
@@ -229,16 +248,17 @@ final class MenuBarLabelRenderer {
         case .temperature(let c, _):
             return gauge ? String(ThermikFormat.degrees(c, unit: unit)) : ThermikFormat.temp(c, unit: unit)
         case .rpm(let rpm):
-            guard rpm > 50 else { return String(localized: "Off") }
-            let rounded = ThermikFormat.rpm((rpm / 10).rounded() * 10)
+            guard let rounded = roundedRPM(rpm) else { return String(localized: "Off") }
             return withUnit ? rounded + "\u{202F}" + ThermikFormat.rpmUnit : rounded
-        case .watts(let w):
-            return ThermikFormat.wattsShort(w)
-        case .unavailable(let k):
-            return k == .none ? "" : "—"
-        case .none:
-            return ""
+        case .watts(let w): return ThermikFormat.wattsShort(w)
+        case .unavailable(let k): return k == .none ? "" : "—"
+        case .none: return ""
         }
+    }
+
+    private static func roundedRPM(_ rpm: Double) -> String? {
+        guard rpm > 50 else { return nil }
+        return ThermikFormat.rpm((rpm / 10).rounded() * 10)
     }
 
     // MARK: Drawing
@@ -260,20 +280,26 @@ final class MenuBarLabelRenderer {
     /// Reserved width of a slot: the widest text its kind can show (monospaced digits → "888°" covers 0…999°).
     private func slotWidth(_ kind: MenuBarReadingKind, font: NSFont, withUnit: Bool, actual: String) -> CGFloat {
         let key = "\(kind)|\(font.pointSize)|\(font.fontName)|\(withUnit)|\(ThermikFormat.rpmUnit)|\(ThermikFormat.wattUnit)"
-        let reserved: CGFloat
-        if let w = widths[key] { reserved = w } else {
-            let templates: [String]
-            switch kind {
-            // Two digits: 100 °C+ (or °F) widens the item once instead of padding every label with an empty column.
-            case .temperature: templates = ["88°"]
-            case .rpm: templates = [withUnit ? "8888\u{202F}" + ThermikFormat.rpmUnit : "8888", String(localized: "Off")]
-            case .watts: templates = ["888" + ThermikFormat.wattUnit]
-            case .none: templates = []
-            }
-            reserved = templates.map { Self.measure($0, font) }.max() ?? 0
-            widths[key] = reserved
-        }
+        if let reserved = widths[key] { return ceil(max(reserved, Self.measure(actual, font))) }
+        let rpm = [withUnit ? "8888\u{202F}" + ThermikFormat.rpmUnit : "8888", String(localized: "Off")]
+        let reserved = reservedWidth(key: key, templates: Self.widthTemplates(kind, rpm: rpm), font: font)
         return ceil(max(reserved, Self.measure(actual, font)))
+    }
+
+    private func reservedWidth(key: String, templates: [String], font: NSFont) -> CGFloat {
+        let reserved = templates.map { Self.measure($0, font) }.max() ?? 0
+        widths[key] = reserved
+        return reserved
+    }
+
+    private static func widthTemplates(_ kind: MenuBarReadingKind, rpm: [String]) -> [String] {
+        // Two digits: 100 °C+ (or °F) widens the item once instead of padding every label with an empty column.
+        switch kind {
+        case .temperature: ["88°"]
+        case .rpm: rpm
+        case .watts: ["888" + ThermikFormat.wattUnit]
+        case .none: []
+        }
     }
 
     private static func measure(_ s: String, _ font: NSFont) -> CGFloat {
@@ -281,409 +307,619 @@ final class MenuBarLabelRenderer {
     }
 
     private func draw(_ c: MenuBarLabelContent, scales: [CGFloat]) -> NSImage {
-        let ramp = ThermikRamp.forSettings(colorBlind: c.colorBlind)
-        let appearance = NSAppearance(named: c.dark ? .darkAqua : .aqua)
-        // Template images are pure alpha masks (AppKit tints them for the menu bar); colour images resolve label colour
-        // and inks for the menu bar's own appearance.
-        let base: NSColor = c.template ? .black : Self.resolved(.labelColor, dark: c.dark)
-        let tint: NSColor = c.tint.map { ramp.nsInk($0, dark: c.dark) } ?? base
-        let stale = c.stale ? "·" : ""
-        let badgeWidth: CGFloat = c.badge == .none ? 0 : Self.badgeColumn
-        let pad: CGFloat = 1
+        DrawingSession(renderer: self, content: c).draw(scales: scales)
+    }
 
-        var ops: [(NSRect) -> Void] = []          // drawing closures in label coordinates (origin bottom-left)
+    @MainActor private final class DrawingSession {
+        typealias Operation = (NSRect) -> Void
+        typealias StackedLines = (top: NSAttributedString, bottom: NSAttributedString, glyph: String?, glyphW: CGFloat, glyphGap: CGFloat)
+
+        static let pad: CGFloat = 1
+        let renderer: MenuBarLabelRenderer
+        let c: MenuBarLabelContent
+        let ramp: ThermikRamp
+        let appearance: NSAppearance?
+        let base: NSColor
+        let tint: NSColor
+        var ops: [Operation] = []          // drawing closures in label coordinates (origin bottom-left)
         var width: CGFloat = 0
+        var stale: String { c.stale ? "·" : "" }
+        var accent: NSColor { c.tint != nil ? tint : base }  // rings, bars and graphs follow the value colour
+        var fraction: Double { c.fraction }
+
+        init(renderer: MenuBarLabelRenderer, content: MenuBarLabelContent) {
+            let ramp = ThermikRamp.forSettings(colorBlind: content.colorBlind)
+            let base: NSColor = content.template ? .black : MenuBarLabelRenderer.resolved(.labelColor, dark: content.dark)
+            self.renderer = renderer
+            self.c = content
+            self.ramp = ramp
+            self.appearance = NSAppearance(named: content.dark ? .darkAqua : .aqua)
+            // Template images are pure alpha masks; colour images resolve label colour and inks for the bar appearance.
+            self.base = base
+            self.tint = content.tint.map { ramp.nsInk($0, dark: content.dark) } ?? base
+        }
+
+        func draw(scales: [CGFloat]) -> NSImage {
+            drawStyle()
+            drawBadge()
+            let size = NSSize(width: ceil(width + 2 * Self.pad), height: MenuBarLabelRenderer.height)
+            let img = NSImage(size: size)
+            for scale in scales { addRepresentation(to: img, size: size, scale: scale) }
+            img.isTemplate = c.template
+            return img
+        }
 
         func text(_ s: String, _ font: NSFont, _ color: NSColor) -> NSAttributedString {
             NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color])
         }
-        /// Text is positioned by its baseline so the digits' cap height — what the eye lines up with the clock — is
-        /// centred, not the line box (whose descender space pushed the old labels up). Half-point steps stay crisp at 2×.
-        func snap(_ v: CGFloat) -> CGFloat { (v * 2).rounded() / 2 }
-        func centredBaseline(_ font: NSFont) -> CGFloat { snap((Self.height - font.capHeight) / 2) }
+
+        /// Text is positioned by its baseline so cap height, not the line box, is centred. Half-point steps stay crisp at 2×.
+        static func snap(_ v: CGFloat) -> CGFloat { (v * 2).rounded() / 2 }
+
+        static func centredBaseline(_ font: NSFont) -> CGFloat {
+            snap((MenuBarLabelRenderer.height - font.capHeight) / 2)
+        }
+
         func put(_ a: NSAttributedString, _ font: NSFont, x: CGFloat, baseline: CGFloat) {
             ops.append { _ in a.draw(at: NSPoint(x: x, y: baseline + font.descender)) }
         }
-        let accent = c.tint != nil ? tint : base       // rings, bars and graphs follow the value colour when coloured
-        let fraction = c.fraction
 
-        /// The common single-line layout: an optional leading accessory, then the primary value centred in its
-        /// reserved slot (the slot, not the text, sets the width, so the item never jitters).
-        func valueAfter(accessory accessoryWidth: CGFloat, gap: CGFloat, _ drawAccessory: ((NSRect) -> Void)? = nil) {
+        /// The common single-line layout: optional accessory, then the value centred in its non-jittering reserved slot.
+        func valueAfter(accessory accessoryWidth: CGFloat, gap: CGFloat, _ drawAccessory: Operation? = nil) {
             let s = c.primaryText + stale
             let a = text(s, Fonts.single, tint)
-            let w = slotWidth(c.primaryKind, font: Fonts.single, withUnit: false, actual: s)
-            let x0 = pad + accessoryWidth + (accessoryWidth > 0 ? gap : 0)
-            width = x0 - pad + w
+            let w = renderer.slotWidth(c.primaryKind, font: Fonts.single, withUnit: false, actual: s)
+            let x0 = Self.pad + accessoryWidth + (accessoryWidth > 0 ? gap : 0)
+            width = x0 - Self.pad + w
             if let drawAccessory { ops.append(drawAccessory) }
-            put(a, Fonts.single, x: x0 + snap((w - a.size().width) / 2), baseline: centredBaseline(Fonts.single))
+            put(a, Fonts.single, x: x0 + Self.snap((w - a.size().width) / 2), baseline: Self.centredBaseline(Fonts.single))
         }
-        func ring(in rect: NSRect, lineWidth: CGFloat) {
+
+        func drawStyle() {
+            switch c.style {
+            case .iconOnly: drawIconOnly()
+            case .temp: valueAfter(accessory: 0, gap: 0)
+            case .iconTemp: drawIconTemp()
+            case .chip: drawChip()
+            case .tempFan: drawTempFan()
+            case .stacked: drawStacked()
+            default: drawAccessoryStyle()
+            }
+        }
+
+        func drawAccessoryStyle() {
+            switch c.style {
+            case .pill: drawPill()
+            case .ringTemp: drawRingTemp()
+            case .bar: drawBar()
+            case .sparkline: drawSparkline()
+            default: drawGaugeOrComposed()
+            }
+        }
+
+        func drawGaugeOrComposed() {
+            switch c.style {
+            case .gauge: drawGauge()
+            case .iconTempFan, .chipTempFan, .flameTempFan, .stackedIcons, .stackedUnits, .tempRPM, .compact, .badgeFan, .ringFan,
+                 .cpuGpu, .cpuGpuStacked, .fanOnly, .custom: drawComposed()
+            default: break
+            }
+        }
+
+        func drawIconOnly() {
+            let glyph = c.alert ? "thermometer.high" : "thermometer.medium"
+            let color = accent, rect = NSRect(x: Self.pad, y: 0, width: 18, height: MenuBarLabelRenderer.height)
+            width = 18
+            ops.append { _ in MenuBarLabelRenderer.drawSymbol(glyph, size: 15, weight: .medium, color: color, in: rect) }
+        }
+
+        func drawIconTemp() {
+            let color = base, rect = NSRect(x: Self.pad, y: 0, width: 11, height: MenuBarLabelRenderer.height)
+            valueAfter(accessory: 11, gap: 2) { _ in
+                MenuBarLabelRenderer.drawSymbol("thermometer.medium", size: 14, weight: .medium, color: color, in: rect)
+            }
+        }
+
+        func drawChip() {
+            let color = base, rect = NSRect(x: Self.pad, y: 0, width: 17, height: MenuBarLabelRenderer.height)
+            valueAfter(accessory: 17, gap: 3) { _ in
+                MenuBarLabelRenderer.drawSymbol("cpu", size: 15, weight: .regular, color: color, in: rect)
+            }
+        }
+
+        func drawTempFan() {
+            valueAfter(accessory: 0, gap: 0)
+            guard c.secondaryKind != .none else { return }
+            drawTempFanSecondary()
+        }
+
+        func drawTempFanSecondary() {
+            let b = text(c.secondaryText, Fonts.single, base)
+            let w2 = renderer.slotWidth(c.secondaryKind, font: Fonts.single, withUnit: false, actual: c.secondaryText)
+            let glyph = MenuBarLabelRenderer.glyph(for: c.secondaryKind) ?? "thermometer.medium"
+            let x0 = Self.pad + width + 6
+            let color = base, rect = NSRect(x: x0, y: 0, width: 13, height: MenuBarLabelRenderer.height)
+            width = x0 - Self.pad + 13 + 2 + w2
+            ops.append { _ in MenuBarLabelRenderer.drawSymbol(glyph, size: 11, weight: .medium, color: color, in: rect) }
+            put(b, Fonts.single, x: x0 + 15 + Self.snap((w2 - b.size().width) / 2), baseline: Self.centredBaseline(Fonts.single))
+        }
+
+        func drawStacked() {
+            // Nothing for the second line: one vertically centred value.
+            guard c.secondaryKind != .none else { valueAfter(accessory: 0, gap: 0); return }
+            drawStackedLines()
+        }
+
+        func prepareStackedLines() -> StackedLines {
+            let top = c.primaryText + stale
+            let a = text(top, Fonts.top, tint), b = text(c.secondaryText, Fonts.bottom, base)
+            // A small glyph names the second line, so no unit is needed.
+            let glyph = MenuBarLabelRenderer.glyph(for: c.secondaryKind)
+            let glyphW: CGFloat = glyph == nil ? 0 : 8.5, glyphGap: CGFloat = glyph == nil ? 0 : 1.5
+            let w1 = renderer.slotWidth(c.primaryKind, font: Fonts.top, withUnit: false, actual: top)
+            let w2 = glyphW + glyphGap + renderer.slotWidth(c.secondaryKind, font: Fonts.bottom, withUnit: false, actual: c.secondaryText)
+            width = max(w1, w2)
+            return (a, b, glyph, glyphW, glyphGap)
+        }
+
+        /// Both cap heights plus the gap form one centred block; each line is centred horizontally.
+        func drawStackedLines() {
+            let lines = prepareStackedLines(), gap: CGFloat = 2.5
+            let block = Fonts.top.capHeight + gap + Fonts.bottom.capHeight
+            let bottom = Self.snap((MenuBarLabelRenderer.height - block) / 2), top = Self.snap(bottom + Fonts.bottom.capHeight + gap)
+            put(lines.top, Fonts.top, x: Self.pad + Self.snap((width - lines.top.size().width) / 2), baseline: top)
+            let lineW = lines.glyphW + lines.glyphGap + lines.bottom.size().width
+            let x2 = Self.pad + Self.snap((width - lineW) / 2)
+            drawStackedGlyph(lines.glyph, x: x2, baseline: bottom, width: lines.glyphW)
+            put(lines.bottom, Fonts.bottom, x: x2 + lines.glyphW + lines.glyphGap, baseline: bottom)
+        }
+
+        func drawStackedGlyph(_ glyph: String?, x: CGFloat, baseline: CGFloat, width: CGFloat) {
+            guard let glyph else { return }
+            let color = base, rect = NSRect(x: x, y: baseline, width: width, height: Fonts.bottom.capHeight)
+            ops.append { _ in MenuBarLabelRenderer.drawSymbol(glyph, size: 7.5, weight: .bold, color: color, in: rect) }
+        }
+
+        /// The value is knocked out of a filled rounded badge, like the input-source badge beside it.
+        func drawPill() {
+            let s = c.primaryText + stale, a = text(s, Fonts.pill, .black)
+            let w = renderer.slotWidth(c.primaryKind, font: Fonts.pill, withUnit: false, actual: s), padX: CGFloat = 5, h: CGFloat = 17
+            let r = NSRect(x: Self.pad, y: Self.snap((MenuBarLabelRenderer.height - h) / 2), width: w + 2 * padX, height: h)
+            let point = NSPoint(x: r.minX + padX + Self.snap((w - a.size().width) / 2),
+                                y: Self.centredBaseline(Fonts.pill) + Fonts.pill.descender)
+            let color = accent
+            width = w + 2 * padX
+            ops.append { _ in Self.drawPillBadge(rect: r, text: a, point: point, color: color) }
+        }
+
+        static func drawPillBadge(rect: NSRect, text: NSAttributedString, point: NSPoint, color: NSColor) {
+            color.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+            text.draw(at: point)
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+        }
+
+        func drawRingTemp() {
+            let d: CGFloat = 15, color = accent, value = fraction
+            let rect = NSRect(x: Self.pad + 1, y: Self.snap((MenuBarLabelRenderer.height - d) / 2) + 1, width: d - 2, height: d - 2)
+            valueAfter(accessory: d, gap: 4) { _ in Self.strokeRing(in: rect, lineWidth: 2, color: color, fraction: value) }
+        }
+
+        /// A vertical level like a tiny battery: filled from the bottom by the value's place on its scale.
+        func drawBar() {
+            let bw: CGFloat = 6, bh: CGFloat = 16, color = accent, value = fraction
+            let rect = NSRect(x: Self.pad + 0.5, y: Self.snap((MenuBarLabelRenderer.height - bh) / 2) + 0.5, width: bw - 1, height: bh - 1)
+            valueAfter(accessory: bw, gap: 4) { _ in Self.drawLevel(in: rect, color: color, fraction: value) }
+        }
+
+        /// The last 5 minutes as a line with a faint area; a flat dim line until two samples exist.
+        func drawSparkline() {
+            let gw: CGFloat = 26, gh: CGFloat = 13, points = c.spark, color = accent
+            let rect = NSRect(x: Self.pad, y: Self.snap((MenuBarLabelRenderer.height - gh) / 2), width: gw, height: gh)
+            valueAfter(accessory: gw, gap: 4) { _ in Self.drawSparklineAccessory(points: points, rect: rect, color: color) }
+        }
+
+        static func drawSparklineAccessory(points: [Double], rect: NSRect, color: NSColor) {
+            let line = sparkPath(in: rect, points: points)
+            guard points.count >= 2 else { strokeFlatSparkline(line, color: color); return }
+            fillSparkArea(line, rect: rect, color: color)
+            strokeSparkline(line, color: color)
+        }
+
+        static func sparkPath(in rect: NSRect, points: [Double]) -> NSBezierPath {
+            guard points.count >= 2 else { return flatSparkPath(in: rect) }
+            let line = NSBezierPath(), step = rect.width / CGFloat(points.count - 1)
+            for (i, p) in points.enumerated() { addSparkPoint(to: line, rect: rect, index: i, point: p, step: step) }
+            return line
+        }
+
+        static func flatSparkPath(in rect: NSRect) -> NSBezierPath {
+            let line = NSBezierPath()
+            line.move(to: NSPoint(x: rect.minX, y: rect.midY))
+            line.line(to: NSPoint(x: rect.maxX, y: rect.midY))
+            return line
+        }
+
+        static func addSparkPoint(to line: NSBezierPath, rect: NSRect, index: Int, point: Double, step: CGFloat) {
+            let pt = NSPoint(x: rect.minX + CGFloat(index) * step, y: rect.minY + 1 + CGFloat(point) * (rect.height - 2))
+            if index == 0 { line.move(to: pt) } else { line.line(to: pt) }
+        }
+
+        static func strokeFlatSparkline(_ line: NSBezierPath, color: NSColor) {
+            line.lineWidth = 1.5
+            color.withAlphaComponent(0.35).setStroke()
+            line.stroke()
+        }
+
+        static func fillSparkArea(_ line: NSBezierPath, rect: NSRect, color: NSColor) {
+            guard let area = line.copy() as? NSBezierPath else { return }
+            area.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+            area.line(to: NSPoint(x: rect.minX, y: rect.minY))
+            area.close()
+            color.withAlphaComponent(0.22).setFill()
+            area.fill()
+        }
+
+        static func strokeSparkline(_ line: NSBezierPath, color: NSColor) {
+            line.lineWidth = 1.5
+            line.lineJoinStyle = .round
+            line.lineCapStyle = .round
+            color.setStroke()
+            line.stroke()
+        }
+
+        static func drawComposedGraph(points: [Double], rect: NSRect, color: NSColor) {
+            let line = sparkPath(in: rect, points: points)
+            let stroke = points.count >= 2 ? color : color.withAlphaComponent(0.35)
+            strokeSparkline(line, color: stroke)
+        }
+
+        static func strokeRing(in rect: NSRect, lineWidth: CGFloat, color: NSColor, fraction: Double) {
+            strokeRingTrack(in: rect, lineWidth: lineWidth, color: color)
+            guard fraction > 0 else { return }
+            strokeRingArc(in: rect, lineWidth: lineWidth, color: color, fraction: fraction)
+        }
+
+        static func strokeRingTrack(in rect: NSRect, lineWidth: CGFloat, color: NSColor) {
             let track = NSBezierPath(ovalIn: rect)
             track.lineWidth = lineWidth
-            accent.withAlphaComponent(0.3).setStroke()
+            color.withAlphaComponent(0.3).setStroke()
             track.stroke()
-            guard fraction > 0 else { return }
+        }
+
+        static func strokeRingArc(in rect: NSRect, lineWidth: CGFloat, color: NSColor, fraction: Double) {
             let arc = NSBezierPath()
             arc.appendArc(withCenter: NSPoint(x: rect.midX, y: rect.midY), radius: rect.width / 2,
                           startAngle: 90, endAngle: 90 - 360 * fraction, clockwise: true)
             arc.lineWidth = lineWidth
             arc.lineCapStyle = .round
-            accent.setStroke()
+            color.setStroke()
             arc.stroke()
         }
 
-        /// Composed labels: values with optional glyph / graphic and caption, in one row or in columns of two rows;
-        /// optionally all knocked out of one rounded badge.
-        func composeLabel(_ L: ComposedLayout, _ items: [ComposedValueContent]) {
-            let stacked = L.layout == .stacked
-            let size: CGFloat = switch (stacked, L.size) {
-            case (false, .small): 11; case (false, .medium): 13; case (false, .large): 14.5
-            case (true, .small): 9.5; case (true, .medium): 10.5; case (true, .large): 11.5
-            }
-            let font = ThermikFont.roundedMonoDigits(size: size, weight: L.bold ? .bold : .medium)
-            let captionFont = ThermikFont.roundedMonoDigits(size: (size * 0.82).rounded(), weight: .semibold)
-            let symbolSize = stacked ? (size * 0.8).rounded() : size
-            let symbolW = (symbolSize * 1.2).rounded()
-            let padX: CGFloat = L.badge ? 5 : 0
-            let cap = font.capHeight
-            let knockout = L.badge
-            func ink(_ it: ComposedValueContent) -> NSColor { it.tint.map { ramp.nsInk($0, dark: c.dark) } ?? base }
-
-            /// One value (glyph/graphic, caption, number) from x0; `baseline` is the number's; nil → centred line.
-            /// Returns the width; draws only when `draw`.
-            func value(_ it: ComposedValueContent, x0: CGFloat, baseline: CGFloat?, draw: Bool) -> CGFloat {
-                var w: CGFloat = 0
-                let valueInk = ink(it), iconInk = L.tintIcons ? valueInk : base
-                let b = baseline ?? centredBaseline(font)
-                let mid = b + cap / 2                                  // vertical centre of the digits
-                if !stacked, it.graphic != .none {
-                    let fraction = it.fraction, spark = it.spark
-                    switch it.graphic {
-                    case .ring:
-                        let d = (cap * 1.9).rounded()
-                        if draw {
-                            let x = x0 + w
-                            ops.append { _ in
-                                let r = NSRect(x: x + 1, y: snap(mid - d / 2) + 1, width: d - 2, height: d - 2)
-                                let track = NSBezierPath(ovalIn: r); track.lineWidth = 2
-                                iconInk.withAlphaComponent(0.3).setStroke(); track.stroke()
-                                guard fraction > 0 else { return }
-                                let arc = NSBezierPath()
-                                arc.appendArc(withCenter: NSPoint(x: r.midX, y: r.midY), radius: r.width / 2,
-                                              startAngle: 90, endAngle: 90 - 360 * fraction, clockwise: true)
-                                arc.lineWidth = 2; arc.lineCapStyle = .round; iconInk.setStroke(); arc.stroke()
-                            }
-                        }
-                        w += d + 4
-                    case .level:
-                        let bw: CGFloat = 6, bh = (cap * 1.9).rounded()
-                        if draw {
-                            let x = x0 + w
-                            ops.append { _ in
-                                let r = NSRect(x: x + 0.5, y: snap(mid - bh / 2) + 0.5, width: bw - 1, height: bh - 1)
-                                let outline = NSBezierPath(roundedRect: r, xRadius: r.width / 2, yRadius: r.width / 2)
-                                outline.lineWidth = 1.1; iconInk.withAlphaComponent(0.55).setStroke(); outline.stroke()
-                                let inner = r.insetBy(dx: 1.5, dy: 1.5)
-                                let f = NSRect(x: inner.minX, y: inner.minY, width: inner.width,
-                                               height: max(inner.height * max(fraction, 0.1), inner.width))
-                                iconInk.setFill(); NSBezierPath(roundedRect: f, xRadius: inner.width / 2, yRadius: inner.width / 2).fill()
-                            }
-                        }
-                        w += bw + 4
-                    case .graph:
-                        let gw: CGFloat = 24, gh = (cap * 1.5).rounded()
-                        if draw {
-                            let x = x0 + w
-                            ops.append { _ in
-                                let r = NSRect(x: x, y: snap(mid - gh / 2), width: gw, height: gh)
-                                let line = NSBezierPath()
-                                if spark.count >= 2 {
-                                    let step = r.width / CGFloat(spark.count - 1)
-                                    for (i, p) in spark.enumerated() {
-                                        let pt = NSPoint(x: r.minX + CGFloat(i) * step, y: r.minY + 1 + CGFloat(p) * (r.height - 2))
-                                        if i == 0 { line.move(to: pt) } else { line.line(to: pt) }
-                                    }
-                                } else {
-                                    line.move(to: NSPoint(x: r.minX, y: r.midY)); line.line(to: NSPoint(x: r.maxX, y: r.midY))
-                                }
-                                line.lineWidth = 1.5; line.lineJoinStyle = .round; line.lineCapStyle = .round
-                                (spark.count >= 2 ? iconInk : iconInk.withAlphaComponent(0.35)).setStroke(); line.stroke()
-                            }
-                        }
-                        w += gw + 4
-                    default: break
-                    }
-                } else if let symbol = it.symbol {
-                    if draw {
-                        let x = x0 + w
-                        ops.append { _ in
-                            Self.drawSymbol(symbol, size: symbolSize, weight: L.bold ? .semibold : .medium, color: iconInk,
-                                            in: NSRect(x: x, y: snap(mid - symbolW / 2), width: symbolW, height: symbolW),
-                                            knockout: knockout)
-                        }
-                    }
-                    w += symbolW + (stacked ? 1.5 : 2)
-                }
-                if !it.caption.isEmpty {
-                    let a = text(it.caption, captionFont, base.withAlphaComponent(knockout ? 1 : 0.72))
-                    if draw { put(a, captionFont, x: x0 + w, baseline: b) }
-                    w += ceil(a.size().width) + 3
-                }
-                let v = text(it.text, font, valueInk)
-                let slot = slotWidth(it.kind, font: font, withUnit: it.showUnit, actual: it.text)
-                if draw { put(v, font, x: x0 + w + snap((slot - v.size().width) / 2), baseline: b) }
-                return w + slot
-            }
-            /// Gap (and mark) between two values or columns; returns its width.
-            func separator(at x: CGFloat, draw: Bool) -> CGFloat {
-                switch L.separator {
-                case .space:
-                    return 7
-                case .dot:
-                    let dot = text("·", font, base.withAlphaComponent(knockout ? 1 : 0.6))
-                    if draw { put(dot, font, x: x + 2.5, baseline: centredBaseline(font)) }
-                    return ceil(dot.size().width) + 5
-                case .bar:
-                    let h = stacked ? Self.height - 6 : (cap * 1.6).rounded()
-                    if draw {
-                        ops.append { _ in
-                            let r = NSRect(x: x + 4.5, y: snap((Self.height - h) / 2), width: 1, height: h)
-                            base.withAlphaComponent(knockout ? 1 : 0.4).setFill(); r.fill()
-                        }
-                    }
-                    return 10
-                }
-            }
-
-            let firstOp = ops.count
-            var x = pad + padX
-            if stacked {
-                // Columns of two: values 1 over 2, 3 over 4. Both lines use the same font; each is centred in its column.
-                let gap: CGFloat = 2.5
-                let bottomBaseline = snap((Self.height - (2 * cap + gap)) / 2)
-                let topBaseline = snap(bottomBaseline + cap + gap)
-                for (col, start) in stride(from: 0, to: items.count, by: 2).enumerated() {
-                    if col > 0 { x += separator(at: x, draw: true) }
-                    let top = items[start], bottom = start + 1 < items.count ? items[start + 1] : nil
-                    let wTop = value(top, x0: 0, baseline: topBaseline, draw: false)
-                    let wBottom = bottom.map { value($0, x0: 0, baseline: bottomBaseline, draw: false) } ?? 0
-                    let colW = max(wTop, wBottom)
-                    if let bottom {
-                        _ = value(top, x0: x + snap((colW - wTop) / 2), baseline: topBaseline, draw: true)
-                        _ = value(bottom, x0: x + snap((colW - wBottom) / 2), baseline: bottomBaseline, draw: true)
-                    } else {
-                        _ = value(top, x0: x, baseline: nil, draw: true)          // a lone value sits on the centre line
-                    }
-                    x += colW
-                }
-            } else {
-                for (i, it) in items.enumerated() {
-                    if i > 0 { x += separator(at: x, draw: true) }
-                    x += value(it, x0: x, baseline: nil, draw: true)
-                }
-            }
-            width = x - pad + padX
-            guard L.badge else { return }
-            // Badge: fill first, then everything drawn so far cuts its shape out of the fill.
-            let badgeW = width, h: CGFloat = stacked ? 21 : 17
-            let fill = c.composed.first(where: { $0.tint != nil }).flatMap { $0.tint }.map { ramp.nsInk($0, dark: c.dark) } ?? base
-            ops.insert({ _ in
-                fill.setFill()
-                NSBezierPath(roundedRect: NSRect(x: pad, y: snap((Self.height - h) / 2), width: badgeW, height: h),
-                             xRadius: 5, yRadius: 5).fill()
-                NSGraphicsContext.current?.compositingOperation = .destinationOut
-            }, at: firstOp)
-            ops.append { _ in NSGraphicsContext.current?.compositingOperation = .sourceOver }
+        static func drawLevel(in rect: NSRect, color: NSColor, fraction: Double) {
+            strokeLevelOutline(in: rect, color: color)
+            fillLevel(in: rect, color: color, fraction: fraction)
         }
 
-        switch c.style {
-        case .iconOnly:
-            let glyph = c.alert ? "thermometer.high" : "thermometer.medium"
-            width = 18
-            ops.append { _ in Self.drawSymbol(glyph, size: 15, weight: .medium, color: accent, in: NSRect(x: pad, y: 0, width: 18, height: Self.height)) }
+        static func strokeLevelOutline(in rect: NSRect, color: NSColor) {
+            let outline = NSBezierPath(roundedRect: rect, xRadius: rect.width / 2, yRadius: rect.width / 2)
+            outline.lineWidth = 1.1
+            color.withAlphaComponent(0.55).setStroke()
+            outline.stroke()
+        }
 
-        case .temp:
-            valueAfter(accessory: 0, gap: 0)
+        static func fillLevel(in rect: NSRect, color: NSColor, fraction: Double) {
+            let inner = rect.insetBy(dx: 1.5, dy: 1.5)
+            let fill = NSRect(x: inner.minX, y: inner.minY, width: inner.width,
+                              height: max(inner.height * max(fraction, 0.1), inner.width))
+            color.setFill()
+            NSBezierPath(roundedRect: fill, xRadius: inner.width / 2, yRadius: inner.width / 2).fill()
+        }
 
-        case .iconTemp:
-            valueAfter(accessory: 11, gap: 2) { _ in
-                Self.drawSymbol("thermometer.medium", size: 14, weight: .medium, color: base,
-                                in: NSRect(x: pad, y: 0, width: 11, height: Self.height))
-            }
-
-        case .chip:
-            valueAfter(accessory: 17, gap: 3) { _ in
-                Self.drawSymbol("cpu", size: 15, weight: .regular, color: base, in: NSRect(x: pad, y: 0, width: 17, height: Self.height))
-            }
-
-        case .tempFan:
-            valueAfter(accessory: 0, gap: 0)
-            if c.secondaryKind != .none {
-                let b = text(c.secondaryText, Fonts.single, base)
-                let w2 = slotWidth(c.secondaryKind, font: Fonts.single, withUnit: false, actual: c.secondaryText)
-                let glyph = Self.glyph(for: c.secondaryKind) ?? "thermometer.medium"
-                let x0 = pad + width + 6
-                width = x0 - pad + 13 + 2 + w2
-                ops.append { _ in Self.drawSymbol(glyph, size: 11, weight: .medium, color: base,
-                                                  in: NSRect(x: x0, y: 0, width: 13, height: Self.height)) }
-                put(b, Fonts.single, x: x0 + 15 + snap((w2 - b.size().width) / 2), baseline: centredBaseline(Fonts.single))
-            }
-
-        case .stacked:
-            if c.secondaryKind == .none {
-                // Nothing for the second line (fanless, or secondary = none): one vertically centred value.
-                valueAfter(accessory: 0, gap: 0)
-            } else {
-                let top = c.primaryText + stale
-                let a = text(top, Fonts.top, tint)
-                let b = text(c.secondaryText, Fonts.bottom, base)
-                // Second line: a small glyph says what the number is (fan / power), so no unit is needed.
-                let glyph = Self.glyph(for: c.secondaryKind)
-                let glyphW: CGFloat = glyph == nil ? 0 : 8.5, glyphGap: CGFloat = glyph == nil ? 0 : 1.5
-                let w1 = slotWidth(c.primaryKind, font: Fonts.top, withUnit: false, actual: top)
-                let w2 = glyphW + glyphGap + slotWidth(c.secondaryKind, font: Fonts.bottom, withUnit: false, actual: c.secondaryText)
-                width = max(w1, w2)
-                // Both cap heights plus the gap form one block centred in the item; each line is centred horizontally.
-                let gap: CGFloat = 2.5
-                let block = Fonts.top.capHeight + gap + Fonts.bottom.capHeight
-                let bottomBaseline = snap((Self.height - block) / 2)
-                let topBaseline = snap(bottomBaseline + Fonts.bottom.capHeight + gap)
-                put(a, Fonts.top, x: pad + snap((width - a.size().width) / 2), baseline: topBaseline)
-                let lineW = glyphW + glyphGap + b.size().width
-                let x2 = pad + snap((width - lineW) / 2)
-                if let glyph {
-                    let capH = Fonts.bottom.capHeight
-                    ops.append { _ in Self.drawSymbol(glyph, size: 7.5, weight: .bold, color: base,
-                                                      in: NSRect(x: x2, y: bottomBaseline, width: glyphW, height: capH)) }
-                }
-                put(b, Fonts.bottom, x: x2 + glyphW + glyphGap, baseline: bottomBaseline)
-            }
-
-        case .pill:
-            // The value is knocked out of a filled rounded badge, like the input-source badge («РУ») beside it.
-            let s = c.primaryText + stale
-            let a = text(s, Fonts.pill, .black)
-            let w = slotWidth(c.primaryKind, font: Fonts.pill, withUnit: false, actual: s)
-            let padX: CGFloat = 5, h: CGFloat = 17
-            width = w + 2 * padX
-            let baseline = centredBaseline(Fonts.pill), descender = Fonts.pill.descender
-            ops.append { _ in
-                let r = NSRect(x: pad, y: snap((Self.height - h) / 2), width: w + 2 * padX, height: h)
-                accent.setFill()
-                NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5).fill()
-                NSGraphicsContext.current?.compositingOperation = .destinationOut
-                a.draw(at: NSPoint(x: r.minX + padX + snap((w - a.size().width) / 2), y: baseline + descender))
-                NSGraphicsContext.current?.compositingOperation = .sourceOver
-            }
-
-        case .ringTemp:
-            let d: CGFloat = 15
-            valueAfter(accessory: d, gap: 4) { _ in
-                ring(in: NSRect(x: pad + 1, y: snap((Self.height - d) / 2) + 1, width: d - 2, height: d - 2), lineWidth: 2)
-            }
-
-        case .bar:
-            // A vertical level like a tiny battery: filled from the bottom by the value's place on its scale.
-            let bw: CGFloat = 6, bh: CGFloat = 16
-            valueAfter(accessory: bw, gap: 4) { _ in
-                let r = NSRect(x: pad + 0.5, y: snap((Self.height - bh) / 2) + 0.5, width: bw - 1, height: bh - 1)
-                let outline = NSBezierPath(roundedRect: r, xRadius: r.width / 2, yRadius: r.width / 2)
-                outline.lineWidth = 1.1
-                accent.withAlphaComponent(0.55).setStroke()
-                outline.stroke()
-                let inner = r.insetBy(dx: 1.5, dy: 1.5)
-                let fill = NSRect(x: inner.minX, y: inner.minY, width: inner.width,
-                                  height: max(inner.height * max(fraction, 0.1), inner.width))
-                accent.setFill()
-                NSBezierPath(roundedRect: fill, xRadius: inner.width / 2, yRadius: inner.width / 2).fill()
-            }
-
-        case .sparkline:
-            // The last 5 minutes as a line with a faint area under it; a flat dim line until two samples exist.
-            let gw: CGFloat = 26, gh: CGFloat = 13
-            let points = c.spark
-            valueAfter(accessory: gw, gap: 4) { _ in
-                let r = NSRect(x: pad, y: snap((Self.height - gh) / 2), width: gw, height: gh)
-                guard points.count >= 2 else {
-                    let flat = NSBezierPath()
-                    flat.move(to: NSPoint(x: r.minX, y: r.midY)); flat.line(to: NSPoint(x: r.maxX, y: r.midY))
-                    flat.lineWidth = 1.5
-                    accent.withAlphaComponent(0.35).setStroke()
-                    flat.stroke()
-                    return
-                }
-                let step = r.width / CGFloat(points.count - 1)
-                let line = NSBezierPath()
-                for (i, p) in points.enumerated() {
-                    let pt = NSPoint(x: r.minX + CGFloat(i) * step, y: r.minY + 1 + CGFloat(p) * (r.height - 2))
-                    if i == 0 { line.move(to: pt) } else { line.line(to: pt) }
-                }
-                if let area = line.copy() as? NSBezierPath {
-                    area.line(to: NSPoint(x: r.maxX, y: r.minY)); area.line(to: NSPoint(x: r.minX, y: r.minY)); area.close()
-                    accent.withAlphaComponent(0.22).setFill()
-                    area.fill()
-                }
-                line.lineWidth = 1.5
-                line.lineJoinStyle = .round
-                line.lineCapStyle = .round
-                accent.setStroke()
-                line.stroke()
-            }
-
-        case .iconTempFan, .chipTempFan, .flameTempFan, .stackedIcons, .stackedUnits, .tempRPM, .compact, .badgeFan, .ringFan,
-             .cpuGpu, .cpuGpuStacked, .fanOnly, .custom:
-            guard let L = c.composedLayout, !c.composed.isEmpty else { valueAfter(accessory: 0, gap: 0); break }
-            composeLabel(L, c.composed)
-
-        case .gauge:
-            let d: CGFloat = 20
-            let font = c.primaryText.count > 2 ? Fonts.gaugeSmall : Fonts.gauge
-            let a = text(c.primaryText, font, base)
+        func drawGauge() {
+            let d: CGFloat = 20, font = c.primaryText.count > 2 ? Fonts.gaugeSmall : Fonts.gauge
+            let a = text(c.primaryText, font, base), color = accent, value = fraction
+            let rect = NSRect(x: Self.pad + 1, y: Self.snap((MenuBarLabelRenderer.height - d) / 2) + 1, width: d - 2, height: d - 2)
             width = d + (stale.isEmpty ? 0 : 4)
-            ops.append { _ in
-                ring(in: NSRect(x: pad + 1, y: snap((Self.height - d) / 2) + 1, width: d - 2, height: d - 2), lineWidth: 2.2)
-            }
-            put(a, font, x: pad + snap((d - a.size().width) / 2), baseline: centredBaseline(font))
-            if !stale.isEmpty {
-                put(text(stale, Fonts.single, base), Fonts.single, x: pad + d, baseline: centredBaseline(Fonts.single))
-            }
+            ops.append { _ in Self.strokeRing(in: rect, lineWidth: 2.2, color: color, fraction: value) }
+            put(a, font, x: Self.pad + Self.snap((d - a.size().width) / 2), baseline: Self.centredBaseline(font))
+            guard !stale.isEmpty else { return }
+            put(text(stale, Fonts.single, base), Fonts.single, x: Self.pad + d, baseline: Self.centredBaseline(Fonts.single))
         }
 
-        if c.badge != .none {
-            let x = pad + width + 1
+        func drawComposed() {
+            guard let layout = c.composedLayout, !c.composed.isEmpty else { valueAfter(accessory: 0, gap: 0); return }
+            ComposedDrawing(session: self, layout: layout, items: c.composed).draw()
+        }
+
+        func drawBadge() {
+            guard c.badge != .none else { return }
+            let x = Self.pad + width + 1
             let (glyph, color): (String, NSColor) = c.badge == .safety
                 ? ("exclamationmark.circle.fill", ramp.nsInk(1, dark: c.dark))
-                : ("diamond.fill", Self.resolved(.controlAccentColor, dark: c.dark))
+                : ("diamond.fill", MenuBarLabelRenderer.resolved(.controlAccentColor, dark: c.dark))
             let size: CGFloat = c.badge == .safety ? 7 : 6
-            ops.append { _ in Self.drawSymbol(glyph, size: size, weight: .bold, color: color,
-                                              in: NSRect(x: x, y: Self.height - 9, width: 6, height: 7)) }
-            width += badgeWidth
+            let rect = NSRect(x: x, y: MenuBarLabelRenderer.height - 9, width: 6, height: 7)
+            ops.append { _ in MenuBarLabelRenderer.drawSymbol(glyph, size: size, weight: .bold, color: color, in: rect) }
+            width += MenuBarLabelRenderer.badgeColumn
         }
 
-        let size = NSSize(width: ceil(width + 2 * pad), height: Self.height)
-        let img = NSImage(size: size)
-        for scale in scales {
+        func addRepresentation(to img: NSImage, size: NSSize, scale: CGFloat) {
+            guard let rep = Self.bitmapRep(size: size, scale: scale), render(into: rep, size: size) else { return }
+            img.addRepresentation(rep)
+        }
+
+        static func bitmapRep(size: NSSize, scale: CGFloat) -> NSBitmapImageRep? {
             guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int((size.width * scale).rounded(.up)),
                                              pixelsHigh: Int((size.height * scale).rounded(.up)), bitsPerSample: 8,
                                              samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
-                                             bytesPerRow: 0, bitsPerPixel: 0) else { continue }
-            // The point size must be set BEFORE the context is made: the context takes its user space from it. Set
-            // afterwards, a 2× rep was drawn in pixel units — the label came out half-size in the bottom-left corner.
+                                             bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+            // Set the point size BEFORE creating the context, or a 2× rep draws half-size in the bottom-left corner.
             rep.size = size
-            guard let ctx = NSGraphicsContext(bitmapImageRep: rep) else { continue }
+            return rep
+        }
+
+        func render(into rep: NSBitmapImageRep, size: NSSize) -> Bool {
+            guard let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return false }
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = ctx
             ctx.imageInterpolation = .high
-            let rect = NSRect(origin: .zero, size: size)
-            if let appearance { appearance.performAsCurrentDrawingAppearance { ops.forEach { $0(rect) } } }
-            else { ops.forEach { $0(rect) } }
+            performDrawing(in: NSRect(origin: .zero, size: size))
             ctx.flushGraphics()
             NSGraphicsContext.restoreGraphicsState()
-            img.addRepresentation(rep)
+            return true
         }
-        img.isTemplate = c.template
-        return img
+
+        func performDrawing(in rect: NSRect) {
+            let operations = ops
+            if let appearance { appearance.performAsCurrentDrawingAppearance { operations.forEach { $0(rect) } } }
+            else { operations.forEach { $0(rect) } }
+        }
+    }
+
+    /// Composed labels: values with optional glyph / graphic and caption, in one row or columns of two rows;
+    /// optionally all knocked out of one rounded badge. Measurement and drawing are separate named operations.
+    @MainActor private final class ComposedDrawing {
+        typealias Baselines = (top: CGFloat, bottom: CGFloat)
+
+        struct ValueLayout {
+            var accessory: CGFloat
+            var caption: CGFloat
+            var slot: CGFloat
+            var baseline: CGFloat
+            var mid: CGFloat
+            var width: CGFloat { accessory + caption + slot }
+        }
+
+        let session: DrawingSession
+        let layout: ComposedLayout
+        let items: [ComposedValueContent]
+        let font: NSFont
+        let captionFont: NSFont
+        let symbolSize: CGFloat
+        var stacked: Bool { layout.layout == .stacked }
+        var symbolW: CGFloat { (symbolSize * 1.2).rounded() }
+        var padX: CGFloat { layout.badge ? 5 : 0 }
+        var cap: CGFloat { font.capHeight }
+        var knockout: Bool { layout.badge }
+
+        init(session: DrawingSession, layout: ComposedLayout, items: [ComposedValueContent]) {
+            let size = Self.fontSize(for: layout)
+            self.session = session
+            self.layout = layout
+            self.items = items
+            self.font = ThermikFont.roundedMonoDigits(size: size, weight: layout.bold ? .bold : .medium)
+            self.captionFont = ThermikFont.roundedMonoDigits(size: (size * 0.82).rounded(), weight: .semibold)
+            self.symbolSize = layout.layout == .stacked ? (size * 0.8).rounded() : size
+        }
+
+        static func fontSize(for layout: ComposedLayout) -> CGFloat {
+            switch (layout.layout == .stacked, layout.size) {
+            case (false, .small): 11; case (false, .medium): 13; case (false, .large): 14.5
+            case (true, .small): 9.5; case (true, .medium): 10.5; case (true, .large): 11.5
+            }
+        }
+
+        func draw() {
+            let firstOp = session.ops.count
+            var x = DrawingSession.pad + padX
+            if stacked { x = drawStackedItems(from: x) } else { x = drawRowItems(from: x) }
+            session.width = x - DrawingSession.pad + padX
+            addBadge(firstOp: firstOp)
+        }
+
+        func drawRowItems(from start: CGFloat) -> CGFloat {
+            var x = start
+            for (i, item) in items.enumerated() {
+                if i > 0 { x += separator(at: x) }
+                x += drawValue(item, x0: x, baseline: nil)
+            }
+            return x
+        }
+
+        /// Columns of two: values 1 over 2, 3 over 4. Both lines use the same font and are centred in their column.
+        func drawStackedItems(from start: CGFloat) -> CGFloat {
+            var x = start
+            let baselines = stackedBaselines()
+            for (col, start) in stride(from: 0, to: items.count, by: 2).enumerated() {
+                if col > 0 { x += separator(at: x) }
+                x += drawStackedColumn(at: x, start: start, baselines: baselines)
+            }
+            return x
+        }
+
+        func stackedBaselines() -> Baselines {
+            let gap: CGFloat = 2.5
+            let bottom = DrawingSession.snap((MenuBarLabelRenderer.height - (2 * cap + gap)) / 2)
+            return (DrawingSession.snap(bottom + cap + gap), bottom)
+        }
+
+        func drawStackedColumn(at x: CGFloat, start: Int, baselines: Baselines) -> CGFloat {
+            let top = items[start], bottom = start + 1 < items.count ? items[start + 1] : nil
+            let wTop = measureValue(top, baseline: baselines.top)
+            let wBottom = bottom.map { measureValue($0, baseline: baselines.bottom) } ?? 0
+            let columnWidth = max(wTop, wBottom)
+            drawStackedValues(top: top, bottom: bottom, x: x, columnWidth: columnWidth, widths: (wTop, wBottom), baselines: baselines)
+            return columnWidth
+        }
+
+        func drawStackedValues(top: ComposedValueContent, bottom: ComposedValueContent?, x: CGFloat, columnWidth: CGFloat,
+                               widths: (top: CGFloat, bottom: CGFloat), baselines: Baselines) {
+            guard let bottom else { drawValue(top, x0: x, baseline: nil); return }  // a lone value sits on the centre line
+            drawValue(top, x0: x + DrawingSession.snap((columnWidth - widths.top) / 2), baseline: baselines.top)
+            drawValue(bottom, x0: x + DrawingSession.snap((columnWidth - widths.bottom) / 2), baseline: baselines.bottom)
+        }
+
+        func measureValue(_ item: ComposedValueContent, baseline: CGFloat?) -> CGFloat {
+            valueLayout(item, baseline: baseline).width
+        }
+
+        /// One value's glyph/graphic, caption and number widths; `mid` is the vertical centre of the digits.
+        func valueLayout(_ item: ComposedValueContent, baseline: CGFloat?) -> ValueLayout {
+            let accessory = accessoryWidth(for: item), caption = captionWidth(for: item)
+            let slot = session.renderer.slotWidth(item.kind, font: font, withUnit: item.showUnit, actual: item.text)
+            let baseline = baseline ?? DrawingSession.centredBaseline(font)
+            return ValueLayout(accessory: accessory, caption: caption, slot: slot, baseline: baseline, mid: baseline + cap / 2)
+        }
+
+        func accessoryWidth(for item: ComposedValueContent) -> CGFloat {
+            guard !stacked, item.graphic != .none else { return symbolWidth(for: item) }
+            return graphicWidth(for: item.graphic)
+        }
+
+        func symbolWidth(for item: ComposedValueContent) -> CGFloat {
+            guard item.symbol != nil else { return 0 }
+            return symbolW + (stacked ? 1.5 : 2)
+        }
+
+        func graphicWidth(for graphic: MenuBarIcon) -> CGFloat {
+            switch graphic {
+            case .ring: (cap * 1.9).rounded() + 4
+            case .level: 10
+            case .graph: 28
+            default: 0
+            }
+        }
+
+        func captionWidth(for item: ComposedValueContent) -> CGFloat {
+            guard !item.caption.isEmpty else { return 0 }
+            let a = session.text(item.caption, captionFont, session.base.withAlphaComponent(knockout ? 1 : 0.72))
+            return ceil(a.size().width) + 3
+        }
+
+        @discardableResult
+        func drawValue(_ item: ComposedValueContent, x0: CGFloat, baseline: CGFloat?) -> CGFloat {
+            let metrics = valueLayout(item, baseline: baseline)
+            let valueInk = ink(item), iconInk = layout.tintIcons ? valueInk : session.base
+            drawAccessory(item, metrics: metrics, x0: x0, color: iconInk)
+            drawCaption(item, metrics: metrics, x0: x0)
+            drawValueText(item, metrics: metrics, x0: x0, color: valueInk)
+            return metrics.width
+        }
+
+        func ink(_ item: ComposedValueContent) -> NSColor {
+            item.tint.map { session.ramp.nsInk($0, dark: session.c.dark) } ?? session.base
+        }
+
+        func drawAccessory(_ item: ComposedValueContent, metrics: ValueLayout, x0: CGFloat, color: NSColor) {
+            if !stacked, item.graphic != .none { drawGraphic(item, metrics: metrics, x0: x0, color: color); return }
+            guard let symbol = item.symbol else { return }
+            drawSymbolAccessory(symbol, metrics: metrics, x0: x0, color: color)
+        }
+
+        func drawGraphic(_ item: ComposedValueContent, metrics: ValueLayout, x0: CGFloat, color: NSColor) {
+            switch item.graphic {
+            case .ring: drawRingGraphic(item, metrics: metrics, x0: x0, color: color)
+            case .level: drawLevelGraphic(item, metrics: metrics, x0: x0, color: color)
+            case .graph: drawGraphGraphic(item, metrics: metrics, x0: x0, color: color)
+            default: break
+            }
+        }
+
+        func drawRingGraphic(_ item: ComposedValueContent, metrics: ValueLayout, x0: CGFloat, color: NSColor) {
+            let d = (cap * 1.9).rounded(), value = item.fraction
+            let rect = NSRect(x: x0 + 1, y: DrawingSession.snap(metrics.mid - d / 2) + 1, width: d - 2, height: d - 2)
+            session.ops.append { _ in DrawingSession.strokeRing(in: rect, lineWidth: 2, color: color, fraction: value) }
+        }
+
+        func drawLevelGraphic(_ item: ComposedValueContent, metrics: ValueLayout, x0: CGFloat, color: NSColor) {
+            let bw: CGFloat = 6, bh = (cap * 1.9).rounded(), value = item.fraction
+            let rect = NSRect(x: x0 + 0.5, y: DrawingSession.snap(metrics.mid - bh / 2) + 0.5, width: bw - 1, height: bh - 1)
+            session.ops.append { _ in DrawingSession.drawLevel(in: rect, color: color, fraction: value) }
+        }
+
+        func drawGraphGraphic(_ item: ComposedValueContent, metrics: ValueLayout, x0: CGFloat, color: NSColor) {
+            let gw: CGFloat = 24, gh = (cap * 1.5).rounded(), points = item.spark
+            let rect = NSRect(x: x0, y: DrawingSession.snap(metrics.mid - gh / 2), width: gw, height: gh)
+            session.ops.append { _ in DrawingSession.drawComposedGraph(points: points, rect: rect, color: color) }
+        }
+
+        func drawSymbolAccessory(_ symbol: String, metrics: ValueLayout, x0: CGFloat, color: NSColor) {
+            let rect = NSRect(x: x0, y: DrawingSession.snap(metrics.mid - symbolW / 2), width: symbolW, height: symbolW)
+            let weight: NSFont.Weight = layout.bold ? .semibold : .medium, cutsOut = knockout, size = symbolSize
+            session.ops.append { _ in
+                MenuBarLabelRenderer.drawSymbol(symbol, size: size, weight: weight, color: color, in: rect, knockout: cutsOut)
+            }
+        }
+
+        func drawCaption(_ item: ComposedValueContent, metrics: ValueLayout, x0: CGFloat) {
+            guard !item.caption.isEmpty else { return }
+            let a = session.text(item.caption, captionFont, session.base.withAlphaComponent(knockout ? 1 : 0.72))
+            session.put(a, captionFont, x: x0 + metrics.accessory, baseline: metrics.baseline)
+        }
+
+        func drawValueText(_ item: ComposedValueContent, metrics: ValueLayout, x0: CGFloat, color: NSColor) {
+            let value = session.text(item.text, font, color)
+            let x = x0 + metrics.accessory + metrics.caption + DrawingSession.snap((metrics.slot - value.size().width) / 2)
+            session.put(value, font, x: x, baseline: metrics.baseline)
+        }
+
+        /// Gap (and mark) between two values or columns; returns its width.
+        func separator(at x: CGFloat) -> CGFloat {
+            switch layout.separator {
+            case .space: 7
+            case .dot: dotSeparator(at: x)
+            case .bar: barSeparator(at: x)
+            }
+        }
+
+        func dotSeparator(at x: CGFloat) -> CGFloat {
+            let dot = session.text("·", font, session.base.withAlphaComponent(knockout ? 1 : 0.6))
+            session.put(dot, font, x: x + 2.5, baseline: DrawingSession.centredBaseline(font))
+            return ceil(dot.size().width) + 5
+        }
+
+        func barSeparator(at x: CGFloat) -> CGFloat {
+            let h = stacked ? MenuBarLabelRenderer.height - 6 : (cap * 1.6).rounded()
+            let rect = NSRect(x: x + 4.5, y: DrawingSession.snap((MenuBarLabelRenderer.height - h) / 2), width: 1, height: h)
+            let color = session.base.withAlphaComponent(knockout ? 1 : 0.4)
+            session.ops.append { _ in color.setFill(); rect.fill() }
+            return 10
+        }
+
+        /// Badge fill is inserted first; all following value operations cut their shapes out of it.
+        func addBadge(firstOp: Int) {
+            guard layout.badge else { return }
+            let h: CGFloat = stacked ? 21 : 17
+            let fill = session.c.composed.first(where: { $0.tint != nil }).flatMap { $0.tint }
+                .map { session.ramp.nsInk($0, dark: session.c.dark) } ?? session.base
+            let rect = NSRect(x: DrawingSession.pad, y: DrawingSession.snap((MenuBarLabelRenderer.height - h) / 2),
+                              width: session.width, height: h)
+            session.ops.insert({ _ in Self.drawBadge(rect: rect, color: fill) }, at: firstOp)
+            session.ops.append { _ in Self.restoreSourceOver() }
+        }
+
+        static func drawBadge(rect: NSRect, color: NSColor) {
+            color.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+        }
+
+        static func restoreSourceOver() {
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+        }
     }
 
     /// Glyph that names a secondary reading (the unit is dropped next to it).

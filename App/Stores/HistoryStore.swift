@@ -48,37 +48,68 @@ import ThermikCore
     /// Runs after SensorStore and SystemStore (SPEC §2.3.3): sensor and aggregate values are this tick's smoothed
     /// ones. Fan values come from the frame itself (FanStore consumes after this store).
     func consume(_ tick: Tick) {
-        let t = tick.date
-        if let sensors {
-            for id in tick.sensors.values.keys {                     // valid this tick only: gaps stay gaps
-                guard let live = sensors.sensor(id), let v = live.value else { continue }
-                record(.sensor(id), v, at: t, long: live.isPinned)
-            }
-            for (kind, v) in sensors.aggregates.values { record(.aggregate(kind), v, at: t, long: true) }
-        }
-        if let fanState = tick.sensors.fans {
-            for f in fanState.fans {
-                record(.fanRPM(f.index), f.actualRPM, at: t, long: true)
-                record(.fanTarget(f.index), f.targetRPM, at: t, long: true)
-            }
-        }
-        let p = tick.sensors.power
-        if let w = p.systemTotalW { record(.power(.systemTotal), w, at: t, long: true) }
-        if let w = p.dcInW { record(.power(.dcIn), w, at: t, long: true) }
-        if let w = p.batteryW { record(.power(.battery), w, at: t, long: true) }
-        if let w = p.socW { record(.power(.soc), w, at: t, long: true) }
-        if let s = tick.system {
-            if s.cpuLoad != nil, let u = s.cpuTotalPercent { record(.cpuUsage, u, at: t, long: true) }
-            if let g = s.gpu?.devicePercent { record(.gpuUsage, Double(g), at: t, long: true) }
-            if let w = s.soc?.power.cpuW { record(.power(.cpu), w, at: t, long: true) }
-            if let w = s.soc?.power.gpuW { record(.power(.gpu), w, at: t, long: true) }
-            record(.pressure, Double(s.pressure.rawValue), at: t, long: true)
-        }
+        recordSensors(tick)
+        recordFans(tick)
+        recordPower(tick.sensors.power, at: tick.date)
+        if let system = tick.system { recordSystem(system, at: tick.date) }
         revision &+= 1
-        let sinceSparkline = t.timeIntervalSince(sparklineBumpedAt)
-        if sinceSparkline >= Tier.sparklineRefresh || sinceSparkline < 0 { sparklineRevision &+= 1; sparklineBumpedAt = t }
-        let sinceLong = t.timeIntervalSince(longWindowBumpedAt)
-        if sinceLong >= Tier.longWindowRefresh || sinceLong < 0 { longWindowRevision &+= 1; longWindowBumpedAt = t }
+        bumpChartRevisions(at: tick.date)
+    }
+
+    private func recordSensors(_ tick: Tick) {
+        guard let sensors else { return }
+        for id in tick.sensors.values.keys {                     // valid this tick only: gaps stay gaps
+            guard let live = sensors.sensor(id), let value = live.value else { continue }
+            recordSensor(live, value: value, at: tick.date)
+        }
+        for (kind, value) in sensors.aggregates.values { recordLong(.aggregate(kind), value, at: tick.date) }
+    }
+
+    private func recordSensor(_ sensor: LiveSensor, value: Double, at date: Date) {
+        let capacity = sensor.isPinned ? Tier.longBucketCapacity : Tier.shortBucketCapacity
+        record(.sensor(sensor.id), value, at: date, bucketCapacity: capacity)
+    }
+
+    private func recordFans(_ tick: Tick) {
+        guard let state = tick.sensors.fans else { return }
+        for fan in state.fans {
+            recordLong(.fanRPM(fan.index), fan.actualRPM, at: tick.date)
+            recordLong(.fanTarget(fan.index), fan.targetRPM, at: tick.date)
+        }
+    }
+
+    private func recordPower(_ power: PowerValues, at date: Date) {
+        if let value = power.systemTotalW { recordLong(.power(.systemTotal), value, at: date) }
+        if let value = power.dcInW { recordLong(.power(.dcIn), value, at: date) }
+        if let value = power.batteryW { recordLong(.power(.battery), value, at: date) }
+        if let value = power.socW { recordLong(.power(.soc), value, at: date) }
+    }
+
+    private func recordSystem(_ system: SystemFrame, at date: Date) {
+        if system.cpuLoad != nil, let value = system.cpuTotalPercent { recordLong(.cpuUsage, value, at: date) }
+        if let value = system.gpu?.devicePercent { recordLong(.gpuUsage, Double(value), at: date) }
+        if let value = system.soc?.power.cpuW { recordLong(.power(.cpu), value, at: date) }
+        if let value = system.soc?.power.gpuW { recordLong(.power(.gpu), value, at: date) }
+        recordLong(.pressure, Double(system.pressure.rawValue), at: date)
+    }
+
+    private func bumpChartRevisions(at date: Date) {
+        bumpSparklineRevision(at: date)
+        bumpLongWindowRevision(at: date)
+    }
+
+    private func bumpSparklineRevision(at date: Date) {
+        let since = date.timeIntervalSince(sparklineBumpedAt)
+        guard since >= Tier.sparklineRefresh || since < 0 else { return }
+        sparklineRevision &+= 1
+        sparklineBumpedAt = date
+    }
+
+    private func bumpLongWindowRevision(at date: Date) {
+        let since = date.timeIntervalSince(longWindowBumpedAt)
+        guard since >= Tier.longWindowRefresh || since < 0 else { return }
+        longWindowRevision &+= 1
+        longWindowBumpedAt = date
     }
 
     /// Refresh hook for a chart of `window`: every tick for 5 min, every 5 s for 15 min and 1 h (≥ one plotted point),
@@ -91,10 +122,13 @@ import ThermikCore
         }
     }
 
-    private func record(_ id: SeriesID, _ value: Double, at t: Date, long: Bool) {
+    private func recordLong(_ id: SeriesID, _ value: Double, at date: Date) {
+        record(id, value, at: date, bucketCapacity: Tier.longBucketCapacity)
+    }
+
+    private func record(_ id: SeriesID, _ value: Double, at date: Date, bucketCapacity: Int) {
         guard value.isFinite else { return }
-        let capacity = long ? Tier.longBucketCapacity : Tier.shortBucketCapacity
-        series[id, default: SeriesHistory(bucketCapacity: capacity)].append(Float(value), at: t, bucketCapacity: capacity)
+        series[id, default: SeriesHistory(bucketCapacity: bucketCapacity)].append(Float(value), at: date, bucketCapacity: bucketCapacity)
     }
 
     // MARK: Queries
@@ -110,32 +144,52 @@ import ThermikCore
     func buckets(_ id: SeriesID, window: HistoryWindow, columns: Int) -> [Bucket] {
         guard columns > 0, let s = series[id] else { return [] }
         let now = Date().timeIntervalSinceReferenceDate
-        let t0 = now - window.rawValue
         let cells = self.cells(s, window: window, now: now)
         guard !cells.isEmpty else { return [] }
-        var out: [Cell?] = Array(repeating: nil, count: columns)
-        for c in cells {
-            let i = min(max(Int((c.t - t0) / window.rawValue * Double(columns)), 0), columns - 1)
-            if var o = out[i] { o.merge(c); out[i] = o } else { out[i] = c }
+        return columnCells(cells, window: window, columns: columns, now: now).compactMap { $0?.bucket }
+    }
+
+    private func columnCells(_ cells: [Cell], window: HistoryWindow, columns: Int, now: TimeInterval) -> [Cell?] {
+        var output: [Cell?] = Array(repeating: nil, count: columns)
+        let start = now - window.rawValue
+        for cell in cells {
+            let index = min(max(Int((cell.t - start) / window.rawValue * Double(columns)), 0), columns - 1)
+            merge(cell, into: &output, at: index)
         }
-        return out.compactMap { $0?.bucket }
+        return output
+    }
+
+    private func merge(_ cell: Cell, into output: inout [Cell?], at index: Int) {
+        if var existing = output[index] {
+            existing.merge(cell)
+            output[index] = existing
+        } else {
+            output[index] = cell
+        }
     }
 
     /// Last 5 minutes, ≤ points values (sparklines). Cached per `sparklineRevision`: between its steps every caller
     /// gets the same array, so a sparkline is redrawn about every 5 s, not on every tick.
     func sparkline(_ id: SeriesID, points: Int) -> [Float] {
         guard points > 0, let s = series[id] else { return [] }
-        if sparklineCacheRevision != sparklineRevision {
-            sparklineCache.removeAll(keepingCapacity: true)
-            sparklineCacheRevision = sparklineRevision
-        }
+        refreshSparklineCacheIfNeeded()
         let key = SparklineKey(id: id, points: points)
         if let hit = sparklineCache[key] { return hit }
-        let t0 = Date().timeIntervalSinceReferenceDate - Tier.sparklineWindow
-        let values = Self.downsample(s.raw.elements(from: s.raw.lowerBound(t0) { $0.time.timeIntervalSinceReferenceDate }),
-                                     maxPoints: points).map(\.value)
+        let values = makeSparkline(s, points: points)
         sparklineCache[key] = values
         return values
+    }
+
+    private func refreshSparklineCacheIfNeeded() {
+        guard sparklineCacheRevision != sparklineRevision else { return }
+        sparklineCache.removeAll(keepingCapacity: true)
+        sparklineCacheRevision = sparklineRevision
+    }
+
+    private func makeSparkline(_ history: SeriesHistory, points: Int) -> [Float] {
+        let start = Date().timeIntervalSinceReferenceDate - Tier.sparklineWindow
+        let raw = history.raw.elements(from: history.raw.lowerBound(start) { $0.time.timeIntervalSinceReferenceDate })
+        return Self.downsample(raw, maxPoints: points).map(\.value)
     }
 
     func stats(_ id: SeriesID, window: HistoryWindow) -> SeriesStats? {
@@ -150,17 +204,25 @@ import ThermikCore
     /// `timestamp,<series…>` with ISO 8601 local-offset times and "." decimals; one row per distinct time.
     func exportCSV(_ ids: [SeriesID], window: HistoryWindow) -> Data {
         let (iso, columns) = exportColumns(ids, window: window)
+        let rows = csvRows(columns)
+        let header = (["timestamp"] + columns.map(\.key)).joined(separator: ",") + "\n"
+        return Data((header + csvBody(rows, iso: iso)).utf8)
+    }
+
+    private func csvRows(_ columns: [(key: String, samples: [Sample])]) -> [Date: [String?]] {
         var rows: [Date: [String?]] = [:]
-        for (i, c) in columns.enumerated() {
-            for s in c.samples {
-                rows[s.time, default: Array(repeating: nil, count: columns.count)][i] = Self.decimal(s.value)
-            }
-        }
-        var csv = (["timestamp"] + columns.map(\.key)).joined(separator: ",") + "\n"
-        for t in rows.keys.sorted() {
-            csv += ([iso.string(from: t)] + rows[t]!.map { $0 ?? "" }).joined(separator: ",") + "\n"
-        }
-        return Data(csv.utf8)
+        for (index, column) in columns.enumerated() { addCSVSamples(column.samples, column: index, columns: columns.count, rows: &rows) }
+        return rows
+    }
+
+    private func addCSVSamples(_ samples: [Sample], column: Int, columns: Int, rows: inout [Date: [String?]]) {
+        for sample in samples { rows[sample.time, default: Array(repeating: nil, count: columns)][column] = Self.decimal(sample.value) }
+    }
+
+    private func csvBody(_ rows: [Date: [String?]], iso: ISO8601DateFormatter) -> String {
+        var csv = ""
+        for date in rows.keys.sorted() { csv += ([iso.string(from: date)] + rows[date]!.map { $0 ?? "" }).joined(separator: ",") + "\n" }
+        return csv
     }
 
     func exportJSON(_ ids: [SeriesID], window: HistoryWindow) -> Data {
@@ -193,22 +255,32 @@ import ThermikCore
         longWindowRevision &+= 1
     }
 
-    // MARK: Helpers for charts (Units 7/8) and diagnostics
+    // MARK: Helpers for charts and diagnostics
 
     /// Splits a time-ordered series where Δt > `gapFactor` × the median spacing (SPEC §2.8: start a new `series:`
     /// value per segment so Swift Charts does not draw a line across a gap).
     nonisolated static func segments(_ samples: [Sample], gapFactor: Double = 3) -> [[Sample]] {
         guard samples.count > 2 else { return samples.isEmpty ? [] : [samples] }
-        var gaps = [TimeInterval](); gaps.reserveCapacity(samples.count - 1)
-        for i in 1..<samples.count { gaps.append(samples[i].time.timeIntervalSince(samples[i - 1].time)) }
+        let gaps = sampleGaps(samples)
         let median = gaps.sorted()[gaps.count / 2]
         let limit = Swift.max(median, 0.001) * gapFactor
-        var out: [[Sample]] = [[samples[0]]]
-        for i in 1..<samples.count {
-            if gaps[i - 1] > limit { out.append([]) }
-            out[out.count - 1].append(samples[i])
+        return splitSamples(samples, gaps: gaps, limit: limit)
+    }
+
+    nonisolated private static func sampleGaps(_ samples: [Sample]) -> [TimeInterval] {
+        var gaps = [TimeInterval]()
+        gaps.reserveCapacity(samples.count - 1)
+        for index in 1..<samples.count { gaps.append(samples[index].time.timeIntervalSince(samples[index - 1].time)) }
+        return gaps
+    }
+
+    nonisolated private static func splitSamples(_ samples: [Sample], gaps: [TimeInterval], limit: Double) -> [[Sample]] {
+        var output: [[Sample]] = [[samples[0]]]
+        for index in 1..<samples.count {
+            if gaps[index - 1] > limit { output.append([]) }
+            output[output.count - 1].append(samples[index])
         }
-        return out
+        return output
     }
 
     /// One line per tier for the log / DEBUG "Dump History Stats".
@@ -227,39 +299,50 @@ import ThermikCore
 
     /// Raw samples for ≤ 15 min windows; older 10 s bucket averages (bucket midpoints) before the raw span.
     private func merged(_ s: SeriesHistory, window: HistoryWindow) -> [Sample] {
-        let now = Date().timeIntervalSinceReferenceDate
-        let t0 = now - window.rawValue
-        let raw = s.raw.elements(from: s.raw.lowerBound(t0) { $0.time.timeIntervalSinceReferenceDate })
+        let start = Date().timeIntervalSinceReferenceDate - window.rawValue
+        let raw = s.raw.elements(from: s.raw.lowerBound(start) { $0.time.timeIntervalSinceReferenceDate })
         guard window.rawValue > Tier.rawRetention else { return raw }
         let rawStart = raw.first?.time.timeIntervalSinceReferenceDate ?? .infinity
-        var out = [Sample]()
-        let first = s.buckets.lowerBound(t0) { $0.mid }
-        out.reserveCapacity(s.buckets.count - first + raw.count)
-        for i in first..<s.buckets.count {
-            let b = s.buckets[i]
-            guard b.mid < rawStart else { break }
-            out.append(Sample(time: Date(timeIntervalSinceReferenceDate: b.mid), value: b.avg))
+        return bucketSamples(s, from: start, before: rawStart, rawCount: raw.count) + raw
+    }
+
+    private func bucketSamples(_ history: SeriesHistory, from start: Double, before rawStart: Double, rawCount: Int) -> [Sample] {
+        var output = [Sample]()
+        let first = history.buckets.lowerBound(start) { $0.mid }
+        output.reserveCapacity(history.buckets.count - first + rawCount)
+        for index in first..<history.buckets.count {
+            let bucket = history.buckets[index]
+            guard bucket.mid < rawStart else { break }
+            output.append(Sample(time: Date(timeIntervalSinceReferenceDate: bucket.mid), value: bucket.avg))
         }
-        return out + raw
+        return output
     }
 
     /// Weighted cells (buckets carry their sample count) for envelopes and statistics.
     private func cells(_ s: SeriesHistory, window: HistoryWindow, now: TimeInterval) -> [Cell] {
-        let t0 = now - window.rawValue
-        let raw = s.raw.elements(from: s.raw.lowerBound(t0) { $0.time.timeIntervalSinceReferenceDate })
-        var out = [Cell]()
-        if window.rawValue > Tier.rawRetention {
-            let rawStart = raw.first?.time.timeIntervalSinceReferenceDate ?? .infinity
-            for i in s.buckets.lowerBound(t0, key: { $0.mid })..<s.buckets.count {
-                let b = s.buckets[i]
-                guard b.mid < rawStart else { break }
-                out.append(Cell(t: b.mid, min: b.min, max: b.max, sum: Double(b.avg) * Double(b.n), n: Int(b.n)))
-            }
+        let start = now - window.rawValue
+        let raw = s.raw.elements(from: s.raw.lowerBound(start) { $0.time.timeIntervalSinceReferenceDate })
+        var output = bucketCells(s, window: window, from: start, raw: raw)
+        output.append(contentsOf: rawCells(raw))
+        return output
+    }
+
+    private func bucketCells(_ history: SeriesHistory, window: HistoryWindow, from start: Double, raw: [Sample]) -> [Cell] {
+        guard window.rawValue > Tier.rawRetention else { return [] }
+        let rawStart = raw.first?.time.timeIntervalSinceReferenceDate ?? .infinity
+        var output = [Cell]()
+        for index in history.buckets.lowerBound(start, key: { $0.mid })..<history.buckets.count {
+            let bucket = history.buckets[index]
+            guard bucket.mid < rawStart else { break }
+            output.append(Cell(t: bucket.mid, min: bucket.min, max: bucket.max, sum: Double(bucket.avg) * Double(bucket.n), n: Int(bucket.n)))
         }
-        for r in raw {
-            out.append(Cell(t: r.time.timeIntervalSinceReferenceDate, min: r.value, max: r.value, sum: Double(r.value), n: 1))
+        return output
+    }
+
+    private func rawCells(_ samples: [Sample]) -> [Cell] {
+        samples.map { sample in
+            Cell(t: sample.time.timeIntervalSinceReferenceDate, min: sample.value, max: sample.value, sum: Double(sample.value), n: 1)
         }
-        return out
     }
 
     private static func downsample(_ data: [Sample], maxPoints: Int) -> [Sample] {
@@ -354,22 +437,33 @@ private struct SeriesHistory {
     init(bucketCapacity: Int) { buckets = HistoryRing(capacity: bucketCapacity) }
 
     mutating func append(_ v: Float, at date: Date, bucketCapacity: Int) {
-        let t = date.timeIntervalSinceReferenceDate
-        if let last = raw.last?.time.timeIntervalSinceReferenceDate, t <= last {
-            // The wall clock went back. A few seconds (NTP): drop the sample. More: start this series over, otherwise
-            // recording would stall until the clock caught up again.
-            guard last - t > 5 else { return }
-            raw.removeAll(); buckets.removeAll(); open = nil
-        }
+        let time = date.timeIntervalSinceReferenceDate
+        guard prepareForSample(at: time) else { return }
         if bucketCapacity > buckets.capacity { buckets.grow(to: bucketCapacity) }
         raw.append(Sample(time: date, value: v))
-        let start = (t / HistoryStore.Tier.bucketSeconds).rounded(.down) * HistoryStore.Tier.bucketSeconds
-        if var o = open, o.start == start {
-            o.add(v); open = o
-        } else {
-            if let o = open { buckets.append(o.stored) }
-            open = OpenBucket(start: start, v)
+        let start = (time / HistoryStore.Tier.bucketSeconds).rounded(.down) * HistoryStore.Tier.bucketSeconds
+        addToOpenBucket(v, start: start)
+    }
+
+    private mutating func prepareForSample(at time: Double) -> Bool {
+        guard let last = raw.last?.time.timeIntervalSinceReferenceDate, time <= last else { return true }
+        // The wall clock went back. A few seconds (NTP): drop the sample. More: start this series over, otherwise
+        // recording would stall until the clock caught up again.
+        guard last - time > 5 else { return false }
+        raw.removeAll()
+        buckets.removeAll()
+        open = nil
+        return true
+    }
+
+    private mutating func addToOpenBucket(_ value: Float, start: Double) {
+        if var current = open, current.start == start {
+            current.add(value)
+            open = current
+            return
         }
+        if let current = open { buckets.append(current.stored) }
+        open = OpenBucket(start: start, value)
     }
 }
 

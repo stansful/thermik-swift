@@ -41,11 +41,7 @@ public actor SystemSampler: SystemSampling {
     /// ≈ 0.1–0.3 each); `soc` adds ≈ 4–6 ms (IOReport, dominated by the PMGR driver), and its first use creates the
     /// subscription (≈ 65 ms, logged). Thermal pressure is read on every call (~26 µs).
     public func sample(_ request: SystemSampleRequest) async -> SystemFrame {
-        var load: [CoreLoad]?
-        if request.contains(.cpuLoad) {
-            let l = cpu.sample()
-            load = l.isEmpty ? nil : l                           // nil right after start/wake (no baseline yet)
-        }
+        let load = requestedCPULoad(request)
         let memory = request.contains(.memory) ? MemoryReader.read() : nil
         let gpu = request.contains(.gpuUsage) ? GPUReader.primary() : nil
         let socMetrics = request.contains(.soc) ? sampleSoC() : nil
@@ -54,6 +50,13 @@ public actor SystemSampler: SystemSampling {
         return SystemFrame(date: Date(), cpuLoad: load, memory: memory, gpu: gpu, soc: socMetrics, battery: bat,
                            powerSources: power, pressure: thermal.current(),
                            processThermalState: ThermalPressureReader.processThermalState())
+    }
+
+    /// Nil right after start/wake, when the CPU sampler has no baseline yet.
+    private func requestedCPULoad(_ request: SystemSampleRequest) -> [CoreLoad]? {
+        guard request.contains(.cpuLoad) else { return nil }
+        let load = cpu.sample()
+        return load.isEmpty ? nil : load
     }
 
     public func slowData(_ request: SlowDataRequest) async -> SlowSystemData {
@@ -102,22 +105,32 @@ public actor SystemSampler: SystemSampling {
     // MARK: Internals
 
     private func sampleSoC() -> SoCMetrics? {
-        if soc == nil {
-            guard !socUnavailable, isAppleSilicon else { return nil }
-            let clock = ContinuousClock()
-            let t0 = clock.now
-            soc = SoCSampler()
-            let d = t0.duration(to: clock.now).components
-            let ms = Double(d.seconds) * 1000 + Double(d.attoseconds) / 1e15
-            socSetupMilliseconds = ms
-            if let soc {
-                Self.log.info("IOReport SoC sampler ready: \(soc.channelCount, privacy: .public) channels in \(ms, format: .fixed(precision: 1), privacy: .public) ms")
-            } else {
-                socUnavailable = true
-                Self.log.notice("IOReport unavailable (libIOReport or channels missing); SoC metrics disabled")
-            }
-        }
+        if soc == nil { initializeSoC() }
         return soc?.sample()
+    }
+
+    private func initializeSoC() {
+        guard !socUnavailable, isAppleSilicon else { return }
+        let clock = ContinuousClock()
+        let start = clock.now
+        soc = SoCSampler()
+        let milliseconds = elapsedMilliseconds(from: start, to: clock.now)
+        socSetupMilliseconds = milliseconds
+        logSoCSetup(milliseconds)
+    }
+
+    private func elapsedMilliseconds(from start: ContinuousClock.Instant, to end: ContinuousClock.Instant) -> Double {
+        let components = start.duration(to: end).components
+        return Double(components.seconds) * 1000 + Double(components.attoseconds) / 1e15
+    }
+
+    private func logSoCSetup(_ milliseconds: Double) {
+        if let soc {
+            Self.log.info("IOReport SoC sampler ready: \(soc.channelCount, privacy: .public) channels in \(milliseconds, format: .fixed(precision: 1), privacy: .public) ms")
+        } else {
+            socUnavailable = true
+            Self.log.notice("IOReport unavailable (libIOReport or channels missing); SoC metrics disabled")
+        }
     }
 
     private func bootHistory() -> BootHistory {
@@ -128,15 +141,18 @@ public actor SystemSampler: SystemSampling {
             boot.intelShutdownCause = code
         case .miss:
             // 5–10 s: never awaited here (it would delay launch). The next `.boot` request (wake) picks the cached code up.
-            if !intelCauseQueryRunning, let bootTime = boot.bootTime {
-                intelCauseQueryRunning = true
-                Task.detached(priority: .utility) { [weak self] in
-                    let code = await BootHistoryReader.queryIntelShutdownCause(bootTime: bootTime)
-                    await self?.finishIntelCauseQuery(code, bootSession: uuid)
-                }
-            }
+            startIntelCauseQuery(boot)
         }
         return boot
+    }
+
+    private func startIntelCauseQuery(_ boot: BootHistory) {
+        guard !intelCauseQueryRunning, let bootTime = boot.bootTime, let uuid = boot.bootSessionUUID else { return }
+        intelCauseQueryRunning = true
+        Task.detached(priority: .utility) { [weak self] in
+            let code = await BootHistoryReader.queryIntelShutdownCause(bootTime: bootTime)
+            await self?.finishIntelCauseQuery(code, bootSession: uuid)
+        }
     }
 
     private func finishIntelCauseQuery(_ code: Int?, bootSession uuid: String) {
@@ -149,25 +165,33 @@ public actor SystemSampler: SystemSampling {
     /// nil on desktops (no AppleSmartBattery → the tool is never spawned).
     private func appleBatteryHealth() async -> AppleBatteryHealth? {
         guard let snapshot = battery.read() else { return nil }
-        let pf = snapshot.permanentFailureStatus
-        func current(_ h: AppleBatteryHealth?) -> AppleBatteryHealth? {
-            h.map { AppleBatteryHealth(maximumCapacityPercent: $0.maximumCapacityPercent, conditionRaw: $0.conditionRaw,
-                                       condition: AppleBatteryHealthReader.condition(raw: $0.conditionRaw, permanentFailureStatus: pf)) }
-        }
-        if let cached = appleHealth, cached.at.duration(to: .now) < (cached.value == nil ? Self.appleHealthRetry : Self.appleHealthTTL) {
-            return current(cached.value)
-        }
-        let task: Task<AppleBatteryHealth?, Never>
-        if let running = appleHealthTask {
-            task = running                                      // coalesce concurrent requests onto one spawn
-        } else {
-            task = Task.detached(priority: .utility) { await AppleBatteryHealthReader.read(permanentFailureStatus: nil) }
-            appleHealthTask = task
-        }
+        let permanentFailure = snapshot.permanentFailureStatus
+        if let cached = freshAppleHealth() { return currentHealth(cached.value, permanentFailure: permanentFailure) }
+        let task = healthTask()
         let value = await task.value
         appleHealthTask = nil
         appleHealth = (value, .now)
         if value == nil { Self.log.notice("system_profiler SPPowerDataType returned no battery health") }
-        return current(value)
+        return currentHealth(value, permanentFailure: permanentFailure)
+    }
+
+    private func freshAppleHealth() -> (value: AppleBatteryHealth?, at: ContinuousClock.Instant)? {
+        guard let cached = appleHealth else { return nil }
+        let ttl = cached.value == nil ? Self.appleHealthRetry : Self.appleHealthTTL
+        guard cached.at.duration(to: .now) < ttl else { return nil }
+        return cached
+    }
+
+    /// Coalesces concurrent requests onto one `system_profiler` spawn.
+    private func healthTask() -> Task<AppleBatteryHealth?, Never> {
+        if let running = appleHealthTask { return running }
+        let task = Task.detached(priority: .utility) { await AppleBatteryHealthReader.read(permanentFailureStatus: nil) }
+        appleHealthTask = task
+        return task
+    }
+
+    private func currentHealth(_ health: AppleBatteryHealth?, permanentFailure: Int?) -> AppleBatteryHealth? {
+        health.map { AppleBatteryHealth(maximumCapacityPercent: $0.maximumCapacityPercent, conditionRaw: $0.conditionRaw,
+                                        condition: AppleBatteryHealthReader.condition(raw: $0.conditionRaw, permanentFailureStatus: permanentFailure)) }
     }
 }

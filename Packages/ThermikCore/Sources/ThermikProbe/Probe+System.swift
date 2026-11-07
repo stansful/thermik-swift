@@ -13,34 +13,47 @@ extension Probe {
         let n = args.dropFirst().first.flatMap { Int($0) }
         let sampler = SystemSampler()
         let machine = await sampler.start()
-        switch sub {
-        case "all":
-            SystemProbe.printMachine(machine)
-            await SystemProbe.battery(sampler)
-            await SystemProbe.load(sampler, machine: machine)
-            await SystemProbe.ioreport(sampler)
-            await SystemProbe.smart(sampler)
-            await SystemProbe.boot(sampler)
-            await SystemProbe.thermal(sampler)
-        case "machine": SystemProbe.printMachine(machine)
-        case "battery": await SystemProbe.battery(sampler)
-        case "load": await SystemProbe.load(sampler, machine: machine)
-        case "ioreport": await SystemProbe.ioreport(sampler)
-        case "smart": await SystemProbe.smart(sampler)
-        case "boot": await SystemProbe.boot(sampler)
-        case "thermal": await SystemProbe.thermal(sampler)
-        case "pmset": await SystemProbe.pmset(sampler, limit: n ?? 20)
-        case "top": await SystemProbe.top(sampler, limit: n ?? 10)
-        case "bench": await SystemProbe.bench(sampler)
-        case "loadtest": await SystemProbe.loadTest(sampler, machine: machine, seconds: min(max(n ?? 10, 1), 40))
-        default:
-            print("thermik-probe system all|machine|battery|load|ioreport|smart|boot|thermal|pmset [N]|top [N]|bench|loadtest [s]")
-        }
+        await SystemProbe.run(sub, n: n, sampler: sampler, machine: machine)
     }
 }
 
 /// File-private helpers (namespaced so they cannot collide with other units' probe files after the merge).
 private enum SystemProbe {
+    static func run(_ sub: String, n: Int?, sampler: SystemSampler, machine: MachineInfo) async {
+        switch sub {
+        case "all": await all(sampler, machine: machine)
+        case "machine", "battery", "load", "ioreport", "smart", "boot", "thermal": await basic(sub, sampler, machine: machine)
+        case "pmset": await pmset(sampler, limit: n ?? 20)
+        case "top": await top(sampler, limit: n ?? 10)
+        case "bench": await bench(sampler)
+        case "loadtest": await loadTest(sampler, machine: machine, seconds: min(max(n ?? 10, 1), 40))
+        default: print("thermik-probe system all|machine|battery|load|ioreport|smart|boot|thermal|pmset [N]|top [N]|bench|loadtest [s]")
+        }
+    }
+
+    private static func all(_ s: SystemSampler, machine: MachineInfo) async {
+        printMachine(machine)
+        await battery(s)
+        await load(s, machine: machine)
+        await ioreport(s)
+        await smart(s)
+        await boot(s)
+        await thermal(s)
+    }
+
+    private static func basic(_ sub: String, _ s: SystemSampler, machine: MachineInfo) async {
+        switch sub {
+        case "machine": printMachine(machine)
+        case "battery": await battery(s)
+        case "load": await load(s, machine: machine)
+        case "ioreport": await ioreport(s)
+        case "smart": await smart(s)
+        case "boot": await boot(s)
+        case "thermal": await thermal(s)
+        default: break
+        }
+    }
+
     // MARK: Sections
 
     static func printMachine(_ m: MachineInfo) {
@@ -50,39 +63,58 @@ private enum SystemProbe {
               + (m.isTranslated ? " | Rosetta" : ""))
         print("RAM \(m.memoryBytes >> 30) GB, \(m.logicalCPUs) logical CPUs" + (m.cpuTopology.isEmpty ? "" : ", \(p)P + \(e)E")
               + ", GPU \(m.gpuName ?? "—") \(m.gpuCores.map { "\($0) cores" } ?? "")")
-        for (i, l) in m.perfLevels.enumerated() {
-            print("  perflevel\(i) \(l.name): \(l.logicalCPUs) logical / \(l.physicalCPUs) physical, L2 \(l.l2CacheBytes.map { "\($0 >> 20) MiB" } ?? "—")")
+        printPerfLevels(m.perfLevels)
+        printTopology(m.cpuTopology)
+    }
+
+    private static func printPerfLevels(_ levels: [PerfLevel]) {
+        for (i, level) in levels.enumerated() {
+            print("  perflevel\(i) \(level.name): \(level.logicalCPUs) logical / \(level.physicalCPUs) physical, L2 \(level.l2CacheBytes.map { "\($0 >> 20) MiB" } ?? "—")")
         }
-        if !m.cpuTopology.isEmpty {
-            print("  topology " + m.cpuTopology.map { "\($0.id)\($0.type)c\($0.cluster)" }.joined(separator: " "))
-        }
+    }
+
+    private static func printTopology(_ topology: [CPUCoreInfo]) {
+        guard !topology.isEmpty else { return }
+        print("  topology " + topology.map { "\($0.id)\($0.type)c\($0.cluster)" }.joined(separator: " "))
     }
 
     static func battery(_ s: SystemSampler) async {
         print("== battery")
         let (frame, ms) = await timed { await s.sample([.battery, .powerSources]) }
-        if let b = frame.battery {
-            print("[\(f(ms, 3)) ms] charge \(b.chargePercent.map { "\($0) %" } ?? "—"), cycles \(b.cycleCount.map(String.init) ?? "—") / \(b.designCycleCount.map(String.init) ?? "—"), design \(b.designCapacity_mAh ?? -1) mAh, nominal \(b.nominalChargeCapacity_mAh ?? -1) mAh, raw max \(b.rawMaxCapacity_mAh ?? -1) mAh, raw current \(b.rawCurrentCapacity_mAh ?? -1) mAh")
-            print("  health \(f(b.healthPercent, 1)) % (raw \(f(b.rawHealthPercent, 1)) %), temperature \(f(b.temperatureC, 2)) °C, \(b.voltage_mV ?? -1) mV, \(b.amperage_mA ?? 0) mA (\(f(b.batteryPowerW, 2)) W)")
-            print("  charging \(b.isCharging), external \(b.externalConnected), full \(b.fullyCharged), PF \(b.permanentFailureStatus.map(String.init) ?? "—"), notChargingReason \(b.notChargingReason.map { "0x" + String($0, radix: 16) } ?? "—"), to empty \(b.minutesToEmpty.map { "\($0) min" } ?? "—"), to full \(b.minutesToFull.map { "\($0) min" } ?? "—")")
-            print("  cells \(b.cellVoltages_mV) mV; adapter \(b.adapter.map { "\($0.name ?? "?") \($0.watts.map { "\($0) W" } ?? "") \($0.voltage_mV ?? 0) mV \($0.current_mA ?? 0) mA wireless \($0.isWireless)" } ?? "none")")
-            print("  PowerTelemetryData: system in \(f(b.systemPowerIn_mW.map { Double($0) / 1000 }, 2)) W, system load \(f(b.systemLoad_mW.map { Double($0) / 1000 }, 2)) W, battery \(f(b.batteryPower_mW.map { Double($0) / 1000 }, 2)) W")
+        printBattery(frame.battery, ms: ms)
+        printPowerSources(frame.powerSources)
+        await printAccessories(s)
+        await printBatteryHealth(s)
+    }
+
+    private static func printBattery(_ battery: BatterySnapshot?, ms: Double) {
+        guard let b = battery else { print("no AppleSmartBattery (desktop)"); return }
+        print("[\(f(ms, 3)) ms] charge \(b.chargePercent.map { "\($0) %" } ?? "—"), cycles \(b.cycleCount.map(String.init) ?? "—") / \(b.designCycleCount.map(String.init) ?? "—"), design \(b.designCapacity_mAh ?? -1) mAh, nominal \(b.nominalChargeCapacity_mAh ?? -1) mAh, raw max \(b.rawMaxCapacity_mAh ?? -1) mAh, raw current \(b.rawCurrentCapacity_mAh ?? -1) mAh")
+        print("  health \(f(b.healthPercent, 1)) % (raw \(f(b.rawHealthPercent, 1)) %), temperature \(f(b.temperatureC, 2)) °C, \(b.voltage_mV ?? -1) mV, \(b.amperage_mA ?? 0) mA (\(f(b.batteryPowerW, 2)) W)")
+        print("  charging \(b.isCharging), external \(b.externalConnected), full \(b.fullyCharged), PF \(b.permanentFailureStatus.map(String.init) ?? "—"), notChargingReason \(b.notChargingReason.map { "0x" + String($0, radix: 16) } ?? "—"), to empty \(b.minutesToEmpty.map { "\($0) min" } ?? "—"), to full \(b.minutesToFull.map { "\($0) min" } ?? "—")")
+        print("  cells \(b.cellVoltages_mV) mV; adapter \(b.adapter.map { "\($0.name ?? "?") \($0.watts.map { "\($0) W" } ?? "") \($0.voltage_mV ?? 0) mV \($0.current_mA ?? 0) mA wireless \($0.isWireless)" } ?? "none")")
+        print("  PowerTelemetryData: system in \(f(b.systemPowerIn_mW.map { Double($0) / 1000 }, 2)) W, system load \(f(b.systemLoad_mW.map { Double($0) / 1000 }, 2)) W, battery \(f(b.batteryPower_mW.map { Double($0) / 1000 }, 2)) W")
+    }
+
+    private static func printPowerSources(_ sources: PowerSourceSummary?) {
+        guard let p = sources else { return }
+        let remaining = p.timeRemaining.map { $0.isInfinite ? "unlimited (AC)" : "\(Int($0 / 60)) min" } ?? "calculating"
+        print("  IOPS: \(p.kind), remaining \(remaining), warning level \(p.batteryWarningLevel), low power mode \(p.lowPowerMode)")
+    }
+
+    private static func printAccessories(_ s: SystemSampler) async {
+        let accessories = await s.accessories()
+        if !accessories.isEmpty {
+            print("  accessories: " + accessories.map { "\($0.category ?? "?") \($0.percent.map { "\($0) %" } ?? "—")\($0.isCharging ? " charging" : "")" }.joined(separator: ", "))
+        }
+    }
+
+    private static func printBatteryHealth(_ s: SystemSampler) async {
+        let (slow, ms) = await timed { await s.slowData(.appleBatteryHealth) }
+        if let health = slow.appleBatteryHealth {
+            print("  Apple (system_profiler, \(f(ms, 0)) ms): maximum capacity \(health.maximumCapacityPercent.map { "\($0) %" } ?? "—"), condition \"\(health.conditionRaw ?? "—")\" → .\(health.condition)")
         } else {
-            print("no AppleSmartBattery (desktop)")
-        }
-        if let p = frame.powerSources {
-            let rem = p.timeRemaining.map { $0.isInfinite ? "unlimited (AC)" : "\(Int($0 / 60)) min" } ?? "calculating"
-            print("  IOPS: \(p.kind), remaining \(rem), warning level \(p.batteryWarningLevel), low power mode \(p.lowPowerMode)")
-        }
-        let acc = await s.accessories()
-        if !acc.isEmpty {
-            print("  accessories: " + acc.map { "\($0.category ?? "?") \($0.percent.map { "\($0) %" } ?? "—")\($0.isCharging ? " charging" : "")" }.joined(separator: ", "))
-        }
-        let (slow, sms) = await timed { await s.slowData(.appleBatteryHealth) }
-        if let h = slow.appleBatteryHealth {
-            print("  Apple (system_profiler, \(f(sms, 0)) ms): maximum capacity \(h.maximumCapacityPercent.map { "\($0) %" } ?? "—"), condition \"\(h.conditionRaw ?? "—")\" → .\(h.condition)")
-        } else {
-            print("  Apple (system_profiler, \(f(sms, 0)) ms): unavailable")
+            print("  Apple (system_profiler, \(f(ms, 0)) ms): unavailable")
         }
     }
 
@@ -92,18 +124,25 @@ private enum SystemProbe {
         _ = await s.sample(req)
         try? await Task.sleep(for: .seconds(1))
         let (frame, ms) = await timed { await s.sample(req) }
-        if let l = frame.cpuLoad {
-            print("[\(f(ms, 3)) ms] CPU total \(f(frame.cpuTotalPercent, 1)) %, \(l.count) cores:")
-            print("  " + l.enumerated().map { i, c in "\(i)\(coreType(machine, i)):\(f(c.total * 100, 0))%" }.joined(separator: " "))
-        } else {
-            print("CPU load: no baseline")
-        }
-        if let m = frame.memory {
-            print("  memory: used \(gb(m.used)) GB of \(gb(m.total)) (app \(gb(m.app)), wired \(gb(m.wired)), compressed \(gb(m.compressed))), cached \(gb(m.cached)), free \(gb(m.free)), swap \(gb(m.swapUsed)) / \(gb(m.swapTotal)) GB, level \(m.freePercentLevel.map { "\($0) %" } ?? "—"), pressure \(m.pressure)")
-        }
-        if let g = frame.gpu {
-            print("  GPU \(g.model ?? "—") (\(g.coreCount.map(String.init) ?? "?") cores): device \(g.devicePercent.map { "\($0) %" } ?? "—"), renderer \(g.rendererPercent.map { "\($0) %" } ?? "—"), tiler \(g.tilerPercent.map { "\($0) %" } ?? "—"), in use \(g.inUseSystemMemory.map { gb($0) + " GB" } ?? "—")")
-        }
+        printCPULoad(frame, ms: ms, machine: machine)
+        printMemory(frame.memory)
+        printGPU(frame.gpu)
+    }
+
+    private static func printCPULoad(_ frame: SystemFrame, ms: Double, machine: MachineInfo) {
+        guard let load = frame.cpuLoad else { print("CPU load: no baseline"); return }
+        print("[\(f(ms, 3)) ms] CPU total \(f(frame.cpuTotalPercent, 1)) %, \(load.count) cores:")
+        print("  " + load.enumerated().map { i, core in "\(i)\(coreType(machine, i)):\(f(core.total * 100, 0))%" }.joined(separator: " "))
+    }
+
+    private static func printMemory(_ memory: MemorySnapshot?) {
+        guard let m = memory else { return }
+        print("  memory: used \(gb(m.used)) GB of \(gb(m.total)) (app \(gb(m.app)), wired \(gb(m.wired)), compressed \(gb(m.compressed))), cached \(gb(m.cached)), free \(gb(m.free)), swap \(gb(m.swapUsed)) / \(gb(m.swapTotal)) GB, level \(m.freePercentLevel.map { "\($0) %" } ?? "—"), pressure \(m.pressure)")
+    }
+
+    private static func printGPU(_ gpu: GPUUtilization?) {
+        guard let g = gpu else { return }
+        print("  GPU \(g.model ?? "—") (\(g.coreCount.map(String.init) ?? "?") cores): device \(g.devicePercent.map { "\($0) %" } ?? "—"), renderer \(g.rendererPercent.map { "\($0) %" } ?? "—"), tiler \(g.tilerPercent.map { "\($0) %" } ?? "—"), in use \(g.inUseSystemMemory.map { gb($0) + " GB" } ?? "—")")
     }
 
     static func ioreport(_ s: SystemSampler) async {
@@ -148,10 +187,14 @@ private enum SystemProbe {
         print("  → verdict .\(slow.shutdownVerdict.map { "\($0)" } ?? "nil") (abnormal: \(slow.shutdownVerdict?.isAbnormal ?? false))")
         print("  kern.bootreason '\(b.bootReason ?? "—")'")
         print("  wake reason '\(b.wakeReason ?? "—")', wake type '\(b.wakeType ?? "—")', last sleep reason '\(b.lastSleepReason ?? "—")', lid closed \(b.lidClosed.map { "\($0)" } ?? "—"), panic \(b.panicLogPath ?? "none"), Intel cause \(b.intelShutdownCause.map(String.init) ?? "—")")
+        printShutdownClassifications()
+    }
+
+    private static func printShutdownClassifications() {
         // Classifier spot checks (pure function; strings as seen on Apple Silicon or plausible variants).
-        for r in ["wdog,reset_in_1 rst_in,reset_in_1_deassert wdog,reset_in_1 ap_restart", "wdog,reset_in_1 rst_in", "AP_SHUTDOWN",
-                  "pwr_btn_long", "therm_trip", "batt_uvlo", "kernel_panic ap_restart", "gcb_off", ""] {
-            print("  classify('\(r)') = .\(ShutdownClassifier.classify(reason: r))")
+        for reason in ["wdog,reset_in_1 rst_in,reset_in_1_deassert wdog,reset_in_1 ap_restart", "wdog,reset_in_1 rst_in", "AP_SHUTDOWN",
+                       "pwr_btn_long", "therm_trip", "batt_uvlo", "kernel_panic ap_restart", "gcb_off", ""] {
+            print("  classify('\(reason)') = .\(ShutdownClassifier.classify(reason: reason))")
         }
     }
 
@@ -180,45 +223,65 @@ private enum SystemProbe {
     static func bench(_ s: SystemSampler) async {
         print("== bench (other builds may be running in parallel: numbers can be noisy)")
         let all: SystemSampleRequest = [.cpuLoad, .memory, .gpuUsage, .battery, .powerSources]
-        var plain: [Double] = []
-        for _ in 0..<30 {
-            let (_, ms) = await timed { await s.sample(all) }
-            plain.append(ms)
-            try? await Task.sleep(for: .milliseconds(100))
-        }
-        print("sample(all except soc) ×30: \(stats(plain))")
-        let single: [(String, SystemSampleRequest)] = [("none (thermal only)", []),
-                                                       ("cpuLoad", .cpuLoad),
-                                                       ("memory", .memory),
-                                                       ("gpuUsage", .gpuUsage),
-                                                       ("battery", .battery),
-                                                       ("powerSources", .powerSources)]
-        for (label, r) in single {
-            var xs: [Double] = []
-            for _ in 0..<15 {
-                let (_, ms) = await timed { await s.sample(r) }
-                xs.append(ms)
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-            print("  \(label): \(stats(xs))")
-        }
+        await benchPlain(s, request: all)
+        await benchSingle(s)
         var withSoC = all; withSoC.insert(.soc)
-        let (_, first) = await timed { await s.sample(withSoC) }
+        await benchSoC(s, request: withSoC)
+        await benchSlowData(s)
+    }
+
+    private static func benchPlain(_ s: SystemSampler, request: SystemSampleRequest) async {
+        let plain = await sampleTimes(s, request: request, count: 30, milliseconds: 100)
+        print("sample(all except soc) ×30: \(stats(plain))")
+    }
+
+    private static func benchSingle(_ s: SystemSampler) async {
+        for (label, request) in benchRequests() {
+            let values = await sampleTimes(s, request: request, count: 15, milliseconds: 50)
+            print("  \(label): \(stats(values))")
+        }
+    }
+
+    private static func benchRequests() -> [(String, SystemSampleRequest)] {
+        [("none (thermal only)", []),
+         ("cpuLoad", .cpuLoad),
+         ("memory", .memory),
+         ("gpuUsage", .gpuUsage),
+         ("battery", .battery),
+         ("powerSources", .powerSources)]
+    }
+
+    private static func sampleTimes(_ s: SystemSampler, request: SystemSampleRequest,
+                                    count: Int, milliseconds: Int) async -> [Double] {
+        var values: [Double] = []
+        for _ in 0..<count {
+            let (_, ms) = await timed { await s.sample(request) }
+            values.append(ms)
+            try? await Task.sleep(for: .milliseconds(milliseconds))
+        }
+        return values
+    }
+
+    private static func benchSoC(_ s: SystemSampler, request: SystemSampleRequest) async {
+        let (_, first) = await timed { await s.sample(request) }
         print("first sample with soc: \(f(first, 1)) ms (IOReport setup \(f(await s.socSetupTime(), 1)) ms)")
-        var soc: [Double] = []
-        for _ in 0..<20 {
-            try? await Task.sleep(for: .milliseconds(500))
-            let (_, ms) = await timed { await s.sample(withSoC) }
-            soc.append(ms)
-        }
+        let soc = await socTimes(s, request: request, count: 20)
         print("sample(all incl. soc) ×20: \(stats(soc))")
-        var socOnly: [Double] = []
-        for _ in 0..<10 {
-            try? await Task.sleep(for: .milliseconds(500))
-            let (_, ms) = await timed { await s.sample(SystemSampleRequest.soc) }
-            socOnly.append(ms)
-        }
+        let socOnly = await socTimes(s, request: .soc, count: 10)
         print("sample(soc only) ×10: \(stats(socOnly))")
+    }
+
+    private static func socTimes(_ s: SystemSampler, request: SystemSampleRequest, count: Int) async -> [Double] {
+        var values: [Double] = []
+        for _ in 0..<count {
+            try? await Task.sleep(for: .milliseconds(500))
+            let (_, ms) = await timed { await s.sample(request) }
+            values.append(ms)
+        }
+        return values
+    }
+
+    private static func benchSlowData(_ s: SystemSampler) async {
         let (_, smart) = await timed { await s.slowData(.nvme) }
         let (_, boot) = await timed { await s.slowData(.boot) }
         print("slowData(.nvme) \(f(smart, 2)) ms, slowData(.boot) \(f(boot, 2)) ms")
@@ -231,8 +294,23 @@ private enum SystemProbe {
         print("== load test: \(threads) spinning threads for \(seconds) s (+ 3 s baseline, 4 s cool-down)")
         let req: SystemSampleRequest = [.cpuLoad, .gpuUsage, .soc, .battery]
         _ = await s.sample(req)
-        for i in 0..<3 { try? await Task.sleep(for: .seconds(1)); await row(s, req, machine, "idle \(i + 1)") }
+        await sampleRows(s, req, machine, count: 3, label: "idle")
         let stop = OSAllocatedUnfairLock(initialState: false)
+        startThreads(threads, stop: stop)
+        await loadedRows(s, req, machine, seconds: seconds)
+        stop.withLock { $0 = true }
+        await cooldownRows(s, req, machine)
+    }
+
+    private static func sampleRows(_ s: SystemSampler, _ req: SystemSampleRequest, _ machine: MachineInfo,
+                                   count: Int, label: String) async {
+        for i in 0..<count {
+            try? await Task.sleep(for: .seconds(1))
+            await row(s, req, machine, "\(label) \(i + 1)")
+        }
+    }
+
+    private static func startThreads(_ threads: Int, stop: OSAllocatedUnfairLock<Bool>) {
         for _ in 0..<threads {
             Thread.detachNewThread {
                 var x: UInt64 = 0x9E37_79B9_7F4A_7C15
@@ -242,6 +320,10 @@ private enum SystemProbe {
                 if x == 42 { print("") }                       // keep the loop observable
             }
         }
+    }
+
+    private static func loadedRows(_ s: SystemSampler, _ req: SystemSampleRequest,
+                                   _ machine: MachineInfo, seconds: Int) async {
         for i in 0..<seconds {
             try? await Task.sleep(for: .seconds(1))
             await row(s, req, machine, "load \(i + 1)")
@@ -250,8 +332,10 @@ private enum SystemProbe {
                 print("    top: " + top.map { "\($0.name) \(f($0.cpuPercent, 0)) %" }.joined(separator: ", "))
             }
         }
-        stop.withLock { $0 = true }
-        for i in 0..<4 { try? await Task.sleep(for: .seconds(1)); await row(s, req, machine, "cool \(i + 1)") }
+    }
+
+    private static func cooldownRows(_ s: SystemSampler, _ req: SystemSampleRequest, _ machine: MachineInfo) async {
+        await sampleRows(s, req, machine, count: 4, label: "cool")
         print("energy model frozen: \(await s.isEnergyModelFrozen())")
     }
 

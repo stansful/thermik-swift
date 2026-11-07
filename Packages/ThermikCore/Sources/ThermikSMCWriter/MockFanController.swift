@@ -49,20 +49,27 @@ public final class MockFanController: FanControlling {
     public func ftstValue() -> Int? { ftstSetByUs || (simulatedForeignControl && !isControlling) ? 1 : 0 }
 
     public func setManual(_ index: Int, targetRPM: Double) throws -> Double {
-        guard let f = profile.fan(index) else { throw FanWriteError.invalidFan(index) }
+        guard let fan = profile.fan(index) else { throw FanWriteError.invalidFan(index) }
         guard targetRPM.isFinite, targetRPM >= 0 else { throw FanWriteError.smc(.invalidValue("rpm \(targetRPM)")) }
-        let rpm = targetRPM == 0 && profile.scheme.allowsFanStop ? 0 : f.clamp(targetRPM).rounded()
-        if !ftstSetByUs {
-            if simulatedUnlockSeconds > 0 { Thread.sleep(forTimeInterval: simulatedUnlockSeconds) }
-            ftstSetByUs = true
-            log.append("Ftst=1")
-        }
+        let rpm = targetRPM == 0 && profile.scheme.allowsFanStop ? 0 : fan.clamp(targetRPM).rounded()
+        unlockIfNeeded()
+        applyManualState(index, rpm: rpm)
+        log.append("manual \(index) \(Int(rpm))")
+        return rpm
+    }
+
+    private func unlockIfNeeded() {
+        guard !ftstSetByUs else { return }
+        if simulatedUnlockSeconds > 0 { Thread.sleep(forTimeInterval: simulatedUnlockSeconds) }
+        ftstSetByUs = true
+        log.append("Ftst=1")
+    }
+
+    private func applyManualState(_ index: Int, rpm: Double) {
         ownedFans.insert(index)
         simulatedReclaimedFans.remove(index)
         appliedRPM[index] = rpm
         actual[index] = rpm
-        log.append("manual \(index) \(Int(rpm))")
-        return rpm
     }
 
     public func setAutomatic(_ index: Int) throws {

@@ -128,15 +128,17 @@ private struct ScrollEdgeFade: ViewModifier {
         if #available(macOS 26.0, *) {
             content.scrollEdgeEffectStyle(.soft, for: .vertical)
         } else if active {
-            content.mask {
-                VStack(spacing: 0) {
-                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 12)
-                    Color.black
-                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 12)
-                }
-            }
+            content.mask { legacyMask() }
         } else {
             content
+        }
+    }
+
+    private func legacyMask() -> some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 12)
+            Color.black
+            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 12)
         }
     }
 }

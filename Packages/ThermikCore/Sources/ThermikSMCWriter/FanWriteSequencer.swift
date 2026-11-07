@@ -135,17 +135,26 @@ public final class FanWriteSequencer: MinimumOnlyRecovery {
     public func adoptSavedMinimumBytes(_ bytes: [Int: [UInt8]]) {
         guard profile.scheme == .intelMinimumOnly else { return }
         for (index, original) in bytes.sorted(by: { $0.key < $1.key }) where savedMinimumBytes[index] == nil {
-            let key = FourCC.fan("F%dMn", index)
-            guard let fan = profile.fan(index), let info = try? smc.keyInfo(key),
-                  original.count == Int(info.size), let rpm = SMCCodec.decode(original, as: info).doubleValue,
-                  rpm.isFinite, rpm >= 0, rpm < fan.maxRPM else {
-                log("fan \(index): ignoring the recovered F\(index)Mn bytes \(original)")
-                continue
-            }
-            if let current = try? smc.readRaw(key).1, current == original { continue }
-            savedMinimumBytes[index] = original
-            log(String(format: "fan %d: original F%dMn %.0f rpm recovered from the marker", index, index, rpm))
+            adoptSavedMinimum(index, original: original)
         }
+    }
+
+    private func adoptSavedMinimum(_ index: Int, original: [UInt8]) {
+        let key = FourCC.fan("F%dMn", index)
+        guard let rpm = recoveredMinimumRPM(index, original: original, key: key) else {
+            log("fan \(index): ignoring the recovered F\(index)Mn bytes \(original)")
+            return
+        }
+        if let current = try? smc.readRaw(key).1, current == original { return }
+        savedMinimumBytes[index] = original
+        log(String(format: "fan %d: original F%dMn %.0f rpm recovered from the marker", index, index, rpm))
+    }
+
+    private func recoveredMinimumRPM(_ index: Int, original: [UInt8], key: FourCC) -> Double? {
+        guard let fan = profile.fan(index), let info = try? smc.keyInfo(key),
+              original.count == Int(info.size), let rpm = SMCCodec.decode(original, as: info).doubleValue,
+              rpm.isFinite, rpm >= 0, rpm < fan.maxRPM else { return nil }
+        return rpm
     }
 
     // MARK: - Low-level guarded I/O
@@ -181,93 +190,143 @@ public final class FanWriteSequencer: MinimumOnlyRecovery {
         let fan = try descriptor(index)
         switch profile.scheme {
         case .none: throw FanWriteError.notControllable
-        case .appleSilicon(_, let hasFtst):
-            guard let modeKey = fan.modeKey else { throw FanWriteError.notControllable }
-            if ownedFans.contains(index), readUInt8(modeKey) == 1 { return }
-            if ownedFans.contains(index) {
-                // We owned it but macOS took it back (wake, thermal reclaim). Throttle re-asserts.
-                if let last = lastManualAssert[index], clock.now().timeIntervalSince(last) < timing.minReassertInterval {
-                    throw FanWriteError.reclaimedTooSoon(fan: index)
-                }
-                ownedFans.remove(index)
-            }
-            lastManualAssert[index] = clock.now()
-            try enterManualAppleSilicon(index: index, modeKey: modeKey, hasFtst: hasFtst, onManual: onManual)
-        case .intelModeKey:
-            guard let modeKey = fan.modeKey else { throw FanWriteError.notControllable }
-            if readUInt8(modeKey) != 1 { try writeUInt8(modeKey, 1) }
-            if allowList.contains(FanHardwareProfile.forceBitsKey) { try setForceBit(index, on: true) }
-        case .intelForceBits:
-            try setForceBit(index, on: true)
-        case .intelMinimumOnly:
-            if savedMinimumBytes[index] == nil {
-                do { savedMinimumBytes[index] = try smc.readRaw(.fan("F%dMn", index)).1 } catch let e as SMCError { throw FanWriteError.smc(e) }
-                // I7: the original reaches the recovery marker before anything raises it.
-                do { try willRaiseMinimum?(index) } catch { savedMinimumBytes[index] = nil; throw error }
-            }
+        case .appleSilicon(_, let hasFtst): try ensureManualAppleSilicon(fan, hasFtst: hasFtst, onManual: onManual)
+        case .intelModeKey: try ensureManualIntelMode(fan)
+        case .intelForceBits: try setForceBit(fan.index)
+        case .intelMinimumOnly: try prepareMinimum(fan.index)
         }
-        ownedFans.insert(index)
+        ownedFans.insert(fan.index)
+    }
+
+    private func ensureManualAppleSilicon(_ fan: FanDescriptor, hasFtst: Bool, onManual: (() throws -> Void)?) throws {
+        guard let modeKey = fan.modeKey else { throw FanWriteError.notControllable }
+        let index = fan.index
+        if ownedFans.contains(index), readUInt8(modeKey) == 1 { return }
+        try reassertAppleSilicon(index)
+        lastManualAssert[index] = clock.now()
+        try enterManualAppleSilicon(index: index, modeKey: modeKey, hasFtst: hasFtst, onManual: onManual)
+    }
+
+    private func reassertAppleSilicon(_ index: Int) throws {
+        guard ownedFans.contains(index) else { return }
+        // We owned it but macOS took it back (wake, thermal reclaim). Throttle re-asserts.
+        if let last = lastManualAssert[index], clock.now().timeIntervalSince(last) < timing.minReassertInterval {
+            throw FanWriteError.reclaimedTooSoon(fan: index)
+        }
+        ownedFans.remove(index)
+    }
+
+    private func ensureManualIntelMode(_ fan: FanDescriptor) throws {
+        guard let modeKey = fan.modeKey else { throw FanWriteError.notControllable }
+        if readUInt8(modeKey) != 1 { try writeUInt8(modeKey, 1) }
+        if allowList.contains(FanHardwareProfile.forceBitsKey) { try setForceBit(fan.index) }
+    }
+
+    private func prepareMinimum(_ index: Int) throws {
+        guard savedMinimumBytes[index] == nil else { return }
+        do { savedMinimumBytes[index] = try smc.readRaw(.fan("F%dMn", index)).1 } catch let e as SMCError { throw FanWriteError.smc(e) }
+        // I7: the original reaches the recovery marker before anything raises it.
+        do { try willRaiseMinimum?(index) } catch { savedMinimumBytes[index] = nil; throw error }
     }
 
     private func enterManualAppleSilicon(index: Int, modeKey: FourCC, hasFtst: Bool, onManual: (() throws -> Void)?) throws {
-        let ftst = FanHardwareProfile.ftstKey
         // Phase 1: direct write (M1/M2/M5, and M3/M4 when the OS is not asserting mode 3).
-        var lastError = "none"
+        if let lastError = attemptDirectManual(index: index, modeKey: modeKey, hasFtst: hasFtst, onManual: onManual) {
+            guard hasFtst else {
+                throw FanWriteError.unlockTimeout(fan: index, elapsed: 0, lastError: lastError)
+            }
+            try enterManualUsingFtst(index: index, modeKey: modeKey, initialError: lastError)
+        }
+    }
+
+    private func attemptDirectManual(index: Int, modeKey: FourCC, hasFtst: Bool, onManual: (() throws -> Void)?) -> String? {
         do {
             try writeUInt8(modeKey, 1)
             clock.sleep(timing.readBackDelay)
-            if readUInt8(modeKey) == 1 {
-                // No Ftst on this Mac, or Ftst already 1 (unlock in effect): nothing to escalate to / no reclaim risk.
-                if !hasFtst || readUInt8(ftst) == 1 { log("fan \(index): manual via direct write"); return }
-                if directWriteSticks && !ownedFans.isEmpty { log("fan \(index): manual via direct write (sticky earlier)"); return }
-                try? onManual?()                       // ramp during the check; setTarget writes the target again after it
-                clock.sleep(timing.stickCheckDelay)
-                if readUInt8(modeKey) == 1 { directWriteSticks = true; log("fan \(index): manual via direct write (sticky)"); return }
-                lastError = "direct write reclaimed by macOS"
-            } else { lastError = "direct write not reflected in read-back" }
+            guard readUInt8(modeKey) == 1 else { return "direct write not reflected in read-back" }
+            if directManualAlreadyEffective(index, hasFtst: hasFtst) { return nil }
+            return checkDirectManualStick(index, modeKey: modeKey, onManual: onManual)
         } catch {
-            lastError = "\(error)"     // typically SMC 0x82 (kSMCBadCommand) while macOS holds mode 3
+            return "\(error)"     // typically SMC 0x82 (kSMCBadCommand) while macOS holds mode 3
         }
-        guard hasFtst else {
-            throw FanWriteError.unlockTimeout(fan: index, elapsed: 0, lastError: lastError)
-        }
-
-        // Phase 2: Ftst unlock (M3/M4). Ftst is global; set it once.
-        let start = clock.now()
-        if readUInt8(ftst) != 1 {
-            ftstSetByUs = true                         // set first: clearing an already-0 Ftst later is harmless
-            try writeUInt8(ftst, 1)
-            log("Ftst=1 written; waiting for thermalmonitord to yield")
-            clock.sleep(timing.settleAfterFtst)
-        }
-        while clock.now().timeIntervalSince(start) < timing.unlockDeadline {
-            do {
-                try writeUInt8(modeKey, 1)
-                clock.sleep(timing.readBackDelay)
-                if readUInt8(modeKey) == 1 {
-                    log(String(format: "fan %d: manual via Ftst unlock after %.2fs", index, clock.now().timeIntervalSince(start)))
-                    return
-                }
-                lastError = "mode write accepted but not reflected"
-            } catch {
-                lastError = "\(error)"
-            }
-            clock.sleep(timing.retryInterval)
-        }
-        // Failed: do not leave Ftst=1 behind if nothing else needs it.
-        if ownedFans.isEmpty && ftstSetByUs { clearFtstBestEffort() }
-        throw FanWriteError.unlockTimeout(fan: index, elapsed: clock.now().timeIntervalSince(start), lastError: lastError)
     }
 
-    private func setForceBit(_ index: Int, on: Bool) throws {
+    private func directManualAlreadyEffective(_ index: Int, hasFtst: Bool) -> Bool {
+        // No Ftst on this Mac, or Ftst already 1 (unlock in effect): nothing to escalate to / no reclaim risk.
+        if !hasFtst || readUInt8(FanHardwareProfile.ftstKey) == 1 { log("fan \(index): manual via direct write"); return true }
+        if directWriteSticks && !ownedFans.isEmpty { log("fan \(index): manual via direct write (sticky earlier)"); return true }
+        return false
+    }
+
+    private func checkDirectManualStick(_ index: Int, modeKey: FourCC, onManual: (() throws -> Void)?) -> String? {
+        try? onManual?()                       // ramp during the check; setTarget writes the target again after it
+        clock.sleep(timing.stickCheckDelay)
+        guard readUInt8(modeKey) == 1 else { return "direct write reclaimed by macOS" }
+        directWriteSticks = true
+        log("fan \(index): manual via direct write (sticky)")
+        return nil
+    }
+
+    private func enterManualUsingFtst(index: Int, modeKey: FourCC, initialError: String) throws {
+        // Phase 2: Ftst unlock (M3/M4). Ftst is global; set it once.
+        let start = clock.now()
+        try prepareFtstForUnlock()
+        if let lastError = waitForFtstUnlock(index: index, modeKey: modeKey, start: start, initialError: initialError) {
+            // Failed: do not leave Ftst=1 behind if nothing else needs it.
+            if ownedFans.isEmpty && ftstSetByUs { clearFtstBestEffort() }
+            throw FanWriteError.unlockTimeout(fan: index, elapsed: clock.now().timeIntervalSince(start), lastError: lastError)
+        }
+    }
+
+    private func prepareFtstForUnlock() throws {
+        let ftst = FanHardwareProfile.ftstKey
+        guard readUInt8(ftst) != 1 else { return }
+        ftstSetByUs = true                         // set first: clearing an already-0 Ftst later is harmless
+        try writeUInt8(ftst, 1)
+        log("Ftst=1 written; waiting for thermalmonitord to yield")
+        clock.sleep(timing.settleAfterFtst)
+    }
+
+    private func waitForFtstUnlock(index: Int, modeKey: FourCC, start: Date, initialError: String) -> String? {
+        var lastError = initialError
+        while clock.now().timeIntervalSince(start) < timing.unlockDeadline {
+            guard let error = attemptFtstModeWrite(modeKey) else {
+                log(String(format: "fan %d: manual via Ftst unlock after %.2fs", index, clock.now().timeIntervalSince(start)))
+                return nil
+            }
+            lastError = error
+            clock.sleep(timing.retryInterval)
+        }
+        return lastError
+    }
+
+    private func attemptFtstModeWrite(_ modeKey: FourCC) -> String? {
+        do {
+            try writeUInt8(modeKey, 1)
+            clock.sleep(timing.readBackDelay)
+            return readUInt8(modeKey) == 1 ? nil : "mode write accepted but not reflected"
+        } catch {
+            return "\(error)"
+        }
+    }
+
+    private func setForceBit(_ index: Int) throws {
+        try updateForceBit(index) { current, bit in current | bit }
+    }
+
+    private func clearForceBit(_ index: Int) throws {
+        try updateForceBit(index) { current, bit in current & ~bit }
+    }
+
+    private func updateForceBit(_ index: Int, transform: (UInt16, UInt16) -> UInt16) throws {
         let key = FanHardwareProfile.forceBitsKey
         let raw: [UInt8]
         do { raw = try smc.readRaw(key).1 } catch let e as SMCError { throw FanWriteError.smc(e) }
         guard raw.count >= 2 else { throw FanWriteError.smc(.sizeMismatch(key: key, expected: 2, actual: raw.count)) }
-        let cur = UInt16(raw[0]) << 8 | UInt16(raw[1])                 // big-endian bitmask
+        let current = UInt16(raw[0]) << 8 | UInt16(raw[1])             // big-endian bitmask
         let bit = UInt16(1) << UInt16(index)
-        let new = on ? (cur | bit) : (cur & ~bit)
-        if new != cur { try write(key, [UInt8(new >> 8), UInt8(new & 0xFF)]) }
+        let new = transform(current, bit)
+        if new != current { try write(key, [UInt8(new >> 8), UInt8(new & 0xFF)]) }
     }
 
     // MARK: - Target
@@ -276,45 +335,68 @@ public final class FanWriteSequencer: MinimumOnlyRecovery {
     @discardableResult
     public func setTarget(_ index: Int, rpm requested: Double) throws -> Double {
         let fan = try descriptor(index)
+        let rpm = try clampedTarget(fan, requested: requested)
+        let earlyTarget = earlyTargetWriter(index, rpm: rpm)
+        try ensureManual(index, onManual: earlyTarget)
+        try writeTarget(index, rpm: rpm)
+        return rpm
+    }
+
+    private func clampedTarget(_ fan: FanDescriptor, requested: Double) throws -> Double {
         guard requested.isFinite, requested >= 0 else { throw FanWriteError.smc(.invalidValue("rpm \(requested)")) }
         // I1: the SMC does no sanity checks. Exactly 0 is a stop where the hardware has one (the helper decides when).
-        let rpm = requested == 0 && profile.scheme.allowsFanStop ? 0 : fan.clamp(requested).rounded()
-        // Early target write for the stick check (Apple Silicon direct path); encoding problems surface below.
-        let earlyTarget: (() throws -> Void)? = profile.scheme == .intelMinimumOnly ? nil : { [self] in
+        return requested == 0 && profile.scheme.allowsFanStop ? 0 : fan.clamp(requested).rounded()
+    }
+
+    /// Early target write for the stick check (Apple Silicon direct path); encoding problems surface below.
+    private func earlyTargetWriter(_ index: Int, rpm: Double) -> (() throws -> Void)? {
+        guard profile.scheme != .intelMinimumOnly else { return nil }
+        return { [self] in
             let key = FourCC.fan("F%dTg", index)
             try self.write(key, try SMCCodec.encodeRPM(rpm, as: try smc.keyInfo(key), key: key))
         }
-        try ensureManual(index, onManual: earlyTarget)
+    }
 
+    private func writeTarget(_ index: Int, rpm: Double) throws {
         if profile.scheme == .intelMinimumOnly {
-            let key = FourCC.fan("F%dMn", index)
-            let info: SMCKeyInfo
-            do { info = try smc.keyInfo(key) } catch let e as SMCError { throw FanWriteError.smc(e) }
-            let bytes: [UInt8]
-            do { bytes = try SMCCodec.encodeRPM(rpm, as: info, key: key) } catch let e as SMCError { throw FanWriteError.smc(e) }
-            try write(key, bytes)
-            appliedRPM[index] = rpm
-            return rpm
+            try writeMinimumTarget(index, rpm: rpm)
+            return
         }
+        try writeStandardTarget(index, rpm: rpm)
+    }
 
-        let key = FourCC.fan("F%dTg", index)
+    private func writeMinimumTarget(_ index: Int, rpm: Double) throws {
+        let key = FourCC.fan("F%dMn", index)
+        let bytes = try encodedTarget(key, rpm: rpm)
+        try write(key, bytes)
+        appliedRPM[index] = rpm
+    }
+
+    private func encodedTarget(_ key: FourCC, rpm: Double) throws -> [UInt8] {
         let info: SMCKeyInfo
         do { info = try smc.keyInfo(key) } catch let e as SMCError { throw FanWriteError.smc(e) }
-        let bytes: [UInt8]
-        do { bytes = try SMCCodec.encodeRPM(rpm, as: info, key: key) } catch let e as SMCError { throw FanWriteError.smc(e) }
+        do { return try SMCCodec.encodeRPM(rpm, as: info, key: key) } catch let e as SMCError { throw FanWriteError.smc(e) }
+    }
+
+    private func writeStandardTarget(_ index: Int, rpm: Double) throws {
+        let key = FourCC.fan("F%dTg", index)
+        let bytes = try encodedTarget(key, rpm: rpm)
         do {
             try write(key, bytes)
         } catch FanWriteError.smc(.firmware(SMCResultCode.keySizeMismatch.rawValue, _)) {
-            // kSMCKeySizeMismatch (0x87): observed on F0Tg with the value applied anyway (agoodkind). Verify.
-            clock.sleep(timing.readBackDelay)
-            let back = (try? smc.readNumber(key)) ?? -1
-            guard abs(back - rpm) < 1 else {
-                throw FanWriteError.verificationFailed(key: key, expected: "\(rpm)", actual: "\(back)")
-            }
+            try verifyTargetAfterSizeMismatch(key, rpm: rpm)
         }
         appliedRPM[index] = rpm
         spinUpStartedAt[index] = nil
-        return rpm
+    }
+
+    private func verifyTargetAfterSizeMismatch(_ key: FourCC, rpm: Double) throws {
+        // kSMCKeySizeMismatch (0x87): observed on F0Tg with the value applied anyway (agoodkind). Verify.
+        clock.sleep(timing.readBackDelay)
+        let back = (try? smc.readNumber(key)) ?? -1
+        guard abs(back - rpm) < 1 else {
+            throw FanWriteError.verificationFailed(key: key, expected: "\(rpm)", actual: "\(back)")
+        }
     }
 
     // MARK: - Release
@@ -323,94 +405,143 @@ public final class FanWriteSequencer: MinimumOnlyRecovery {
     public func release(_ index: Int) throws {
         let fan = try descriptor(index)
         guard ownedFans.contains(index) else { return }
-        switch profile.scheme {
-        case .appleSilicon, .intelModeKey:
-            if let m = fan.modeKey { try releaseMode(fan, m) }
-            if case .intelModeKey = profile.scheme, allowList.contains(FanHardwareProfile.forceBitsKey) { try setForceBit(index, on: false) }
-        case .intelForceBits:
-            try setForceBit(index, on: false)
-        case .intelMinimumOnly:
-            if let orig = savedMinimumBytes[index] { try write(.fan("F%dMn", index), orig); savedMinimumBytes[index] = nil }
-        case .none: break
-        }
+        try releaseFan(fan)
         ownedFans.remove(index)
         appliedRPM[index] = nil
-        if ownedFans.isEmpty && ftstSetByUs {
-            try writeUInt8(FanHardwareProfile.ftstKey, 0); ftstSetByUs = false; log("Ftst=0 written; macOS reclaims fans")
+        try clearFtstAfterLastRelease()
+    }
+
+    private func releaseFan(_ fan: FanDescriptor) throws {
+        switch profile.scheme {
+        case .appleSilicon, .intelModeKey:
+            if let mode = fan.modeKey { try releaseMode(fan, mode) }
+            if case .intelModeKey = profile.scheme, allowList.contains(FanHardwareProfile.forceBitsKey) { try clearForceBit(fan.index) }
+        case .intelForceBits:
+            try clearForceBit(fan.index)
+        case .intelMinimumOnly:
+            try restoreSavedMinimum(fan.index)
+        case .none: break
         }
+    }
+
+    private func restoreSavedMinimum(_ index: Int) throws {
+        guard let original = savedMinimumBytes[index] else { return }
+        try write(.fan("F%dMn", index), original)
+        savedMinimumBytes[index] = nil
+    }
+
+    private func clearFtstAfterLastRelease() throws {
+        guard ownedFans.isEmpty && ftstSetByUs else { return }
+        try writeUInt8(FanHardwareProfile.ftstKey, 0)
+        ftstSetByUs = false
+        log("Ftst=0 written; macOS reclaims fans")
+    }
+
+    private struct ReleasePolicy {
+        let operation: String
+        let releasesMode: (FanDescriptor, FourCC) -> Bool
+        let forceBitsAfter: (UInt16, UInt16) -> UInt16
+        let shouldReleaseFtst: (FourCC) -> Bool
     }
 
     /// Never throws; retries each write of state Thermik recorded. Returns human-readable failures.
     @discardableResult
     public func releaseAll(reason: String) -> [String] {
-        performRelease(reason: reason, operation: "releaseAll",
-                       releasesMode: { fan, _ in ownedFans.contains(fan.index) },
-                       forceBitsAfter: { current, ours in current & ~ours },
-                       shouldReleaseFtst: { _ in ftstSetByUs })
+        let policy = ReleasePolicy(operation: "releaseAll",
+                                   releasesMode: { fan, _ in self.ownedFans.contains(fan.index) },
+                                   forceBitsAfter: { current, ours in current & ~ours },
+                                   shouldReleaseFtst: { _ in self.ftstSetByUs })
+        return performRelease(reason: reason, policy: policy)
     }
 
     /// Also clears unrecorded state left by a crash or an explicit reset. Never throws; retries each write.
     @discardableResult
     public func forceReleaseAll(reason: String) -> [String] {
-        performRelease(reason: reason, operation: "forceReleaseAll",
-                       releasesMode: { fan, mode in ownedFans.contains(fan.index) || readUInt8(mode) == 1 },
-                       forceBitsAfter: { _, _ in 0 },
-                       shouldReleaseFtst: { key in ftstSetByUs || readUInt8(key) == 1 })
+        let policy = ReleasePolicy(operation: "forceReleaseAll",
+                                   releasesMode: { fan, mode in self.ownedFans.contains(fan.index) || self.readUInt8(mode) == 1 },
+                                   forceBitsAfter: { _, _ in 0 },
+                                   shouldReleaseFtst: { key in self.ftstSetByUs || self.readUInt8(key) == 1 })
+        return performRelease(reason: reason, policy: policy)
     }
 
-    private func performRelease(reason: String, operation: String,
-                                releasesMode: (FanDescriptor, FourCC) -> Bool,
-                                forceBitsAfter: (UInt16, UInt16) -> UInt16,
-                                shouldReleaseFtst: (FourCC) -> Bool) -> [String] {
-        log("\(operation)(reason: \(reason))")
+    private func performRelease(reason: String, policy: ReleasePolicy) -> [String] {
+        log("\(policy.operation)(reason: \(reason))")
         var failures: [String] = []
-        @discardableResult func attempt(_ what: String, _ body: () throws -> Void) -> Bool {
-            for n in 1...max(1, timing.restoreAttempts) {
-                do { try body(); return true } catch {
-                    if n == max(1, timing.restoreAttempts) { failures.append("\(what): \(error)") } else { clock.sleep(timing.restoreRetryDelay) }
-                }
-            }
-            return false
-        }
-        // Every stopped fan spins up first, so their waits in `releaseMode` overlap.
+        spinUpFansForRelease(policy)
+        releaseFans(policy, failures: &failures)
+        releaseForceBits(policy, failures: &failures)
+        releaseFtst(policy, failures: &failures)
+        if failures.isEmpty { resetAfterRelease() }
+        return failures
+    }
+
+    private func spinUpFansForRelease(_ policy: ReleasePolicy) {
         for fan in profile.fans {
-            guard let mode = fan.modeKey, releasesMode(fan, mode) else { continue }
+            guard let mode = fan.modeKey, policy.releasesMode(fan, mode) else { continue }
             try? spinUpForRelease(fan)
         }
-        for fan in profile.fans {
-            switch profile.scheme {
-            case .appleSilicon, .intelModeKey:
-                if let m = fan.modeKey, releasesMode(fan, m) {
-                    attempt("\(m)=0") { try releaseMode(fan, m) }
-                }
-            case .intelMinimumOnly:
-                // Keep the original until it is back in the SMC: the scheduled retry needs it, and so does the
-                // recovery marker that HelperService keeps while the restore is incomplete.
-                if let orig = savedMinimumBytes[fan.index],
-                   attempt("F\(fan.index)Mn restore", { try write(.fan("F%dMn", fan.index), orig) }) {
-                    savedMinimumBytes[fan.index] = nil
-                }
-            default: break
+    }
+
+    private func releaseFans(_ policy: ReleasePolicy, failures: inout [String]) {
+        for fan in profile.fans { release(fan, policy: policy, failures: &failures) }
+    }
+
+    private func release(_ fan: FanDescriptor, policy: ReleasePolicy, failures: inout [String]) {
+        switch profile.scheme {
+        case .appleSilicon, .intelModeKey: releaseModeIfNeeded(fan, policy: policy, failures: &failures)
+        case .intelMinimumOnly: restoreMinimum(fan, failures: &failures)
+        default: break
+        }
+    }
+
+    private func releaseModeIfNeeded(_ fan: FanDescriptor, policy: ReleasePolicy, failures: inout [String]) {
+        guard let mode = fan.modeKey, policy.releasesMode(fan, mode) else { return }
+        attempt("\(mode)=0", { try releaseMode(fan, mode) }, failures: &failures)
+    }
+
+    /// Keep the original minimum until it is back in the SMC for retries and the recovery marker.
+    private func restoreMinimum(_ fan: FanDescriptor, failures: inout [String]) {
+        guard let original = savedMinimumBytes[fan.index] else { return }
+        let restored = attempt("F\(fan.index)Mn restore", { try write(.fan("F%dMn", fan.index), original) }, failures: &failures)
+        if restored { savedMinimumBytes[fan.index] = nil }
+    }
+
+    private func releaseForceBits(_ policy: ReleasePolicy, failures: inout [String]) {
+        let key = FanHardwareProfile.forceBitsKey
+        guard allowList.contains(key) else { return }
+        attempt("FS!=0", { try updateForceBits(key, policy: policy) }, failures: &failures)
+    }
+
+    private func updateForceBits(_ key: FourCC, policy: ReleasePolicy) throws {
+        let raw = try smc.readRaw(key).1
+        let current = raw.count >= 2 ? (UInt16(raw[0]) << 8 | UInt16(raw[1])) : 0
+        let ours = ownedFans.reduce(UInt16(0)) { $0 | (UInt16(1) << UInt16($1)) }
+        let new = policy.forceBitsAfter(current, ours)
+        if new != current { try write(key, [UInt8(new >> 8), UInt8(new & 0xFF)]) }
+    }
+
+    private func releaseFtst(_ policy: ReleasePolicy, failures: inout [String]) {
+        let key = FanHardwareProfile.ftstKey
+        guard allowList.contains(key), policy.shouldReleaseFtst(key) else { return }
+        attempt("Ftst=0", { try writeUInt8(key, 0) }, failures: &failures)
+    }
+
+    private func resetAfterRelease() {
+        ownedFans.removeAll()
+        appliedRPM.removeAll()
+        ftstSetByUs = false
+        lastManualAssert.removeAll()
+        spinUpStartedAt.removeAll()
+    }
+
+    @discardableResult
+    private func attempt(_ what: String, _ body: () throws -> Void, failures: inout [String]) -> Bool {
+        for n in 1...max(1, timing.restoreAttempts) {
+            do { try body(); return true } catch {
+                if n == max(1, timing.restoreAttempts) { failures.append("\(what): \(error)") } else { clock.sleep(timing.restoreRetryDelay) }
             }
         }
-        let fsKey = FanHardwareProfile.forceBitsKey
-        if allowList.contains(fsKey) {
-            attempt("FS!=0") {
-                let raw = try smc.readRaw(fsKey).1
-                let cur = raw.count >= 2 ? (UInt16(raw[0]) << 8 | UInt16(raw[1])) : 0
-                let ours = ownedFans.reduce(UInt16(0)) { $0 | (UInt16(1) << UInt16($1)) }
-                let new = forceBitsAfter(cur, ours)
-                if new != cur { try write(fsKey, [UInt8(new >> 8), UInt8(new & 0xFF)]) }
-            }
-        }
-        let ftst = FanHardwareProfile.ftstKey
-        if allowList.contains(ftst), shouldReleaseFtst(ftst) {
-            attempt("Ftst=0") { try writeUInt8(ftst, 0) }
-        }
-        if failures.isEmpty {
-            ownedFans.removeAll(); appliedRPM.removeAll(); ftstSetByUs = false; lastManualAssert.removeAll(); spinUpStartedAt.removeAll()
-        }
-        return failures
+        return false
     }
 
     /// Mode back to System. A fan Thermik stopped (target 0) cannot go straight back on M4 Max: the SMC refuses
@@ -423,16 +554,24 @@ public final class FanWriteSequencer: MinimumOnlyRecovery {
         guard let started = spinUpStartedAt[fan.index] else { try writeUInt8(modeKey, 0); return }
         while true {
             do {
-                try writeUInt8(modeKey, 0)
-                spinUpStartedAt[fan.index] = nil
-                log(String(format: "fan %d: stopped fan spun up to %.0f rpm and handed back %.2fs after the spin-up", fan.index,
-                           fan.minRPM, clock.now().timeIntervalSince(started)))
+                try finishReleaseMode(fan, modeKey: modeKey, started: started)
                 return
             } catch {
-                guard clock.now().timeIntervalSince(started) < timing.releaseSpinUpDeadline else { throw error }
-                clock.sleep(timing.releaseSpinUpRetryInterval)
+                try waitForReleaseRetry(started: started, error: error)
             }
         }
+    }
+
+    private func finishReleaseMode(_ fan: FanDescriptor, modeKey: FourCC, started: Date) throws {
+        try writeUInt8(modeKey, 0)
+        spinUpStartedAt[fan.index] = nil
+        log(String(format: "fan %d: stopped fan spun up to %.0f rpm and handed back %.2fs after the spin-up", fan.index,
+                   fan.minRPM, clock.now().timeIntervalSince(started)))
+    }
+
+    private func waitForReleaseRetry(started: Date, error: Error) throws {
+        guard clock.now().timeIntervalSince(started) < timing.releaseSpinUpDeadline else { throw error }
+        clock.sleep(timing.releaseSpinUpRetryInterval)
     }
 
     /// A stopped fan gets its minimum as the target (once: afterwards it no longer counts as stopped).

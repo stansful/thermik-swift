@@ -51,151 +51,245 @@ public actor SensorSampler: SensorSampling {
     public func start() async throws -> SensorInventory {
         if let inventory { return inventory }
         let clock = ContinuousClock()
-        let t0 = clock.now
+        let started = clock.now
+        let discovered = try discoverInventory()
+        inventory = discovered.inventory
+        logStart(discovered.inventory, hardware: discovered.hardware, started: started, clock: clock)
+        return discovered.inventory
+    }
 
+    private func discoverInventory() throws -> (inventory: SensorInventory, hardware: SensorCatalog.Hardware) {
         // 1–2. SMC (optional: HID-only mode when it cannot be opened) and identity.
-        var provider: SMCSensorProvider?
-        do {
-            let p = try SMCSensorProvider()
-            try p.discover()
-            provider = p
-        } catch {
-            log.error("SMC unavailable: \(String(describing: error), privacy: .public); continuing with HID only")
-        }
+        let provider = discoverSMC()
         let identity = ChipIdentity.read(smc: provider?.connection)
         filter = SanityFilter(appleSilicon: identity.isAppleSilicon)
+        let discovered = try discoverCatalog(provider: provider, identity: identity)
+        smc = provider
+        indexSensors(discovered.catalog.sensors, provider: provider)
+        let inv = makeInventory(identity: identity, catalog: discovered.catalog, provider: provider)
+        return (inv, discovered.hardware)
+    }
 
-        // 3. Catalog inputs. HID is opened only when something can come from it: DB `hid:` entries, an unknown chip,
-        //    a chip without SMC die keys, or no SMC at all.
-        let dbName = SensorCatalog.databaseName(for: identity)
-        let db = SensorCatalog.loadDatabase(platform: dbName)
-        let smcKeys = provider?.temperatureKeys.map { (key: $0.key.description, type: $0.info.type.description) } ?? []
-        let needsHID = provider == nil || db == nil || !Heuristics.hasSMCDieKeys(smcKeys.map(\.key))
-            || db?.sensors.contains { $0.key.hasPrefix("hid:") } == true
-        if needsHID { hid = HIDSensorReader(kind: .temperature) }
+    private func discoverSMC() -> SMCSensorProvider? {
+        do {
+            let provider = try SMCSensorProvider()
+            try provider.discover()
+            return provider
+        } catch {
+            log.error("SMC unavailable: \(String(describing: error), privacy: .public); continuing with HID only")
+            return nil
+        }
+    }
 
+    private func discoverCatalog(provider: SMCSensorProvider?, identity: ChipIdentity) throws
+        -> (catalog: SensorCatalog, hardware: SensorCatalog.Hardware) {
+        let db = SensorCatalog.loadDatabase(platform: SensorCatalog.databaseName(for: identity))
+        prepareHID(provider: provider, database: db)
         let hw = SensorCatalog.hardware(provider: provider, hidProducts: hid?.products ?? [], identity: identity, database: db)
         let catalog = SensorCatalog(database: db, hardware: hw)
+        try requireSource(provider: provider, catalog: catalog)
+        return (catalog, hw)
+    }
+
+    /// HID is opened only when something can come from it: DB `hid:` entries, an unknown chip, no SMC die keys, or no SMC.
+    private func prepareHID(provider: SMCSensorProvider?, database: ChipSensorDatabase?) {
+        let smcKeys = provider?.temperatureKeys.map { (key: $0.key.description, type: $0.info.type.description) } ?? []
+        let needsHID = provider == nil || database == nil || !Heuristics.hasSMCDieKeys(smcKeys.map(\.key))
+            || database?.sensors.contains { $0.key.hasPrefix("hid:") } == true
+        if needsHID { hid = HIDSensorReader(kind: .temperature) }
+    }
+
+    private func requireSource(provider: SMCSensorProvider?, catalog: SensorCatalog) throws {
         guard provider != nil || catalog.sensors.contains(where: { $0.id.source == .hid }) else {
             log.error("no sensor source (SMC and HID unavailable)")
             throw SensorSamplerError.noSensorSource
         }
+    }
 
-        // 4–5. Lookups for the hot path.
-        smc = provider
+    private func indexSensors(_ sensors: [Sensor], provider: SMCSensorProvider?) {
         let fourCC = Dictionary(provider?.temperatureKeys.map { ($0.key.description, $0.key) } ?? [], uniquingKeysWith: { a, _ in a })
-        for s in catalog.sensors {
-            descriptors[s.id] = s.descriptor
-            if s.id.source == .smc, let k = fourCC[s.id.key] { keyOf[s.id] = k; idOf[k] = s.id }
-            if Self.gatingGroups.contains(s.group), let c = s.descriptor.cluster { clusterOf[s.id] = ClusterKey(group: s.group, cluster: c) }
-        }
+        for sensor in sensors { index(sensor, fourCC: fourCC) }
+    }
 
+    private func index(_ sensor: Sensor, fourCC: [String: FourCC]) {
+        descriptors[sensor.id] = sensor.descriptor
+        if sensor.id.source == .smc, let key = fourCC[sensor.id.key] {
+            keyOf[sensor.id] = key
+            idOf[key] = sensor.id
+        }
+        guard Self.gatingGroups.contains(sensor.group), let cluster = sensor.descriptor.cluster else { return }
+        clusterOf[sensor.id] = ClusterKey(group: sensor.group, cluster: cluster)
+    }
+
+    private func makeInventory(identity: ChipIdentity, catalog: SensorCatalog,
+                               provider: SMCSensorProvider?) -> SensorInventory {
         // 6. Fans (read-only discovery). 7. Headline / safety sets come resolved from the catalog.
         let fans = provider.map { FanHardwareProfile.discover($0.connection) } ?? .none
-        let inv = SensorInventory(identity: identity, sensors: catalog.sensors, headline: catalog.headline,
-                                  safetySet: catalog.safetySet, fanProfile: fans, catalogStatus: catalog.status,
-                                  smcAvailable: provider != nil, smcKeyCount: provider?.keyCount ?? 0,
-                                  dieLayout: catalog.dieLayout, fanNames: catalog.fanNames)
-        inventory = inv
-        let elapsed = clock.now - t0
+        return SensorInventory(identity: identity, sensors: catalog.sensors, headline: catalog.headline,
+                               safetySet: catalog.safetySet, fanProfile: fans, catalogStatus: catalog.status,
+                               smcAvailable: provider != nil, smcKeyCount: provider?.keyCount ?? 0,
+                               dieLayout: catalog.dieLayout, fanNames: catalog.fanNames)
+    }
+
+    private func logStart(_ inv: SensorInventory, hardware: SensorCatalog.Hardware?, started: ContinuousClock.Instant,
+                          clock: ContinuousClock) {
+        let elapsed = clock.now - started
         startDuration = elapsed
         let visible = inv.sensors.filter(\.isVisibleByDefault).count
         let ms = Double(elapsed.components.attoseconds) / 1e15 + Double(elapsed.components.seconds) * 1e3
         log.info("""
             sensors: \(inv.sensors.count, privacy: .public) (\(visible, privacy: .public) visible), \
-            catalog \(String(describing: catalog.status), privacy: .public), \
-            smc keys \(inv.smcKeyCount, privacy: .public), hid products \(hw.hidProducts.count, privacy: .public), \
-            fans \(fans.fans.count, privacy: .public), start \(ms, format: .fixed(precision: 1), privacy: .public) ms
+            catalog \(String(describing: inv.catalogStatus), privacy: .public), \
+            smc keys \(inv.smcKeyCount, privacy: .public), hid products \(hardware?.hidProducts.count ?? 0, privacy: .public), \
+            fans \(inv.fanProfile.fans.count, privacy: .public), start \(ms, format: .fixed(precision: 1), privacy: .public) ms
             """)
-        return inv
     }
 
     // MARK: One tick
+
+    private struct SamplingPass {
+        var values: [SensorID: Double] = [:]
+        var raw: [SensorID: Double] = [:]
+        var read = Set<SensorID>()               // decoded this tick (valid or not)
+        var smcKeys: [FourCC] = []
+        var hidIDs: [SensorID] = []
+        var seen = Set<SensorID>()
+
+        init(capacity: Int) {
+            values.reserveCapacity(capacity)
+            raw.reserveCapacity(capacity)
+        }
+    }
 
     public func sample(_ request: SampleRequest) async -> SensorFrame {
         let date = Date()
         let now = ContinuousClock.now
         guard inventory != nil else { return .empty(date) }
-        let postWake: Bool
-        if let until = postWakeUntil, now < until { postWake = true } else { postWake = false; postWakeUntil = nil }
-
-        var values: [SensorID: Double] = [:]
-        var raw: [SensorID: Double] = [:]
-        var read = Set<SensorID>()               // decoded this tick (valid or not)
-        values.reserveCapacity(request.sensorIDs.count)
-        raw.reserveCapacity(request.sensorIDs.count)
-
-        // Split the request; ignore ids this inventory does not know and duplicates.
-        var smcKeys: [FourCC] = []
-        var hidIDs: [SensorID] = []
-        var seen = Set<SensorID>()
-        for id in request.sensorIDs where seen.insert(id).inserted {
-            switch id.source {
-            case .smc: if let k = keyOf[id] { smcKeys.append(k) }
-            case .hid: if descriptors[id] != nil { hidIDs.append(id) }
-            }
-        }
-
-        // SMC pass. The connection replaces a stale client itself (once, then with backoff while it cannot be opened);
-        // a pass that still finds it lost is abandoned for this tick.
-        var smcHealthy = smc != nil
+        let postWake = isPostWake(at: now)
+        var pass = SamplingPass(capacity: request.sensorIDs.count)
+        split(request, into: &pass)
         let smcFailures = smc?.connection.connectionFailureCount ?? 0
-        if let smc, !smcKeys.isEmpty {
-            smcHealthy = smc.readPass(smcKeys) { k, v, _ in
-                guard let id = idOf[k], let d = descriptors[id] else { return }
-                read.insert(id)
-                if v.isFinite { raw[id] = v }
-                guard filter.isValid(v, d) else { return }
-                if postWake && Self.gatingGroups.contains(d.group) { return }   // 40.0 placeholders right after wake
-                values[id] = v
-            }
-        }
+        let smcHealthy = readSMC(&pass, postWake: postWake)
+        readHID(&pass, now: now, postWake: postWake)
+        return makeFrame(pass, request: request, date: date, postWake: postWake, smcHealthy: smcHealthy, smcFailures: smcFailures)
+    }
 
-        // HID: at most every `hidInterval`; a newly requested product is read at once.
-        if let hid, !hidIDs.isEmpty {
-            let due = hidReadAt.map { now - $0 >= Self.hidInterval } ?? true
-            let fresh = due ? hidIDs : hidIDs.filter { !hidCached.contains($0) }
-            if !fresh.isEmpty {
-                let got = hid.read(products: fresh.map(\.key))
-                if due { hidCache.removeAll(keepingCapacity: true); hidCached.removeAll(keepingCapacity: true); hidReadAt = now }
-                for id in fresh { hidCached.insert(id); hidCache[id] = got[id.key] }
-            }
-            for id in hidIDs {
-                guard let v = hidCache[id], let d = descriptors[id] else { continue }
-                read.insert(id)
-                raw[id] = v
-                if filter.isValid(v, d) && !(postWake && Self.gatingGroups.contains(d.group)) { values[id] = v }
-            }
-        }
+    private func isPostWake(at now: ContinuousClock.Instant) -> Bool {
+        guard let until = postWakeUntil else { return false }
+        if now < until { return true }
+        postWakeUntil = nil
+        return false
+    }
 
-        // Gated clusters: every requested key of a (group, cluster) that was read is invalid by value (the post-wake
-        // forcing alone does not count as gating).
-        var clusters: [ClusterKey: (ids: [SensorID], anyValid: Bool)] = [:]
-        for id in read {
-            guard let c = clusterOf[id], let d = descriptors[id] else { continue }
-            let validByValue = raw[id].map { filter.isValid($0, d) } ?? false
-            var e = clusters[c] ?? ([], false)
-            e.ids.append(id)
-            e.anyValid = e.anyValid || validByValue
-            clusters[c] = e
+    /// Split the request; ignore ids this inventory does not know and duplicates.
+    private func split(_ request: SampleRequest, into pass: inout SamplingPass) {
+        for id in request.sensorIDs where pass.seen.insert(id).inserted {
+            switch id.source {
+            case .smc: if let key = keyOf[id] { pass.smcKeys.append(key) }
+            case .hid: if descriptors[id] != nil { pass.hidIDs.append(id) }
+            }
         }
+    }
+
+    /// The connection replaces a stale client itself (once, then with backoff); a lost pass is abandoned for this tick.
+    private func readSMC(_ pass: inout SamplingPass, postWake: Bool) -> Bool {
+        guard let smc, !pass.smcKeys.isEmpty else { return smc != nil }
+        return smc.readPass(pass.smcKeys) { key, value, _ in
+            guard let id = idOf[key], let descriptor = descriptors[id] else { return }
+            pass.read.insert(id)
+            if value.isFinite { pass.raw[id] = value }
+            guard filter.isValid(value, descriptor) else { return }
+            if postWake && Self.gatingGroups.contains(descriptor.group) { return }   // 40.0 placeholders right after wake
+            pass.values[id] = value
+        }
+    }
+
+    /// HID: at most every `hidInterval`; a newly requested product is read at once.
+    private func readHID(_ pass: inout SamplingPass, now: ContinuousClock.Instant, postWake: Bool) {
+        guard let hid, !pass.hidIDs.isEmpty else { return }
+        refreshHIDCache(hid, ids: pass.hidIDs, now: now)
+        for id in pass.hidIDs { recordHID(id, into: &pass, postWake: postWake) }
+    }
+
+    private func refreshHIDCache(_ hid: HIDSensorReader, ids: [SensorID], now: ContinuousClock.Instant) {
+        let due = hidReadAt.map { now - $0 >= Self.hidInterval } ?? true
+        let fresh = due ? ids : ids.filter { !hidCached.contains($0) }
+        guard !fresh.isEmpty else { return }
+        let got = hid.read(products: fresh.map(\.key))
+        if due { resetHIDCache(now: now) }
+        for id in fresh { cacheHID(id, value: got[id.key]) }
+    }
+
+    private func resetHIDCache(now: ContinuousClock.Instant) {
+        hidCache.removeAll(keepingCapacity: true)
+        hidCached.removeAll(keepingCapacity: true)
+        hidReadAt = now
+    }
+
+    private func cacheHID(_ id: SensorID, value: Double?) {
+        hidCached.insert(id)
+        hidCache[id] = value
+    }
+
+    private func recordHID(_ id: SensorID, into pass: inout SamplingPass, postWake: Bool) {
+        guard let value = hidCache[id], let descriptor = descriptors[id] else { return }
+        pass.read.insert(id)
+        pass.raw[id] = value
+        guard filter.isValid(value, descriptor), !(postWake && Self.gatingGroups.contains(descriptor.group)) else { return }
+        pass.values[id] = value
+    }
+
+    private struct ClusterReadings {
+        var ids: [SensorID] = []
+        var anyValid = false
+    }
+
+    /// Gating requires every requested cluster key read to be invalid by value; post-wake forcing alone does not count.
+    private func clusters(_ pass: SamplingPass) -> [ClusterKey: ClusterReadings] {
+        var clusters: [ClusterKey: ClusterReadings] = [:]
+        for id in pass.read {
+            guard let cluster = clusterOf[id], let descriptor = descriptors[id] else { continue }
+            let validByValue = pass.raw[id].map { filter.isValid($0, descriptor) } ?? false
+            var entry = clusters[cluster] ?? ClusterReadings()
+            entry.ids.append(id)
+            entry.anyValid = entry.anyValid || validByValue
+            clusters[cluster] = entry
+        }
+        return clusters
+    }
+
+    private func gatedClusters(_ pass: SamplingPass) -> Set<SensorID> {
+        let clusters = clusters(pass)
         var gated = Set<SensorID>()
-        for (_, e) in clusters where !e.anyValid { gated.formUnion(e.ids) }
+        for (_, entry) in clusters where !entry.anyValid { gated.formUnion(entry.ids) }
+        return gated
+    }
 
-        // Fans and power (skipped when the SMC pass was abandoned: a dead connection would read as 0 rpm).
-        var fans: FanControlState?
-        var power = PowerValues.empty
-        if let smc, smcHealthy, let inv = inventory {
-            if request.components.contains(.fans), !inv.fanProfile.fans.isEmpty {
-                let before = smc.connection.connectionFailureCount
-                fans = FanReader.snapshot(smc.connection, profile: inv.fanProfile, now: date)
-                // The link died during the snapshot (or there was no pass to notice it): its failed reads are 0 rpm.
-                if smc.connection.connectionFailureCount != before { fans = nil }
-            }
-            if request.components.contains(.power) { power = smc.power() }
-        }
+    private func makeFrame(_ pass: SamplingPass, request: SampleRequest, date: Date, postWake: Bool,
+                           smcHealthy: Bool, smcFailures: Int) -> SensorFrame {
+        let gated = gatedClusters(pass)
+        let components = readComponents(request, date: date, smcHealthy: smcHealthy)
         if let smc { noteSMCLink(smc.connection, failed: smc.connection.connectionFailureCount != smcFailures) }
-        return SensorFrame(date: date, values: values, raw: raw, gated: gated, fans: fans, power: power, isPostWake: postWake)
+        return SensorFrame(date: date, values: pass.values, raw: pass.raw, gated: gated,
+                           fans: components.fans, power: components.power, isPostWake: postWake)
+    }
+
+    /// Fans and power are skipped when the SMC pass was abandoned: a dead connection would read as 0 rpm.
+    private func readComponents(_ request: SampleRequest, date: Date, smcHealthy: Bool)
+        -> (fans: FanControlState?, power: PowerValues) {
+        guard let smc, smcHealthy, let inv = inventory else { return (nil, .empty) }
+        let fans = readFans(smc, request: request, inventory: inv, date: date)
+        let power = request.components.contains(.power) ? smc.power() : .empty
+        return (fans, power)
+    }
+
+    private func readFans(_ smc: SMCSensorProvider, request: SampleRequest,
+                          inventory: SensorInventory, date: Date) -> FanControlState? {
+        guard request.components.contains(.fans), !inventory.fanProfile.fans.isEmpty else { return nil }
+        let before = smc.connection.connectionFailureCount
+        let snapshot = FanReader.snapshot(smc.connection, profile: inventory.fanProfile, now: date)
+        // The link died during the snapshot (or there was no pass to notice it): its failed reads are 0 rpm.
+        return smc.connection.connectionFailureCount == before ? snapshot : nil
     }
 
     /// Logs each SMC link transition once (`failed`: a call this tick found no usable client) instead of an error per
@@ -204,14 +298,24 @@ public actor SensorSampler: SensorSampling {
         let reopens = link.reopenCount
         defer { smcReopens = reopens }
         if failed {
-            if !smcLinkDown { log.error("SMC connection lost: SMC readings, fans and power are skipped until it can be reopened (retried with backoff)") }
-            smcLinkDown = true
-        } else if smcLinkDown, link.isOpen {
+            noteSMCLinkFailure()
+            return
+        }
+        noteAvailableSMCLink(link, reopens: reopens)
+    }
+
+    private func noteSMCLinkFailure() {
+        if !smcLinkDown { log.error("SMC connection lost: SMC readings, fans and power are skipped until it can be reopened (retried with backoff)") }
+        smcLinkDown = true
+    }
+
+    private func noteAvailableSMCLink(_ link: SMCConnection, reopens: Int) {
+        if smcLinkDown, link.isOpen {
             smcLinkDown = false
             log.notice("SMC connection restored")
-        } else if reopens != smcReopens {
-            log.notice("SMC connection was stale: reopened")
+            return
         }
+        if reopens != smcReopens { log.notice("SMC connection was stale: reopened") }
     }
 
     // MARK: Sleep / wake

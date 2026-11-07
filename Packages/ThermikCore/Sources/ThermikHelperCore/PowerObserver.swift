@@ -29,10 +29,7 @@ public final class PowerObserver: @unchecked Sendable {   // handlers set before
     @discardableResult
     public func start() -> Bool {
         let refcon = Unmanaged.passUnretained(self).toOpaque()
-        rootPort = IORegisterForSystemPower(refcon, &notifyPort, { refcon, _, messageType, argument in
-            guard let refcon else { return }
-            Unmanaged<PowerObserver>.fromOpaque(refcon).takeUnretainedValue().handle(messageType: messageType, argument: argument)
-        }, &notifier)
+        rootPort = registerForPowerMessages(refcon: refcon)
         guard rootPort != 0, let notifyPort else {
             powerLog.error("IORegisterForSystemPower failed")
             return false
@@ -42,22 +39,33 @@ public final class PowerObserver: @unchecked Sendable {   // handlers set before
         return true
     }
 
+    private func registerForPowerMessages(refcon: UnsafeMutableRawPointer) -> io_connect_t {
+        IORegisterForSystemPower(refcon, &notifyPort, { refcon, _, messageType, argument in
+            PowerObserver.forwardPowerMessage(refcon: refcon, messageType: messageType, argument: argument)
+        }, &notifier)
+    }
+
+    private static func forwardPowerMessage(refcon: UnsafeMutableRawPointer?, messageType: natural_t,
+                                            argument: UnsafeMutableRawPointer?) {
+        guard let refcon else { return }
+        Unmanaged<PowerObserver>.fromOpaque(refcon).takeUnretainedValue().handle(messageType: messageType, argument: argument)
+    }
+
     private func handle(messageType: natural_t, argument: UnsafeMutableRawPointer?) {
         // `argument` carries the notification ID IOAllowPowerChange expects.
         let notificationID = Int(bitPattern: argument)
         switch messageType {
-        case Self.canSystemSleep:
-            IOAllowPowerChange(rootPort, notificationID)       // never veto idle sleep
-        case Self.systemWillSleep:
-            onWillSleep?()                                      // restore the fans first …
-            IOAllowPowerChange(rootPort, notificationID)       // … then let the system sleep
-        case Self.systemWillNotSleep:
-            powerLog.info("sleep cancelled")
-        case Self.systemHasPoweredOn:
-            onDidWake?()
-        default:
-            break
+        case Self.canSystemSleep: IOAllowPowerChange(rootPort, notificationID)       // never veto idle sleep
+        case Self.systemWillSleep: willSleep(notificationID: notificationID)
+        case Self.systemWillNotSleep: powerLog.info("sleep cancelled")
+        case Self.systemHasPoweredOn: onDidWake?()
+        default: break
         }
+    }
+
+    private func willSleep(notificationID: Int) {
+        onWillSleep?()                                      // restore the fans first …
+        IOAllowPowerChange(rootPort, notificationID)       // … then let the system sleep
     }
 
     deinit {

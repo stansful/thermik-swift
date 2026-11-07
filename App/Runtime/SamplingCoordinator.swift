@@ -70,8 +70,17 @@ import ThermikCore
         await discoverSensors()
         let systemSampler = env.systemSampler
         env.system.setMachine(await systemSampler.start())
-        // Boot history before the first tick: the abnormal-shutdown alert is evaluated once, on the first tick. A slow
-        // reader (Intel `log show`) gets 3 s; its result is applied whenever it arrives.
+        await loadBootHistory()
+        refreshSlowData(env.settings.driveTemperatures ? [.appleBatteryHealth, .nvme] : [.appleBatteryHealth])
+        snapshotCadenceInputs()
+        observeCadenceInputs()
+        runLoop()
+    }
+
+    /// Boot history comes before the first tick: the abnormal-shutdown alert is evaluated once, on the first tick.
+    /// A slow reader (Intel `log show`) gets 3 s; its result is applied whenever it arrives.
+    private func loadBootHistory() async {
+        let systemSampler = env.systemSampler
         let system = env.system
         slowInFlight.insert(.boot)
         let bootReady = await waitAtMost(.seconds(3)) { [weak self] in
@@ -80,15 +89,15 @@ import ThermikCore
             self?.slowInFlight.remove(.boot)
         }
         if !bootReady { log.notice("boot history still loading after 3 s; starting the loop") }
-        refreshSlowData(env.settings.driveTemperatures ? [.appleBatteryHealth, .nvme] : [.appleBatteryHealth])
+    }
+
+    private func snapshotCadenceInputs() {
         lastFast = needsFastCadence
         lastNeedsAll = env.visibility.needsAllSensors
         lastNeedsSoC = env.visibility.needsSoCMetrics
         lastInspected = env.visibility.inspectedSensor
         lastShowHidden = env.settings.showHiddenSensors
         lastIntervalSeconds = nominalSeconds
-        observeCadenceInputs()
-        runLoop()
     }
 
     func stop() {
@@ -109,21 +118,26 @@ import ThermikCore
 
     func resume(afterWake: Bool) {
         isPaused = false
-        if afterWake {
-            wakePending = true                 // next tick: isFirstAfterWake (filters restart)
-            lastRead.removeAll()               // every reader runs on the first tick after wake
-            powerSourcesDirty = true
-            refreshSlowData(.boot)
-            if !env.sensors.isLoaded {         // discovery failed at launch (SMC not ready): try again
-                Task { @MainActor [weak self] in
-                    await self?.discoverSensors()
-                    self?.requestTickSoon()
-                }
-            }
-        }
+        if afterWake { prepareAfterWake() }
         log.info("sampling resumed\(afterWake ? " after wake" : "", privacy: .public)")
         tickRequested = true
         wakeLoop()
+    }
+
+    private func prepareAfterWake() {
+        wakePending = true                 // next tick: isFirstAfterWake (filters restart)
+        lastRead.removeAll()               // every reader runs on the first tick after wake
+        powerSourcesDirty = true
+        refreshSlowData(.boot)
+        if !env.sensors.isLoaded { rediscoverSensorsAfterWake() }
+    }
+
+    /// Discovery can fail at launch when SMC is not ready; wake is the next opportunity to retry it.
+    private func rediscoverSensorsAfterWake() {
+        Task { @MainActor [weak self] in
+            await self?.discoverSensors()
+            self?.requestTickSoon()
+        }
     }
 
     /// Extra tick ASAP (coalesced: at most one pending). Wired to AppRouter.requestTick by AppDelegate.
@@ -172,28 +186,55 @@ import ThermikCore
         }
     }
 
+    private struct TickRequests {
+        let ids: [SensorID]
+        let allVisible: Bool
+        let sensor: SampleRequest
+        let system: SystemSampleRequest
+    }
+
+    private struct TickSample {
+        let requests: TickRequests
+        let frame: SensorFrame
+        let system: SystemFrame
+        let sampled: ContinuousClock.Instant
+    }
+
+    private struct TickTiming {
+        let dt: TimeInterval
+        let afterGap: Bool
+    }
+
     private func step() async {
-        if isPaused {
-            await sleep(until: clock.now.advanced(by: .seconds(3600)), tolerance: .seconds(60))   // resume() wakes it
-            return
-        }
+        if isPaused { await sleepPaused(); return }
         let iv = interval
         let now = clock.now
-        var due = now
-        if let slot = lastSlot, let end = lastTickEnd {
-            // Fixed grid: a timer that fires late (tolerance) does not shift the following ticks.
-            due = max(slot.advanced(by: iv), end.advanced(by: .milliseconds(100)))
-            if tickRequested { due = min(due, max(now, end.advanced(by: Self.minimumSpacing))) }
-        }
-        if due <= now.advanced(by: .milliseconds(2)) {
-            // Requested ticks, and ticks more than half an interval late (a stall, a resume), start a new grid:
-            // the next tick then comes a full interval later, never in a burst to catch up.
-            lastSlot = (tickRequested || lastSlot == nil || now > due.advanced(by: iv / 2)) ? now : due
-            tickRequested = false
-            await tick(interval: iv)
-        } else {
+        let due = nextDeadline(at: now, interval: iv)
+        guard due <= now.advanced(by: .milliseconds(2)) else {
             await sleep(until: due, tolerance: tickRequested ? .zero : iv / 10)
+            return
         }
+        prepareTick(at: now, due: due, interval: iv)
+        await tick(interval: iv)
+    }
+
+    private func sleepPaused() async {
+        await sleep(until: clock.now.advanced(by: .seconds(3600)), tolerance: .seconds(60))   // resume() wakes it
+    }
+
+    private func nextDeadline(at now: ContinuousClock.Instant, interval iv: Duration) -> ContinuousClock.Instant {
+        guard let slot = lastSlot, let end = lastTickEnd else { return now }
+        // Fixed grid: a timer that fires late (tolerance) does not shift the following ticks.
+        var due = max(slot.advanced(by: iv), end.advanced(by: .milliseconds(100)))
+        if tickRequested { due = min(due, max(now, end.advanced(by: Self.minimumSpacing))) }
+        return due
+    }
+
+    private func prepareTick(at now: ContinuousClock.Instant, due: ContinuousClock.Instant, interval iv: Duration) {
+        // Requested ticks, and ticks more than half an interval late (a stall, a resume), start a new grid:
+        // the next tick then comes a full interval later, never in a burst to catch up.
+        lastSlot = (tickRequested || lastSlot == nil || now > due.advanced(by: iv / 2)) ? now : due
+        tickRequested = false
     }
 
     private func sleep(until deadline: ContinuousClock.Instant, tolerance: Duration) async {
@@ -210,114 +251,209 @@ import ThermikCore
         let gen = generation
         let nominal = iv.timeInterval
         let start = clock.now
-        let (ids, allVisible) = sensorRequest()
-        let request = SampleRequest(sensorIDs: ids, components: env.fans.hasFans ? [.fans, .power] : [.power])
-        let systemRequest = self.systemRequest(at: start)
-        let sensorSampler = env.sensorSampler, systemSampler = env.systemSampler
-        async let frameResult = sensorSampler.sample(request)
-        async let systemResult = systemSampler.sample(systemRequest)
-        let frame = await frameResult
-        var system = await systemResult
-        // IOReport is read only while the System page shows it: the first sample after a stretch without one averages
-        // that whole stretch. Drop it; the next tick has a current one.
-        if let soc = system.soc, soc.interval > 3 * nominal { system.soc = nil }
-        let sampled = clock.now
+        let sampledTick = await sample(at: start, nominal: nominal)
         guard gen == generation, !Task.isCancelled else {
             log.debug("tick dropped: paused while sampling")
             return
         }
-        markRead(systemRequest, at: start, frame: system)
+        deliver(sampledTick, at: start, nominal: nominal)
+    }
 
-        // dt is measured; after wake, or after a gap of 5 nominal intervals (a stall, a 60 s → 1 s cadence switch is
-        // judged by the slower one), the tick is "first after wake" and carries the nominal dt (SPEC §2.3.4).
+    private func sample(at start: ContinuousClock.Instant, nominal: TimeInterval) async -> TickSample {
+        let requests = makeRequests(at: start)
+        let sensorSampler = env.sensorSampler, systemSampler = env.systemSampler
+        async let frameResult = sensorSampler.sample(requests.sensor)
+        async let systemResult = systemSampler.sample(requests.system)
+        let frame = await frameResult
+        var system = await systemResult
+        discardStaleSoC(in: &system, nominal: nominal)
+        let sampled = clock.now
+        return TickSample(requests: requests, frame: frame, system: system, sampled: sampled)
+    }
+
+    private func makeRequests(at start: ContinuousClock.Instant) -> TickRequests {
+        let (ids, allVisible) = sensorRequest()
+        let request = SampleRequest(sensorIDs: ids, components: env.fans.hasFans ? [.fans, .power] : [.power])
+        let systemRequest = self.systemRequest(at: start)
+        return TickRequests(ids: ids, allVisible: allVisible, sensor: request, system: systemRequest)
+    }
+
+    /// IOReport averages the whole stretch since its last read; drop that sample after a stretch without the System page.
+    private func discardStaleSoC(in system: inout SystemFrame, nominal: TimeInterval) {
+        if let soc = system.soc, soc.interval > 3 * nominal { system.soc = nil }
+    }
+
+    private func deliver(_ sample: TickSample, at start: ContinuousClock.Instant, nominal: TimeInterval) {
+        markRead(sample.requests.system, at: start, frame: sample.system)
+        let timing = tickTiming(at: start, nominal: nominal)
+        let end = publish(sample, timing: timing, at: start, nominal: nominal)
+        logTick(sample, timing: timing, start: start, end: end, nominal: nominal)
+        logHistoryIfNeeded()
+    }
+
+    /// After wake or a long gap, carry nominal dt and restart filtering; otherwise use measured dt (SPEC §2.3.4).
+    private func tickTiming(at start: ContinuousClock.Instant, nominal: TimeInterval) -> TickTiming {
         let hadPrevious = lastTick != nil
         let measured = lastTick.map { $0.duration(to: start).timeInterval } ?? nominal
         let afterGap = hadPrevious && (wakePending || measured > SensorSmoothing.gapFactor * max(nominal, lastNominal ?? nominal))
         let dt = (!hadPrevious || afterGap) ? nominal : max(measured, 0.05)
+        return TickTiming(dt: dt, afterGap: afterGap)
+    }
+
+    private func publish(_ sample: TickSample, timing: TickTiming,
+                         at start: ContinuousClock.Instant, nominal: TimeInterval) -> ContinuousClock.Instant {
         lastTick = start
         lastNominal = nominal
         sequence &+= 1
         env.sensors.nominalInterval = nominal
-        let t = Tick(sequence: sequence, date: Date(), dt: dt, sensors: frame, system: system, isFirstAfterWake: afterGap)
-        for c in consumers { c.consume(t) }
+        let tick = Tick(sequence: sequence, date: Date(), dt: timing.dt, sensors: sample.frame, system: sample.system,
+                        isFirstAfterWake: timing.afterGap)
+        for consumer in consumers { consumer.consume(tick) }
+        return finishTick()
+    }
+
+    private func finishTick() -> ContinuousClock.Instant {
         let end = clock.now
         lastTickEnd = end
         wakePending = false
         armStaleWatchdog()
         scheduleSlowData(at: end)
+        return end
+    }
 
-        let sampleMs = start.duration(to: sampled).timeInterval * 1000
-        let consumeMs = sampled.duration(to: end).timeInterval * 1000
+    private func logTick(_ sample: TickSample, timing: TickTiming, start: ContinuousClock.Instant,
+                         end: ContinuousClock.Instant, nominal: TimeInterval) {
+        let sampleMs = start.duration(to: sample.sampled).timeInterval * 1000
+        let consumeMs = sample.sampled.duration(to: end).timeInterval * 1000
         log.debug("""
-            tick \(self.sequence, privacy: .public) dt=\(dt, format: .fixed(precision: 2), privacy: .public)s \
-            interval=\(nominal, format: .fixed(precision: 0), privacy: .public)s keys=\(ids.count, privacy: .public) \
-            all=\(allVisible, privacy: .public) valid=\(frame.values.count, privacy: .public) \
-            gated=\(frame.gated.count, privacy: .public) sample=\(sampleMs, format: .fixed(precision: 1), privacy: .public)ms \
-            consumers=\(consumeMs, format: .fixed(precision: 2), privacy: .public)ms\(afterGap ? " firstAfterWake" : "", privacy: .public)
+            tick \(self.sequence, privacy: .public) dt=\(timing.dt, format: .fixed(precision: 2), privacy: .public)s \
+            interval=\(nominal, format: .fixed(precision: 0), privacy: .public)s keys=\(sample.requests.ids.count, privacy: .public) \
+            all=\(sample.requests.allVisible, privacy: .public) valid=\(sample.frame.values.count, privacy: .public) \
+            gated=\(sample.frame.gated.count, privacy: .public) sample=\(sampleMs, format: .fixed(precision: 1), privacy: .public)ms \
+            consumers=\(consumeMs, format: .fixed(precision: 2), privacy: .public)ms\(timing.afterGap ? " firstAfterWake" : "", privacy: .public)
             """)
-        if sequence % Self.historyLogEvery == 0 {
-            let history = env.history
-            log.debug("history \(history.debugSummary(), privacy: .public)")
-        }
+    }
+
+    private func logHistoryIfNeeded() {
+        guard sequence % Self.historyLogEvery == 0 else { return }
+        let history = env.history
+        log.debug("history \(history.debugSummary(), privacy: .public)")
     }
 
     // MARK: Requests
 
-    /// Sensor ids for this tick + whether every listed sensor is read.
-    private func sensorRequest() -> (ids: [SensorID], allVisible: Bool) {
-        let settings = env.settings, vis = env.visibility
-        var extra = Set<SensorID>()
-        var all = vis.needsAllSensors
-        func add(_ source: TemperatureSource) {
+    private struct SensorRequestBuilder {
+        var extra: Set<SensorID> = []
+        var allVisible: Bool
+
+        mutating func add(_ source: TemperatureSource) {
             switch source {
             case .sensor(let id): extra.insert(id)
-            case .aggregate(let k): if k == .highestAll || k == .averageAll { all = true }   // defined over every visible sensor
+            case .aggregate(let kind): add(kind)
             }
         }
-        for metric in [settings.menuBar.primary, settings.menuBar.secondary] {
-            if case .temperature(let source) = metric { add(source) }
+
+        mutating func add(_ kind: AggregateKind) {
+            if kind == .highestAll || kind == .averageAll { allVisible = true }   // defined over every visible sensor
         }
+    }
+
+    /// Sensor ids for this tick + whether every listed sensor is read.
+    private func sensorRequest() -> (ids: [SensorID], allVisible: Bool) {
+        var request = SensorRequestBuilder(allVisible: env.visibility.needsAllSensors)
+        addMenuBarSources(to: &request)
+        addAlertSources(to: &request)
+        addFanSources(to: &request)
+        addLoggingSources(to: &request)
+        if let inspected = env.visibility.inspectedSensor { request.extra.insert(inspected) }
+        return (env.sensors.requestedSensorIDs(includeAllVisible: request.allVisible, extra: request.extra), request.allVisible)
+    }
+
+    private func addMenuBarSources(to request: inout SensorRequestBuilder) {
+        let metrics = [env.settings.menuBar.primary, env.settings.menuBar.secondary]
+        for metric in metrics {
+            if case .temperature(let source) = metric { request.add(source) }
+        }
+    }
+
+    private func addAlertSources(to request: inout SensorRequestBuilder) {
         // `.anySensor` rules see what is read: the hottest keys (die, memory, SSD, battery) are always in the headline
         // and safety sets, so they do not force the full list every tick.
-        if settings.alertsEnabled {
-            for rule in settings.alertRules where rule.enabled {
-                switch rule.subject {
-                case .sensor(let id): extra.insert(id)
-                case .aggregate(let k): add(.aggregate(k))
-                case .group(let g):
-                    for s in env.sensors.sensors where !s.isHidden && s.sensor.displayGroup == g { extra.insert(s.id) }
-                default: break
-                }
-            }
+        guard env.settings.alertsEnabled else { return }
+        for rule in env.settings.alertRules where rule.enabled {
+            addAlertSubject(rule.subject, to: &request)
         }
+    }
+
+    private func addAlertSubject(_ subject: AlertRule.Subject, to request: inout SensorRequestBuilder) {
+        switch subject {
+        case .sensor(let id): request.extra.insert(id)
+        case .aggregate(let kind): request.add(kind)
+        case .group(let group): addAlertGroup(group, to: &request)
+        default: break
+        }
+    }
+
+    private func addAlertGroup(_ group: DisplayGroup, to request: inout SensorRequestBuilder) {
+        for sensor in env.sensors.sensors where !sensor.isHidden && sensor.sensor.displayGroup == group {
+            request.extra.insert(sensor.id)
+        }
+    }
+
+    private func addFanSources(to request: inout SensorRequestBuilder) {
+        let settings = env.settings
         if env.fans.mode != .system || settings.fans.mode == .curve {
-            add(settings.fans.curveAC.input)
-            if let battery = settings.fans.curveBattery { add(battery.input) }
+            request.add(settings.fans.curveAC.input)
+            if let battery = settings.fans.curveBattery { request.add(battery.input) }
         }
         // FanStore's own per-sensor inputs while its engine runs (a fan test, or a lease that is still held).
-        if env.fans.needsFastTicks { extra.formUnion(env.fans.requiredSensorIDs) }
-        if settings.log.enabled, settings.log.include.contains(.sensors) {
-            if settings.log.sensorIDs.isEmpty { all = true } else { extra.formUnion(settings.log.sensorIDs) }
+        if env.fans.needsFastTicks { request.extra.formUnion(env.fans.requiredSensorIDs) }
+    }
+
+    private func addLoggingSources(to request: inout SensorRequestBuilder) {
+        let log = env.settings.log
+        guard log.enabled, log.include.contains(.sensors) else { return }
+        if log.sensorIDs.isEmpty {
+            request.allVisible = true
+        } else {
+            request.extra.formUnion(log.sensorIDs)
         }
-        if let inspected = vis.inspectedSensor { extra.insert(inspected) }
-        return (env.sensors.requestedSensorIDs(includeAllVisible: all, extra: extra), all)
     }
 
     private func systemRequest(at now: ContinuousClock.Instant) -> SystemSampleRequest {
-        let vis = env.visibility
-        let visible = vis.isAnyUIVisible
+        var request: SystemSampleRequest = []
+        if needsCPUReaders(at: now) { request.formUnion([.cpuLoad, .gpuUsage]) }
+        if needsMemoryReader(at: now) { request.insert(.memory) }
+        if needsSoCReader() { request.insert(.soc) }
+        if needsBatteryReader(at: now) { request.insert(.battery) }
+        if needsPowerSources(at: now) { request.insert(.powerSources) }
+        return request
+    }
+
+    private func needsCPUReaders(at now: ContinuousClock.Instant) -> Bool {
+        env.visibility.showsSystemPage || isLogging(.usage) || isDue(.cpu, every: 5, now)
+    }
+
+    private func needsMemoryReader(at now: ContinuousClock.Instant) -> Bool {
+        isDue(.memory, every: env.visibility.isAnyUIVisible ? 2 : 10, now)
+    }
+
+    private func needsSoCReader() -> Bool {
+        env.visibility.needsSoCMetrics || isLogging(.power)
+    }
+
+    private func needsBatteryReader(at now: ContinuousClock.Instant) -> Bool {
+        batteryMissing ? isDue(.battery, every: 60, now) : (env.visibility.needsBatteryDetail || isDue(.battery, every: 5, now))
+    }
+
+    private func needsPowerSources(at now: ContinuousClock.Instant) -> Bool {
+        powerSourcesDirty || isDue(.powerSources, every: 30, now)
+    }
+
+    /// The CSV log keeps per-tick usage and IOReport power columns while UI is visible.
+    private func isLogging(_ group: LogColumnGroup) -> Bool {
         let log = env.settings.log
-        // The CSV log keeps its per-tick usage and IOReport power columns while UI is visible, as before.
-        let logged = { (g: LogColumnGroup) in visible && log.enabled && log.include.contains(g) }
-        var r: SystemSampleRequest = []
-        if vis.showsSystemPage || logged(.usage) || isDue(.cpu, every: 5, now) { r.formUnion([.cpuLoad, .gpuUsage]) }
-        if isDue(.memory, every: visible ? 2 : 10, now) { r.insert(.memory) }
-        if vis.needsSoCMetrics || logged(.power) { r.insert(.soc) }
-        if batteryMissing ? isDue(.battery, every: 60, now) : (vis.needsBatteryDetail || isDue(.battery, every: 5, now)) {
-            r.insert(.battery)
-        }
-        if powerSourcesDirty || isDue(.powerSources, every: 30, now) { r.insert(.powerSources) }
-        return r
+        return env.visibility.isAnyUIVisible && log.enabled && log.include.contains(group)
     }
 
     /// 0.25 s of slack so a 2 s reader on 1 s ticks runs every second tick despite timer tolerance.
@@ -354,16 +490,23 @@ import ThermikCore
         let req = request.subtracting(slowInFlight)
         guard !req.isEmpty else { return }
         slowInFlight.formUnion(req)
-        let now = clock.now
-        if req.contains(.appleBatteryHealth) { lastAppleBatteryHealth = now }
-        if req.contains(.nvme) { lastNVMe = now }
+        markSlowDataRequested(req)
         let sampler = env.systemSampler
         Task { @MainActor [weak self] in
             let data = await sampler.slowData(req)
-            guard let self else { return }
-            self.slowInFlight.subtract(req)
-            self.env.system.apply(slow: data)
+            self?.applySlowData(data, request: req)
         }
+    }
+
+    private func markSlowDataRequested(_ request: SlowDataRequest) {
+        let now = clock.now
+        if request.contains(.appleBatteryHealth) { lastAppleBatteryHealth = now }
+        if request.contains(.nvme) { lastNVMe = now }
+    }
+
+    private func applySlowData(_ data: SlowSystemData, request: SlowDataRequest) {
+        slowInFlight.subtract(request)
+        env.system.apply(slow: data)
     }
 
     // MARK: Discovery, staleness, cadence observation
@@ -371,18 +514,26 @@ import ThermikCore
     private func discoverSensors() async {
         do {
             let inventory = try await env.sensorSampler.start()
-            env.sensors.load(inventory: inventory)
-            env.fans.load(profile: inventory.fanProfile, names: inventory.fanNames)
-            log.info("""
-                inventory: \(inventory.sensors.count, privacy: .public) sensors, \
-                \(inventory.fanProfile.fans.count, privacy: .public) fans, smc=\(inventory.smcAvailable, privacy: .public) \
-                keys=\(inventory.smcKeyCount, privacy: .public) platform=\(inventory.identity.platformName, privacy: .public)
-                """)
+            applyInventory(inventory)
         } catch {
-            env.sensors.loadFailed(error)
-            env.events.record(.error("sensors unavailable: \(error)"))
-            log.error("sensor discovery failed: \(String(describing: error), privacy: .public)")
+            discoveryFailed(with: error)
         }
+    }
+
+    private func applyInventory(_ inventory: SensorInventory) {
+        env.sensors.load(inventory: inventory)
+        env.fans.load(profile: inventory.fanProfile, names: inventory.fanNames)
+        log.info("""
+            inventory: \(inventory.sensors.count, privacy: .public) sensors, \
+            \(inventory.fanProfile.fans.count, privacy: .public) fans, smc=\(inventory.smcAvailable, privacy: .public) \
+            keys=\(inventory.smcKeyCount, privacy: .public) platform=\(inventory.identity.platformName, privacy: .public)
+            """)
+    }
+
+    private func discoveryFailed(with error: any Error) {
+        env.sensors.loadFailed(error)
+        env.events.record(.error("sensors unavailable: \(error)"))
+        log.error("sensor discovery failed: \(String(describing: error), privacy: .public)")
     }
 
     /// No frame for > 3 nominal intervals (a hung reader, a stuck loop) → SensorStore shows stale readings. The limit
@@ -391,30 +542,38 @@ import ThermikCore
     /// stops renewing the helper's lease and the helper hands the fans back to macOS (I3) instead of holding them.
     private func armStaleWatchdog() {
         staleWatchdog?.cancel()
-        let clock = self.clock
         staleWatchdog = Task { @MainActor [weak self] in
-            var limit: TimeInterval = 0
-            while true {
-                guard let self, let end = self.lastTickEnd else { return }
-                limit = SensorSmoothing.staleFactor * self.nominalSeconds + 0.5
-                let deadline = end.advanced(by: .seconds(limit))
-                if clock.now >= deadline { break }
-                do { try await clock.sleep(until: deadline, tolerance: .milliseconds(500)) } catch { return }
-            }
+            guard let limit = await self?.waitForStaleDeadline() else { return }
             guard let self, !self.isPaused else { return }
             self.env.sensors.markStale()
             self.log.notice("no sensor frame for \(limit, format: .fixed(precision: 1), privacy: .public) s: readings marked stale")
         }
     }
 
+    private func waitForStaleDeadline() async -> TimeInterval? {
+        var limit: TimeInterval = 0
+        while true {
+            guard let end = lastTickEnd else { return nil }
+            limit = SensorSmoothing.staleFactor * nominalSeconds + 0.5
+            let deadline = end.advanced(by: .seconds(limit))
+            if clock.now >= deadline { break }
+            do { try await clock.sleep(until: deadline, tolerance: .milliseconds(500)) } catch { return nil }
+        }
+        return limit
+    }
+
+    private struct CadenceInputs {
+        let fast: Bool
+        let needsAll: Bool
+        let needsSoC: Bool
+        let inspected: SensorID?
+        let showHidden: Bool
+        let seconds: TimeInterval
+    }
+
     private func observeCadenceInputs() {
         observeContinuously({ [weak self] in
-            guard let self else { return }
-            // Every input of needsFastCadence / sensorRequest, read explicitly (the computed properties short-circuit).
-            let v = self.env.visibility, fans = self.env.fans
-            _ = v.popoverOpen; _ = v.mainWindowVisible; _ = v.visiblePage; _ = v.inspectedSensor
-            _ = fans.isOverriding; _ = fans.status; _ = fans.mode; _ = fans.canControl; _ = fans.needsFastTicks
-            _ = self.env.settings.updateInterval; _ = self.env.settings.showHiddenSensors
+            self?.readCadenceInputs()
         }) { [weak self] in
             guard let self else { return false }
             self.cadenceInputsChanged()
@@ -422,32 +581,57 @@ import ThermikCore
         }
     }
 
-    private func cadenceInputsChanged() {
+    private func readCadenceInputs() {
+        // Every input of needsFastCadence / sensorRequest, read explicitly (the computed properties short-circuit).
+        let visibility = env.visibility, fans = env.fans
+        _ = visibility.popoverOpen; _ = visibility.mainWindowVisible; _ = visibility.visiblePage; _ = visibility.inspectedSensor
+        _ = fans.isOverriding; _ = fans.status; _ = fans.mode; _ = fans.canControl; _ = fans.needsFastTicks
+        _ = env.settings.updateInterval; _ = env.settings.showHiddenSensors
+    }
+
+    private func currentCadenceInputs() -> CadenceInputs {
         let fast = needsFastCadence
         let needsAll = env.visibility.needsAllSensors
         let needsSoC = env.visibility.needsSoCMetrics
         let inspected = env.visibility.inspectedSensor
         let showHidden = env.settings.showHiddenSensors
         let seconds = nominalSeconds
-        // Something new is on screen (popover opened, a page switched, a sensor inspected, hidden sensors listed, the
-        // System page's IOReport baseline): read it right away. A newly inspected sensor that is already read with
-        // every listed one (arrowing through the Sensors table) waits for the regular tick.
-        let inspectedHasReading = needsAll && inspected.flatMap { env.sensors.sensor($0)?.value } != nil
-        if (needsAll && !lastNeedsAll) || (fast && !lastFast) || (needsSoC && !lastNeedsSoC)
-            || (inspected != nil && inspected != lastInspected && !inspectedHasReading)
-            || (needsAll && showHidden && !lastShowHidden) {
-            tickRequested = true
-        }
-        if fast != lastFast || needsAll != lastNeedsAll {
-            log.info("""
-                cadence: interval \(seconds, format: .fixed(precision: 0), privacy: .public) s, \
-                all sensors \(needsAll, privacy: .public), fast \(fast, privacy: .public)
-                """)
-        }
-        let intervalChanged = seconds != lastIntervalSeconds
-        lastFast = fast; lastNeedsAll = needsAll; lastNeedsSoC = needsSoC; lastInspected = inspected; lastShowHidden = showHidden
-        lastIntervalSeconds = seconds
+        return CadenceInputs(fast: fast, needsAll: needsAll, needsSoC: needsSoC,
+                             inspected: inspected, showHidden: showHidden, seconds: seconds)
+    }
+
+    private func cadenceInputsChanged() {
+        let inputs = currentCadenceInputs()
+        if shouldRequestTick(for: inputs) { tickRequested = true }
+        logCadenceChange(inputs)
+        let intervalChanged = inputs.seconds != lastIntervalSeconds
+        rememberCadenceInputs(inputs)
         // A store that re-assigns an unchanged value (e.g. a status every tick) must not wake the loop each time.
         if !isPaused, tickRequested || intervalChanged { wakeLoop() }
+    }
+
+    /// Read newly visible data now, except when an inspected sensor already has a reading from the full visible list.
+    private func shouldRequestTick(for inputs: CadenceInputs) -> Bool {
+        let inspectedHasReading = inputs.needsAll && inputs.inspected.flatMap { env.sensors.sensor($0)?.value } != nil
+        return (inputs.needsAll && !lastNeedsAll) || (inputs.fast && !lastFast) || (inputs.needsSoC && !lastNeedsSoC)
+            || (inputs.inspected != nil && inputs.inspected != lastInspected && !inspectedHasReading)
+            || (inputs.needsAll && inputs.showHidden && !lastShowHidden)
+    }
+
+    private func logCadenceChange(_ inputs: CadenceInputs) {
+        guard inputs.fast != lastFast || inputs.needsAll != lastNeedsAll else { return }
+        log.info("""
+            cadence: interval \(inputs.seconds, format: .fixed(precision: 0), privacy: .public) s, \
+            all sensors \(inputs.needsAll, privacy: .public), fast \(inputs.fast, privacy: .public)
+            """)
+    }
+
+    private func rememberCadenceInputs(_ inputs: CadenceInputs) {
+        lastFast = inputs.fast
+        lastNeedsAll = inputs.needsAll
+        lastNeedsSoC = inputs.needsSoC
+        lastInspected = inputs.inspected
+        lastShowHidden = inputs.showHidden
+        lastIntervalSeconds = inputs.seconds
     }
 }

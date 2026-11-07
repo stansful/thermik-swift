@@ -85,20 +85,22 @@ private struct MainSidebar: View {
     /// Sensors: hottest value; Fans: ◆ while Thermik holds them; Diagnostics: warnings; Alerts: alerts today.
     private func badge(_ page: Route.Page) -> Text? {
         switch page {
-        case .sensors:
-            guard let v = sensors.hottest?.value else { return nil }
-            return Text(verbatim: ThermikFormat.temp(v, unit: settings.effectiveUnit))
-        case .fans:
-            return fans.isOverriding ? Text(verbatim: "◆") : nil
-        case .diagnostics:
-            let n = diagnostics.items.filter { $0.status >= .warning }.count
-            return n > 0 ? Text(verbatim: "\(n)") : nil
-        case .alerts:
-            let n = alerts.alertsToday
-            return n > 0 ? Text(verbatim: "\(n)") : nil
-        default:
-            return nil
+        case .sensors: return sensorBadge()
+        case .fans: return fans.isOverriding ? Text(verbatim: "◆") : nil
+        case .diagnostics: return countBadge(diagnostics.items.filter { $0.status >= .warning }.count)
+        case .alerts: return countBadge(alerts.alertsToday)
+        default: return nil
         }
+    }
+
+    private func sensorBadge() -> Text? {
+        guard let v = sensors.hottest?.value else { return nil }
+        return Text(verbatim: ThermikFormat.temp(v, unit: settings.effectiveUnit))
+    }
+
+    private func countBadge(_ count: Int) -> Text? {
+        guard count > 0 else { return nil }
+        return Text(verbatim: "\(count)")
     }
 }
 

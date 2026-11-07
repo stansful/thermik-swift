@@ -87,28 +87,44 @@ import ThermikCore
         let tokens = events.drainCSVTokens()                     // always drain: the store's queue never grows
         let config = settings.log
         guard config.enabled else {
-            if writerActive { reconfigure() }
-            pendingEvents.removeAll()
+            loggingDisabled()
             return
         }
-        if config.include.contains(.events) {
-            pendingEvents += tokens
-            if pendingEvents.count > Self.maxPendingEvents { pendingEvents.removeFirst(pendingEvents.count - Self.maxPendingEvents) }
-        }
+        collectPendingEvents(tokens, config: config)
+        appendRowIfNeeded(tick, config: config)
+    }
+
+    private func loggingDisabled() {
+        if writerActive { reconfigure() }
+        pendingEvents.removeAll()
+    }
+
+    private func collectPendingEvents(_ tokens: [String], config: LogConfig) {
+        guard config.include.contains(.events) else { return }
+        pendingEvents += tokens
+        if pendingEvents.count > Self.maxPendingEvents { pendingEvents.removeFirst(pendingEvents.count - Self.maxPendingEvents) }
+    }
+
+    private func appendRowIfNeeded(_ tick: Tick, config: LogConfig) {
         // Wait for discovery: the header comment names the machine and the columns need the inventory.
         guard sensors.isLoaded, let machine = system.machine else { return }
         updateLayout(config, machine: machine)
-
         let interval = max(config.intervalSeconds, 0)
-        let tolerance = min(max(tick.dt, 0.1), max(interval, 0.1)) * 0.25     // ticks may arrive a little early
-        let due = interval == 0 || nextRowDate.map { tick.date >= $0.addingTimeInterval(-tolerance) } ?? true
+        let due = rowIsDue(tick, interval: interval)
         guard due || !pendingEvents.isEmpty else { return }
         send(.append(makeRow(tick)))
         pendingEvents.removeAll()
-        if due {
-            let next = (nextRowDate ?? tick.date).addingTimeInterval(interval)
-            nextRowDate = next < tick.date ? tick.date.addingTimeInterval(interval) : next   // never burst to catch up
-        }
+        if due { updateNextRowDate(tick, interval: interval) }
+    }
+
+    private func rowIsDue(_ tick: Tick, interval: TimeInterval) -> Bool {
+        let tolerance = min(max(tick.dt, 0.1), max(interval, 0.1)) * 0.25     // ticks may arrive a little early
+        return interval == 0 || nextRowDate.map { tick.date >= $0.addingTimeInterval(-tolerance) } ?? true
+    }
+
+    private func updateNextRowDate(_ tick: Tick, interval: TimeInterval) {
+        let next = (nextRowDate ?? tick.date).addingTimeInterval(interval)
+        nextRowDate = next < tick.date ? tick.date.addingTimeInterval(interval) : next   // never burst to catch up
     }
 
     /// Sampling pauses while asleep: write the pending events (the "sleep" token) now, with the latest values and the
@@ -129,15 +145,19 @@ import ThermikCore
         layoutKey = nil
         nextRowDate = nil
         if !config.enabled {
-            guard writerActive else { return }
-            // An empty header is fine: a disabled writer closes and is dropped.
-            send(.configure(config, CSVLogLayout.header(config: config, columns: [], hasFans: false, modelIdentifier: "",
-                                                        chip: "", osVersion: "", appVersion: "")))
-            writerActive = false
-            log.info("CSV logging disabled")
+            disableWriter(config: config)
         } else if sensors.isLoaded, let machine = system.machine {
             updateLayout(config, machine: machine)
         }
+    }
+
+    private func disableWriter(config: LogConfig) {
+        guard writerActive else { return }
+        // An empty header is fine: a disabled writer closes and is dropped.
+        send(.configure(config, CSVLogLayout.header(config: config, columns: [], hasFans: false, modelIdentifier: "",
+                                                    chip: "", osVersion: "", appVersion: "")))
+        writerActive = false
+        log.info("CSV logging disabled")
     }
 
     func revealInFinder() {
@@ -154,18 +174,30 @@ import ThermikCore
     // MARK: Layout and rows
 
     private func updateLayout(_ config: LogConfig, machine: MachineInfo) {
-        let fanIndices = fans.fans.map(\.id).sorted()
-        let chosen = config.include.contains(.sensors) ? chosenSensorIDs(config) : []
-        let key = LayoutKey(config: config, fanIndices: fanIndices, sensorIDs: chosen, model: machine.modelIdentifier,
-                            chip: machine.chip, os: machine.osVersion)
+        let key = makeLayoutKey(config, machine: machine)
         guard key != layoutKey else { return }                    // the common case: one cheap comparison per tick
         let intervalChanged = layoutKey?.config.intervalSeconds != config.intervalSeconds
         layoutKey = key
         if intervalChanged { nextRowDate = nil }
-        let sensorColumns = chosen.compactMap { sensors.sensor($0).map { CSVLogLayout.sensorColumn($0.sensor) } }
-        columns = CSVLogLayout.columns(include: config.include, fanIndices: fanIndices, sensors: sensorColumns)
+        updateColumns(config, key: key)
+        configureWriter(config, machine: machine, key: key)
+    }
+
+    private func makeLayoutKey(_ config: LogConfig, machine: MachineInfo) -> LayoutKey {
+        let fanIndices = fans.fans.map(\.id).sorted()
+        let chosen = config.include.contains(.sensors) ? chosenSensorIDs(config) : []
+        return LayoutKey(config: config, fanIndices: fanIndices, sensorIDs: chosen, model: machine.modelIdentifier,
+                         chip: machine.chip, os: machine.osVersion)
+    }
+
+    private func updateColumns(_ config: LogConfig, key: LayoutKey) {
+        let sensorColumns = key.sensorIDs.compactMap { sensors.sensor($0).map { CSVLogLayout.sensorColumn($0.sensor) } }
+        columns = CSVLogLayout.columns(include: config.include, fanIndices: key.fanIndices, sensors: sensorColumns)
+    }
+
+    private func configureWriter(_ config: LogConfig, machine: MachineInfo, key: LayoutKey) {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let header = CSVLogLayout.header(config: config, columns: columns, hasFans: !fanIndices.isEmpty,
+        let header = CSVLogLayout.header(config: config, columns: columns, hasFans: !key.fanIndices.isEmpty,
                                          modelIdentifier: machine.modelIdentifier, chip: machine.chip, osVersion: machine.osVersion,
                                          appVersion: version)
         send(.configure(config, header))
@@ -180,27 +212,41 @@ import ThermikCore
     }
 
     private func makeRow(_ tick: Tick, date: Date? = nil) -> CSVLogRow {
-        var fanValues: [Int: CSVLogSample.Fan] = [:]
-        for f in fans.fans { fanValues[f.id] = CSVLogSample.Fan(actualRPM: f.actualRPM, targetRPM: f.targetRPM) }
+        let sample = makeSample(tick)
+        let config = settings.fans
+        let curve = system.powerSourceKind == .battery ? (config.curveBattery ?? config.curveAC) : config.curveAC
+        let mode = fans.hasFans ? CSVLogLayout.fanModeToken(fans.mode, curve: curve, fixedPercent: config.fixedPercent) : nil
+        return CSVLogRow(date: date ?? tick.date, numbers: CSVLogLayout.numbers(for: columns, sample: sample), fanMode: mode,
+                         events: pendingEvents)
+    }
+
+    private func fanSamples() -> [Int: CSVLogSample.Fan] {
+        var values: [Int: CSVLogSample.Fan] = [:]
+        for fan in fans.fans { values[fan.id] = CSVLogSample.Fan(actualRPM: fan.actualRPM, targetRPM: fan.targetRPM) }
+        return values
+    }
+
+    private func sensorSamples(_ tick: Tick) -> [SensorID: Double] {
         // Sensor columns: the smoothed value when the sensor was read this tick, else an empty cell (never a stale value).
-        var sensorValues: [SensorID: Double] = [:]
-        for c in columns where c.id.contains(":") {
-            guard let id = SensorID(c.id), let raw = tick.sensors.values[id] else { continue }
-            sensorValues[id] = sensors.sensor(id)?.value ?? raw
+        var values: [SensorID: Double] = [:]
+        for column in columns where column.id.contains(":") {
+            guard let id = SensorID(column.id), let raw = tick.sensors.values[id] else { continue }
+            values[id] = sensors.sensor(id)?.value ?? raw
         }
+        return values
+    }
+
+    private func makeSample(_ tick: Tick) -> CSVLogSample {
+        let fanValues = fanSamples()
+        let sensorValues = sensorSamples(tick)
         let soc = tick.system?.soc?.power                       // only while IOReport is sampled (UI visible)
-        let sample = CSVLogSample(
+        return CSVLogSample(
             aggregates: sensors.aggregates, fans: fanValues, power: sensors.power, cpuW: soc?.cpuW, gpuW: soc?.gpuW,
             cpuUsagePercent: system.cpuTotalPercent, gpuUsagePercent: system.gpu?.devicePercent.map(Double.init),
             memoryUsedGB: system.memory.map { Double($0.used) / 1_073_741_824 }, pressure: system.pressure,
             batteryPercent: system.battery?.chargePercent,
             onAC: system.battery.map(\.externalConnected) ?? system.powerSource.map { $0.kind == .ac },
             sensors: sensorValues)
-        let config = settings.fans
-        let curve = system.powerSourceKind == .battery ? (config.curveBattery ?? config.curveAC) : config.curveAC
-        let mode = fans.hasFans ? CSVLogLayout.fanModeToken(fans.mode, curve: curve, fixedPercent: config.fixedPercent) : nil
-        return CSVLogRow(date: date ?? tick.date, numbers: CSVLogLayout.numbers(for: columns, sample: sample), fanMode: mode,
-                         events: pendingEvents)
     }
 
     // MARK: Writer pump
@@ -217,29 +263,53 @@ import ThermikCore
             Task { @MainActor in self?.writerReported(url: url, error: error) }
         }
         Task.detached(priority: .utility) {
-            var writer: CSVLogWriter?
-            var reported: (URL?, String?) = (nil, nil)
-            for await command in stream {
-                switch command {
-                case .configure(let config, let header):
-                    if let w = writer {
-                        await w.update(config: config, header: header)
-                        if !config.enabled { writer = nil }
-                    } else if config.enabled {
-                        writer = CSVLogWriter(config: config, header: header)
-                    }
-                case .append(let row): await writer?.append(row)
-                case .flush: await writer?.flush()
-                case .close(let ack):
-                    await writer?.close()
-                    ack.signal()
-                }
-                if let w = writer {
-                    let now = (await w.currentFileURL, await w.lastError)
-                    if now.0 != reported.0 || now.1 != reported.1 { reported = now; report(now.0, now.1) }
-                }
-            }
+            await Self.pumpCommands(stream, report: report)
         }
+    }
+
+    nonisolated private static func pumpCommands(_ stream: AsyncStream<Command>,
+                                                 report: @Sendable (URL?, String?) -> Void) async {
+        var writer: CSVLogWriter?
+        var reported: (URL?, String?) = (nil, nil)
+        for await command in stream {
+            await processCommand(command, writer: &writer)
+            await reportWriter(writer, reported: &reported, report: report)
+        }
+    }
+
+    nonisolated private static func processCommand(_ command: Command, writer: inout CSVLogWriter?) async {
+        switch command {
+        case .configure(let config, let header):
+            await configureWriter(&writer, config: config, header: header)
+        case .append(let row):
+            await writer?.append(row)
+        case .flush:
+            await writer?.flush()
+        case .close(let ack):
+            await closeWriter(writer, ack: ack)
+        }
+    }
+
+    nonisolated private static func configureWriter(_ writer: inout CSVLogWriter?, config: LogConfig,
+                                                    header: CSVLogHeader) async {
+        if let existing = writer {
+            await existing.update(config: config, header: header)
+            if !config.enabled { writer = nil }
+        } else if config.enabled {
+            writer = CSVLogWriter(config: config, header: header)
+        }
+    }
+
+    nonisolated private static func closeWriter(_ writer: CSVLogWriter?, ack: Ack) async {
+        await writer?.close()
+        ack.signal()
+    }
+
+    nonisolated private static func reportWriter(_ writer: CSVLogWriter?, reported: inout (URL?, String?),
+                                                 report: @Sendable (URL?, String?) -> Void) async {
+        guard let writer else { return }
+        let now = (await writer.currentFileURL, await writer.lastError)
+        if now.0 != reported.0 || now.1 != reported.1 { reported = now; report(now.0, now.1) }
     }
 
     private func writerReported(url: URL?, error: String?) {

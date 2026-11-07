@@ -68,15 +68,19 @@ struct LabelStyleGallery: View {
     static func baseSnapshot(sensors: SensorStore, fans: FanStore, settings: SettingsStore, history: HistoryStore) -> MenuBarSnapshot {
         let source: TemperatureSource = if case .temperature(let s) = settings.menuBar.primary { s } else { .aggregate(.cpuAverage) }
         let c = sensors.value(source) ?? sensors.hottest?.value ?? 62
-        let running = fans.fans.filter { !$0.isOff }
-        let rpm: Double? = fans.hasFans ? (running.isEmpty ? 0 : running.map(\.actualRPM).reduce(0, +) / Double(running.count))
-                                        : (sensors.isLoaded ? nil : 1840)
+        let rpm = previewRPM(sensors: sensors, fans: fans)
         var s = MenuBarSnapshot(celsius: c, rpm: rpm, normalized: ThermalScale.soc.normalized(c), alert: false)
         s.fahrenheit = settings.effectiveUnit == .fahrenheit          // as the menu bar draws it (°F setting)
         // The mini graph previews the same 5-minute history the status item draws.
         let series = MenuBarController.seriesID(settings.menuBar.primary) ?? .aggregate(.cpuAverage)
         s.history = history.sparkline(series, points: 24).map(Double.init)
         return s
+    }
+
+    private static func previewRPM(sensors: SensorStore, fans: FanStore) -> Double? {
+        let running = fans.fans.filter { !$0.isOff }
+        return fans.hasFans ? (running.isEmpty ? 0 : running.map(\.actualRPM).reduce(0, +) / Double(running.count))
+                            : (sensors.isLoaded ? nil : 1840)
     }
 }
 

@@ -34,46 +34,53 @@ enum NVMeSMARTReader {
     }
 
     private static func read(service svc: io_service_t) -> NVMeHealth? {
-        var plugin: UnsafeMutablePointer<UnsafeMutablePointer<IOCFPlugInInterface>?>?
-        var score: Int32 = 0
-        guard IOCreatePlugInInterfaceForService(svc, smartUserClientTypeID, plugInInterfaceID, &plugin, &score) == kIOReturnSuccess,
-              let plugin, let pv = plugin.pointee?.pointee else { return nil }
+        guard let plugin = makePlugin(service: svc), let pv = plugin.pointee?.pointee else { return nil }
         defer { _ = pv.Release(plugin) }
         var raw: LPVOID?
         guard pv.QueryInterface(plugin, CFUUIDGetUUIDBytes(smartInterfaceID), &raw) == S_OK, let raw else { return nil }
         let smart = raw.assumingMemoryBound(to: UnsafeMutablePointer<IONVMeSMARTInterface>.self)
         defer { _ = smart.pointee.pointee.Release(raw) }
-        let iface = smart.pointee.pointee
+        return readHealth(service: svc, interface: smart.pointee.pointee, raw: raw)
+    }
 
-        var d = NVMeSMARTData()
-        guard iface.SMARTReadData(raw, &d) == kIOReturnSuccess else { return nil }
+    private static func makePlugin(service svc: io_service_t) -> UnsafeMutablePointer<UnsafeMutablePointer<IOCFPlugInInterface>?>? {
+        var plugin: UnsafeMutablePointer<UnsafeMutablePointer<IOCFPlugInInterface>?>?
+        var score: Int32 = 0
+        guard IOCreatePlugInInterfaceForService(svc, smartUserClientTypeID, plugInInterfaceID, &plugin, &score) == kIOReturnSuccess,
+              let plugin, plugin.pointee?.pointee != nil else { return nil }
+        return plugin
+    }
 
-        var model: String?, firmware: String?
-        let identify = UnsafeMutableRawPointer.allocate(byteCount: 4096, alignment: 16)
-        defer { identify.deallocate() }
-        if iface.GetIdentifyData(raw, identify, 0) == kIOReturnSuccess {
-            let c = identify.assumingMemoryBound(to: NVMeIdentifyControllerStruct.self).pointee
-            model = text(c.MODEL_NUMBER)
-            firmware = text(c.FW_REVISION)
-            // c.SERIAL_NUMBER is deliberately never touched (PII).
-        }
+    private static func readHealth(service svc: io_service_t, interface: IONVMeSMARTInterface, raw: LPVOID) -> NVMeHealth? {
+        var data = NVMeSMARTData()
+        guard interface.SMARTReadData(raw, &data) == kIOReturnSuccess else { return nil }
+        let identity = identify(interface: interface, raw: raw)
         let bsd = IORegistryEntrySearchCFProperty(svc, kIOServicePlane, "BSD Name" as CFString, nil,
                                                   IOOptionBits(kIORegistryIterateRecursively)) as? String
-        // 128-bit counters are imported as (lo, hi) tuples; hi is 0 for any realistic drive.
-        // One data unit = 1000 × 512 bytes (NVMe 1.4 §5.14.1.2). Temperature is the composite value in kelvin.
-        return NVMeHealth(bsdName: bsd, model: model, firmware: firmware,
-                          temperatureC: Int(d.TEMPERATURE) - 273,
-                          criticalWarning: d.CRITICAL_WARNING,
-                          availableSparePercent: Int(d.AVAILABLE_SPARE),
-                          availableSpareThresholdPercent: Int(d.AVAILABLE_SPARE_THRESHOLD),
-                          percentageUsed: Int(d.PERCENTAGE_USED),
-                          dataReadBytes: Double(d.DATA_UNITS_READ.0) * 512_000,
-                          dataWrittenBytes: Double(d.DATA_UNITS_WRITTEN.0) * 512_000,
-                          powerCycles: d.POWER_CYCLES.0,
-                          powerOnHours: d.POWER_ON_HOURS.0,
-                          unsafeShutdowns: d.UNSAFE_SHUTDOWNS.0,
-                          mediaErrors: d.MEDIA_ERRORS.0,
-                          errorLogEntries: d.NUM_ERROR_INFO_LOG_ENTRIES.0)
+        return makeHealth(data, identity: identity, bsd: bsd)
+    }
+
+    private static func identify(interface: IONVMeSMARTInterface, raw: LPVOID) -> (model: String?, firmware: String?) {
+        let buffer = UnsafeMutableRawPointer.allocate(byteCount: 4096, alignment: 16)
+        defer { buffer.deallocate() }
+        guard interface.GetIdentifyData(raw, buffer, 0) == kIOReturnSuccess else { return (nil, nil) }
+        let controller = buffer.assumingMemoryBound(to: NVMeIdentifyControllerStruct.self).pointee
+        // controller.SERIAL_NUMBER is deliberately never touched (PII).
+        return (text(controller.MODEL_NUMBER), text(controller.FW_REVISION))
+    }
+
+    /// 128-bit counters are imported as (lo, hi) tuples; hi is 0 for any realistic drive.
+    /// One data unit = 1000 × 512 bytes (NVMe 1.4 §5.14.1.2). Temperature is the composite value in kelvin.
+    private static func makeHealth(_ d: NVMeSMARTData, identity: (model: String?, firmware: String?), bsd: String?) -> NVMeHealth {
+        NVMeHealth(
+            bsdName: bsd, model: identity.model, firmware: identity.firmware,
+            temperatureC: Int(d.TEMPERATURE) - 273, criticalWarning: d.CRITICAL_WARNING,
+            availableSparePercent: Int(d.AVAILABLE_SPARE), availableSpareThresholdPercent: Int(d.AVAILABLE_SPARE_THRESHOLD),
+            percentageUsed: Int(d.PERCENTAGE_USED), dataReadBytes: Double(d.DATA_UNITS_READ.0) * 512_000,
+            dataWrittenBytes: Double(d.DATA_UNITS_WRITTEN.0) * 512_000,
+            powerCycles: d.POWER_CYCLES.0, powerOnHours: d.POWER_ON_HOURS.0,
+            unsafeShutdowns: d.UNSAFE_SHUTDOWNS.0, mediaErrors: d.MEDIA_ERRORS.0,
+            errorLogEntries: d.NUM_ERROR_INFO_LOG_ENTRIES.0)
     }
 
     /// Fixed-width, space-padded ASCII field of the Identify Controller structure.

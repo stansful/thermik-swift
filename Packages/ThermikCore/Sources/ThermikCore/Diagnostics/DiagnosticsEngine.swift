@@ -138,30 +138,51 @@ public struct DiagnosticsEngine: Sendable {
 
     private mutating func observeFans(_ state: FanControlState, commands: [Int: FanCommand], now: Date) {
         lastFanState = state
+        observeForeignControl(state, commands: commands, now: now)
+        for snap in state.fans { observeFan(snap, command: commands[snap.index], now: now) }
+    }
+
+    private mutating func observeForeignControl(_ state: FanControlState, commands: [Int: FanCommand], now: Date) {
         let thermikControls = commands.values.contains { if case .rpm = $0 { return true } else { return false } }
-        if state.anyManual && !thermikControls { foreignSince = foreignSince ?? now } else { foreignSince = nil }
-        for snap in state.fans {
-            guard let fan = profile.fan(snap.index) else { continue }
-            var t = fanTracks[snap.index] ?? FanTrack()
-            let floor = fan.minRPM * 0.95
-            switch commands[snap.index] {
-            case .rpm(let r)?:
-                // A stop request may be held at the minimum by the helper (hot die): check against the live target then.
-                t.expectedRPM = r == 0 && snap.targetRPM >= floor ? snap.targetRPM : r; t.commandedByThermik = true
-            case .system?, nil:
-                // macOS (or another app) decides: it must spin only when its own target asks for it.
-                t.expectedRPM = snap.targetRPM >= floor ? snap.targetRPM : nil; t.commandedByThermik = false
-            }
-            let stopped = snap.actualRPM < Self.stoppedRPM
-            if let e = t.expectedRPM, e >= floor, stopped { t.stallSince = t.stallSince ?? now } else { t.stallSince = nil }
-            if let e = t.expectedRPM, e > 0, !stopped, abs(snap.actualRPM - e) > e * Self.mismatchFraction {
-                t.mismatchSince = t.mismatchSince ?? now
-            } else {
-                t.mismatchSince = nil
-            }
-            t.last = snap
-            fanTracks[snap.index] = t
+        guard state.anyManual && !thermikControls else { foreignSince = nil; return }
+        foreignSince = foreignSince ?? now
+    }
+
+    private mutating func observeFan(_ snap: FanSnapshot, command: FanCommand?, now: Date) {
+        guard let fan = profile.fan(snap.index) else { return }
+        var track = fanTracks[snap.index] ?? FanTrack()
+        let floor = fan.minRPM * 0.95
+        updateExpectation(&track, command: command, snap: snap, floor: floor)
+        updateStall(&track, snap: snap, floor: floor, now: now)
+        updateMismatch(&track, snap: snap, now: now)
+        track.last = snap
+        fanTracks[snap.index] = track
+    }
+
+    private func updateExpectation(_ track: inout FanTrack, command: FanCommand?, snap: FanSnapshot, floor: Double) {
+        switch command {
+        case .rpm(let rpm)?:
+            // A stop request may be held at the minimum by the helper (hot die): check against the live target then.
+            track.expectedRPM = rpm == 0 && snap.targetRPM >= floor ? snap.targetRPM : rpm
+            track.commandedByThermik = true
+        case .system?, nil:
+            // macOS (or another app) decides: it must spin only when its own target asks for it.
+            track.expectedRPM = snap.targetRPM >= floor ? snap.targetRPM : nil
+            track.commandedByThermik = false
         }
+    }
+
+    private func updateStall(_ track: inout FanTrack, snap: FanSnapshot, floor: Double, now: Date) {
+        let stopped = snap.actualRPM < Self.stoppedRPM
+        guard let expected = track.expectedRPM, expected >= floor, stopped else { track.stallSince = nil; return }
+        track.stallSince = track.stallSince ?? now
+    }
+
+    private func updateMismatch(_ track: inout FanTrack, snap: FanSnapshot, now: Date) {
+        let stopped = snap.actualRPM < Self.stoppedRPM
+        guard let expected = track.expectedRPM, expected > 0, !stopped,
+              abs(snap.actualRPM - expected) > expected * Self.mismatchFraction else { track.mismatchSince = nil; return }
+        track.mismatchSince = track.mismatchSince ?? now
     }
 
     private mutating func observeSensors(_ frame: SensorFrame, now: Date, unseenLimit: TimeInterval) {
@@ -169,37 +190,60 @@ public struct DiagnosticsEngine: Sendable {
         var valid: [SensorGroup: Int] = [:], read: [SensorGroup: Int] = [:]
         var validCount = 0
         for i in slots.indices {
-            let id = slots[i].id, group = slots[i].group
-            if let seen = slots[i].track.lastSeen, now.timeIntervalSince(seen) > unseenLimit { slots[i].track = SensorTrack() }
-            let gated = frame.gated.contains(id)
-            let raw = frame.raw[id]
-            let value = frame.values[id]
-            guard value != nil || raw != nil || gated else { continue }                     // not read this tick
-            slots[i].track.lastSeen = now
-            slots[i].track.lastRaw = raw
-            if gated {
-                // A power-gated cluster is not a fault: forget its timers.
-                slots[i].track.lastValue = nil; slots[i].track.constantSince = nil
-                slots[i].track.invalidSince = nil; slots[i].track.outOfRangeSince = nil
-                continue
-            }
-            read[group, default: 0] += 1
-            if let v = value {
-                valid[group, default: 0] += 1
-                validCount += 1
-                slots[i].track.observeValid(v, now: now)
-            } else {
-                slots[i].track.invalidSince = slots[i].track.invalidSince ?? now
-                slots[i].track.lastValue = nil; slots[i].track.constantSince = nil
-            }
-            if let r = raw, r.isFinite, !group.plausibleRange.contains(r) {
-                slots[i].track.outOfRangeSince = slots[i].track.outOfRangeSince ?? now
-            } else {
-                slots[i].track.outOfRangeSince = nil
-            }
+            observeSensor(at: i, frame: frame, now: now, unseenLimit: unseenLimit,
+                          valid: &valid, read: &read, validCount: &validCount)
         }
         groupValidFraction = read.reduce(into: [:]) { $0[$1.key] = Double(valid[$1.key] ?? 0) / Double(max($1.value, 1)) }
         lastValidCount = validCount
+    }
+
+    private mutating func observeSensor(at index: Int, frame: SensorFrame, now: Date, unseenLimit: TimeInterval,
+                                        valid: inout [SensorGroup: Int], read: inout [SensorGroup: Int], validCount: inout Int) {
+        resetSensorIfUnseen(at: index, now: now, unseenLimit: unseenLimit)
+        let id = slots[index].id, group = slots[index].group
+        let gated = frame.gated.contains(id)
+        guard frame.values[id] != nil || frame.raw[id] != nil || gated else { return }       // not read this tick
+        slots[index].track.lastSeen = now
+        slots[index].track.lastRaw = frame.raw[id]
+        if gated { resetGatedSensor(at: index); return }
+        read[group, default: 0] += 1
+        observeSensorValue(at: index, value: frame.values[id], group: group, now: now, valid: &valid, validCount: &validCount)
+        observeOutOfRange(at: index, raw: frame.raw[id], now: now)
+    }
+
+    private mutating func resetSensorIfUnseen(at index: Int, now: Date, unseenLimit: TimeInterval) {
+        guard let seen = slots[index].track.lastSeen, now.timeIntervalSince(seen) > unseenLimit else { return }
+        slots[index].track = SensorTrack()
+    }
+
+    private mutating func resetGatedSensor(at index: Int) {
+        // A power-gated cluster is not a fault: forget its timers.
+        slots[index].track.lastValue = nil
+        slots[index].track.constantSince = nil
+        slots[index].track.invalidSince = nil
+        slots[index].track.outOfRangeSince = nil
+    }
+
+    private mutating func observeSensorValue(at index: Int, value: Double?, group: SensorGroup, now: Date,
+                                             valid: inout [SensorGroup: Int], validCount: inout Int) {
+        guard let value else {
+            slots[index].track.invalidSince = slots[index].track.invalidSince ?? now
+            slots[index].track.lastValue = nil
+            slots[index].track.constantSince = nil
+            return
+        }
+        valid[group, default: 0] += 1
+        validCount += 1
+        slots[index].track.observeValid(value, now: now)
+    }
+
+    private mutating func observeOutOfRange(at index: Int, raw: Double?, now: Date) {
+        let range = slots[index].group.plausibleRange
+        guard let raw, raw.isFinite, !range.contains(raw) else {
+            slots[index].track.outOfRangeSince = nil
+            return
+        }
+        slots[index].track.outOfRangeSince = slots[index].track.outOfRangeSince ?? now
     }
 
     // MARK: Derived state
@@ -227,60 +271,86 @@ public struct DiagnosticsEngine: Sendable {
     /// suspect sensors with the reason, sorted by id.
     public func suspectSensors() -> [(id: SensorID, reason: String)] {
         guard let now = lastFrameDate else { return [] }
-        var out: [(SensorID, String)] = []
-        for (i, slot) in slots.enumerated() {
-            let id = slot.id, t = slot.track, group = slot.group
-            if let since = t.outOfRangeSince, now.timeIntervalSince(since) > Self.outOfRangeSeconds, let r = t.lastRaw {
-                let range = group.plausibleRange
-                out.append((id, String(format: "out of range for %@: %.1f °C (plausible %.0f…%.0f °C)",
-                                       Self.duration(now.timeIntervalSince(since)), r, range.lowerBound, range.upperBound)))
-            } else if let since = t.invalidSince, now.timeIntervalSince(since) > Self.invalidSeconds,
-                      (groupValidFraction[group] ?? 0) >= Self.invalidGroupValidFraction {
-                out.append((id, String(format: "invalid for %@ while %.0f %% of its group (%@) is valid",
-                                       Self.duration(now.timeIntervalSince(since)),
-                                       (groupValidFraction[group] ?? 0) * 100, group.rawValue)))
-            } else if let since = t.constantSince, let v = t.lastValue, now.timeIntervalSince(since) > Self.stuckSeconds,
-                      let change = siblingChange(of: i, since: since), change >= Self.siblingChangeC {
-                out.append((id, String(format: "constant %.2f °C for %@ while a sibling changed by %.1f °C",
-                                       v, Self.duration(now.timeIntervalSince(since)), change)))
-            }
-        }
+        let out = slots.indices.compactMap { suspectSensor(at: $0, now: now) }
         return out.sorted { $0.0 < $1.0 }.map { (id: $0.0, reason: $0.1) }
+    }
+
+    private func suspectSensor(at index: Int, now: Date) -> (SensorID, String)? {
+        if let finding = outOfRangeFinding(at: index, now: now) { return finding }
+        if let finding = invalidFinding(at: index, now: now) { return finding }
+        return stuckFinding(at: index, now: now)
+    }
+
+    private func outOfRangeFinding(at index: Int, now: Date) -> (SensorID, String)? {
+        let slot = slots[index], track = slot.track
+        guard let since = track.outOfRangeSince, now.timeIntervalSince(since) > Self.outOfRangeSeconds,
+              let raw = track.lastRaw else { return nil }
+        let range = slot.group.plausibleRange
+        return (slot.id, String(format: "out of range for %@: %.1f °C (plausible %.0f…%.0f °C)",
+                                Self.duration(now.timeIntervalSince(since)), raw, range.lowerBound, range.upperBound))
+    }
+
+    private func invalidFinding(at index: Int, now: Date) -> (SensorID, String)? {
+        let slot = slots[index], track = slot.track
+        let fraction = groupValidFraction[slot.group] ?? 0
+        guard let since = track.invalidSince, now.timeIntervalSince(since) > Self.invalidSeconds,
+              fraction >= Self.invalidGroupValidFraction else { return nil }
+        return (slot.id, String(format: "invalid for %@ while %.0f %% of its group (%@) is valid",
+                                Self.duration(now.timeIntervalSince(since)), fraction * 100, slot.group.rawValue))
+    }
+
+    private func stuckFinding(at index: Int, now: Date) -> (SensorID, String)? {
+        let slot = slots[index], track = slot.track
+        guard let since = track.constantSince, let value = track.lastValue,
+              now.timeIntervalSince(since) > Self.stuckSeconds,
+              let change = siblingChange(of: index, since: since), change >= Self.siblingChangeC else { return nil }
+        return (slot.id, String(format: "constant %.2f °C for %@ while a sibling changed by %.1f °C",
+                                value, Self.duration(now.timeIntervalSince(since)), change))
     }
 
     /// max − min of the first visible sibling (same hardware group) that changed by ≥ 2 °C over [since, now], else the
     /// largest change seen (nil without sibling samples).
     private func siblingChange(of index: Int, since: Date) -> Double? {
         var best: Double?
-        for j in siblings[slots[index].group] ?? [] where j != index {
-            var lo = Double.infinity, hi = -Double.infinity
-            for p in slots[j].track.samples.reversed() {
-                if p.t < since { break }
-                lo = min(lo, p.v); hi = max(hi, p.v)
-            }
-            guard hi >= lo else { continue }
-            best = max(best ?? 0, hi - lo)
-            if hi - lo >= Self.siblingChangeC { break }
+        for sibling in siblings[slots[index].group] ?? [] where sibling != index {
+            guard let change = sampleChange(of: sibling, since: since) else { continue }
+            best = max(best ?? 0, change)
+            if change >= Self.siblingChangeC { break }
         }
         return best
+    }
+
+    private func sampleChange(of index: Int, since: Date) -> Double? {
+        var lo = Double.infinity, hi = -Double.infinity
+        for point in slots[index].track.samples.reversed() {
+            if point.t < since { break }
+            lo = min(lo, point.v)
+            hi = max(hi, point.v)
+        }
+        guard hi >= lo else { return nil }
+        return hi - lo
     }
 
     // MARK: Items
 
     public func items(context: DiagnosticsContext, now: Date) -> [DiagnosticItem] {
         DiagnosticKind.allCases.map { kind in
-            let e: Evaluation
-            switch kind {
-            case .lastShutdown: e = lastShutdownItem(context)
-            case .fans: e = fansItem(context)
-            case .sensors: e = sensorsItem(context)
-            case .battery: e = batteryItem(context)
-            case .thermal: e = thermalItem(context)
-            case .storage: e = storageItem(context)
-            case .helper: e = helperItem(context)
-            case .smc: e = smcItem(context)
-            }
-            return DiagnosticItem(id: kind, status: e.0, finding: e.1, details: e.2, updated: now)
+            let evaluation = evaluation(for: kind, context: context)
+            return DiagnosticItem(id: kind, status: evaluation.0, finding: evaluation.1,
+                                  details: evaluation.2, updated: now)
+        }
+    }
+
+    private func evaluation(for kind: DiagnosticKind, context: DiagnosticsContext) -> Evaluation {
+        switch kind {
+        case .lastShutdown: return lastShutdownItem(context)
+        case .fans: return fansItem(context)
+        case .sensors: return sensorsItem(context)
+        case .battery: return batteryItem(context)
+        case .thermal: return thermalItem(context)
+        case .storage: return storageItem(context)
+        case .helper: return helperItem(context)
+        case .smc: return smcItem(context)
         }
     }
 
@@ -289,64 +359,103 @@ public struct DiagnosticsEngine: Sendable {
     private func lastShutdownItem(_ c: DiagnosticsContext) -> Evaluation {
         let boot = c.slow.boot
         let panic = !(boot?.panicLogPath ?? "").isEmpty
-        var details: [DiagnosticDetail] = []
-        if let b = boot {
-            func add(_ label: String, _ value: String?) { if let v = value, !v.isEmpty { details.append(DiagnosticDetail(label, v)) } }
-            add("kern.shutdownreason", b.shutdownReason)
-            add("kern.bootreason", b.bootReason)
-            add("kern.wakereason", b.wakeReason)
-            add("Last sleep reason", b.lastSleepReason)
-            add("Wake type", b.wakeType)
-            add("Boot time", b.bootTime.map(Self.iso))
-            add("Last sleep", b.lastSleepTime.map(Self.iso))
-            add("Last wake", b.lastWakeTime.map(Self.iso))
-            add("Lid closed", b.lidClosed.map { $0 ? "yes" : "no" })
-            add("Previous shutdown cause (Intel)", b.intelShutdownCause.map(String.init))
-            add("Panic report", b.panicLogPath)
-        }
+        var details = bootDetails(boot)
         guard let verdict = c.slow.shutdownVerdict ?? (panic ? .kernelPanic : nil) else {
             return (.unknown, boot == nil ? .unknown : .shutdown(.unknown, panicLog: false), details)
         }
         details.insert(DiagnosticDetail("Classification", Self.verdictName(verdict)), at: 0)
-        let status: DiagnosticStatus
-        if panic || verdict == .kernelPanic { status = .error }
-        else if verdict.isAbnormal { status = .warning }
-        else if verdict == .unknown { status = .unknown }
-        else if verdict == .other { status = .info }
-        else { status = .ok }
-        return (status, .shutdown(panic ? .kernelPanic : verdict, panicLog: panic), details)
+        return (shutdownStatus(verdict, panic: panic), .shutdown(panic ? .kernelPanic : verdict, panicLog: panic), details)
+    }
+
+    private func bootDetails(_ boot: BootHistory?) -> [DiagnosticDetail] {
+        var details: [DiagnosticDetail] = []
+        guard let boot else { return details }
+        appendBootReasonDetails(&details, boot)
+        appendBootTimingDetails(&details, boot)
+        appendBootOtherDetails(&details, boot)
+        return details
+    }
+
+    private func appendBootReasonDetails(_ details: inout [DiagnosticDetail], _ boot: BootHistory) {
+        appendNonEmptyDetail(&details, "kern.shutdownreason", boot.shutdownReason)
+        appendNonEmptyDetail(&details, "kern.bootreason", boot.bootReason)
+        appendNonEmptyDetail(&details, "kern.wakereason", boot.wakeReason)
+        appendNonEmptyDetail(&details, "Last sleep reason", boot.lastSleepReason)
+        appendNonEmptyDetail(&details, "Wake type", boot.wakeType)
+    }
+
+    private func appendBootTimingDetails(_ details: inout [DiagnosticDetail], _ boot: BootHistory) {
+        appendNonEmptyDetail(&details, "Boot time", boot.bootTime.map(Self.iso))
+        appendNonEmptyDetail(&details, "Last sleep", boot.lastSleepTime.map(Self.iso))
+        appendNonEmptyDetail(&details, "Last wake", boot.lastWakeTime.map(Self.iso))
+    }
+
+    private func appendBootOtherDetails(_ details: inout [DiagnosticDetail], _ boot: BootHistory) {
+        appendNonEmptyDetail(&details, "Lid closed", boot.lidClosed.map { $0 ? "yes" : "no" })
+        appendNonEmptyDetail(&details, "Previous shutdown cause (Intel)", boot.intelShutdownCause.map(String.init))
+        appendNonEmptyDetail(&details, "Panic report", boot.panicLogPath)
+    }
+
+    private func appendNonEmptyDetail(_ details: inout [DiagnosticDetail], _ label: String, _ value: String?) {
+        guard let value, !value.isEmpty else { return }
+        details.append(DiagnosticDetail(label, value))
+    }
+
+    private func shutdownStatus(_ verdict: ShutdownVerdict, panic: Bool) -> DiagnosticStatus {
+        if panic || verdict == .kernelPanic { return .error }
+        if verdict.isAbnormal { return .warning }
+        if verdict == .unknown { return .unknown }
+        if verdict == .other { return .info }
+        return .ok
     }
 
     private func fansItem(_ c: DiagnosticsContext) -> Evaluation {
-        let p = profile.fans.isEmpty ? (c.inventory?.fanProfile ?? .none) : profile
-        guard !p.fans.isEmpty else {
-            // No fans discovered: fanless only when discovery actually ran on a reachable SMC.
-            if let inv = c.inventory, inv.smcAvailable { return (.info, .fanless, []) }
-            return (.unknown, .unknown, [])
-        }
-        var details: [DiagnosticDetail] = [DiagnosticDetail("Scheme", p.scheme.description)]
-        if let ftst = lastFanState?.ftst { details.append(DiagnosticDetail("Ftst", String(ftst))) }
-        if let fs = lastFanState?.forceBits { details.append(DiagnosticDetail("FS!", String(format: "0x%04x", fs))) }
-        for fan in p.fans {
-            let t = fanTracks[fan.index]
-            var parts = [String(format: "range %.0f–%.0f rpm", fan.minRPM, fan.maxRPM)]
-            if let s = t?.last {
-                parts.insert(String(format: "%.0f rpm, target %.0f rpm", s.actualRPM, s.targetRPM), at: 0)
-                if let m = s.mode { parts.append("mode \(m)") }
-            }
-            if t?.commandedByThermik == true, let e = t?.expectedRPM { parts.append(String(format: "Thermik commands %.0f rpm", e)) }
-            details.append(DiagnosticDetail("Fan \(fan.index) (\(fan.name))", parts.joined(separator: ", ")))
-        }
-        if foreignControlSuspected { details.append(DiagnosticDetail("Control", "another app is forcing the fans")) }
+        let fanProfile = profile.fans.isEmpty ? (c.inventory?.fanProfile ?? .none) : profile
+        guard !fanProfile.fans.isEmpty else { return fanlessItem(c) }
+        let details = fanDetails(fanProfile)
         guard lastFanState != nil else { return (.unknown, .unknown, details) }
         let stalled = stalledFans
         let mismatch = fansNotReachingTarget.filter { !stalled.contains($0) }
+        return fansEvaluation(profile: fanProfile, details: details, stalled: stalled, mismatch: mismatch)
+    }
+
+    private func fanlessItem(_ c: DiagnosticsContext) -> Evaluation {
+        // No fans discovered: fanless only when discovery actually ran on a reachable SMC.
+        if let inventory = c.inventory, inventory.smcAvailable { return (.info, .fanless, []) }
+        return (.unknown, .unknown, [])
+    }
+
+    private func fanDetails(_ profile: FanHardwareProfile) -> [DiagnosticDetail] {
+        var details = [DiagnosticDetail("Scheme", profile.scheme.description)]
+        if let ftst = lastFanState?.ftst { details.append(DiagnosticDetail("Ftst", String(ftst))) }
+        if let bits = lastFanState?.forceBits { details.append(DiagnosticDetail("FS!", String(format: "0x%04x", bits))) }
+        for fan in profile.fans { details.append(fanDetail(fan)) }
+        if foreignControlSuspected { details.append(DiagnosticDetail("Control", "another app is forcing the fans")) }
+        return details
+    }
+
+    private func fanDetail(_ fan: FanDescriptor) -> DiagnosticDetail {
+        let track = fanTracks[fan.index]
+        var parts = [String(format: "range %.0f–%.0f rpm", fan.minRPM, fan.maxRPM)]
+        if let snapshot = track?.last {
+            parts.insert(String(format: "%.0f rpm, target %.0f rpm", snapshot.actualRPM, snapshot.targetRPM), at: 0)
+            if let mode = snapshot.mode { parts.append("mode \(mode)") }
+        }
+        if track?.commandedByThermik == true, let expected = track?.expectedRPM {
+            parts.append(String(format: "Thermik commands %.0f rpm", expected))
+        }
+        return DiagnosticDetail("Fan \(fan.index) (\(fan.name))", parts.joined(separator: ", "))
+    }
+
+    private func fansEvaluation(profile: FanHardwareProfile, details: [DiagnosticDetail],
+                                stalled: [Int], mismatch: [Int]) -> Evaluation {
+        var details = details
         if !stalled.isEmpty {
             if !mismatch.isEmpty { details.append(DiagnosticDetail("Not reaching target", mismatch.map(String.init).joined(separator: ", "))) }
             return (.warning, .fansStalled(stalled), details)
         }
         if !mismatch.isEmpty { return (.warning, .fansNotReachingTarget(mismatch), details) }
-        return (.ok, .fansOK(count: p.fans.count), details)
+        return (.ok, .fansOK(count: profile.fans.count), details)
     }
 
     private func sensorsItem(_ c: DiagnosticsContext) -> Evaluation {
@@ -361,34 +470,67 @@ public struct DiagnosticsEngine: Sendable {
     }
 
     private func batteryItem(_ c: DiagnosticsContext) -> Evaluation {
-        let b = c.battery
+        let battery = c.battery
         let apple = c.slow.appleBatteryHealth
-        guard b != nil || apple != nil else { return (.info, .noBattery, []) }
+        guard battery != nil || apple != nil else { return (.info, .noBattery, []) }
+        let condition = batteryCondition(battery, apple: apple)
+        let health = apple?.maximumCapacityPercent.map(Double.init) ?? battery?.healthPercent
+        let rated = battery?.designCycleCount
+        let details = batteryDetails(battery, apple: apple)
+        let finding = DiagnosticFinding.battery(condition, healthPercent: health,
+                                                cycles: battery?.cycleCount, ratedCycles: rated)
+        return (batteryStatus(condition, health: health), finding, details)
+    }
+
+    private func batteryCondition(_ battery: BatterySnapshot?, apple: AppleBatteryHealth?) -> BatteryCondition {
         var condition = apple?.condition ?? .unknown
-        if let pf = b?.permanentFailureStatus, pf != 0 { condition = .permanentFailure }
-        else if condition == .unknown, b != nil { condition = .normal }    // gauge readable, no failure flag
-        let health = apple?.maximumCapacityPercent.map(Double.init) ?? b?.healthPercent
-        let rated = b?.designCycleCount
+        if let failure = battery?.permanentFailureStatus, failure != 0 { condition = .permanentFailure }
+        else if condition == .unknown, battery != nil { condition = .normal }    // gauge readable, no failure flag
+        return condition
+    }
+
+    private func batteryDetails(_ battery: BatterySnapshot?, apple: AppleBatteryHealth?) -> [DiagnosticDetail] {
+        var details = appleBatteryDetails(apple)
+        appendBatteryHealthDetails(&details, battery)
+        appendBatteryStatusDetails(&details, battery)
+        return details
+    }
+
+    private func appleBatteryDetails(_ apple: AppleBatteryHealth?) -> [DiagnosticDetail] {
         var details: [DiagnosticDetail] = []
-        func add(_ label: String, _ value: String?) { if let v = value { details.append(DiagnosticDetail(label, v)) } }
-        add("Condition (system_profiler)", apple?.conditionRaw)
-        add("Maximum capacity (Apple)", apple?.maximumCapacityPercent.map { "\($0) %" })
-        add("Health (nominal / design)", b?.healthPercent.map { String(format: "%.1f %%", $0) })
-        add("Health (raw max / design)", b?.rawHealthPercent.map { String(format: "%.1f %%", $0) })
-        add("Cycle count", b?.cycleCount.map { c in rated.map { "\(c) of \($0)" } ?? String(c) })
-        add("Design capacity", b?.designCapacity_mAh.map { "\($0) mAh" })
-        add("Nominal charge capacity", b?.nominalChargeCapacity_mAh.map { "\($0) mAh" })
-        add("Raw max capacity", b?.rawMaxCapacity_mAh.map { "\($0) mAh" })
-        add("Temperature", b?.temperatureC.map { String(format: "%.1f °C", $0) })
-        add("Permanent failure status", b?.permanentFailureStatus.map { String(format: "0x%x", $0) })
-        add("Not charging reason", b?.notChargingReason.map { String(format: "0x%x", $0) })
-        add("Adapter", b?.adapter?.watts.map { "\($0) W" })     // watts only: adapter names are accessory names
-        let finding = DiagnosticFinding.battery(condition, healthPercent: health, cycles: b?.cycleCount, ratedCycles: rated)
+        appendDetail(&details, "Condition (system_profiler)", apple?.conditionRaw)
+        appendDetail(&details, "Maximum capacity (Apple)", apple?.maximumCapacityPercent.map { "\($0) %" })
+        return details
+    }
+
+    private func appendBatteryHealthDetails(_ details: inout [DiagnosticDetail], _ battery: BatterySnapshot?) {
+        let rated = battery?.designCycleCount
+        appendDetail(&details, "Health (nominal / design)", battery?.healthPercent.map { String(format: "%.1f %%", $0) })
+        appendDetail(&details, "Health (raw max / design)", battery?.rawHealthPercent.map { String(format: "%.1f %%", $0) })
+        appendDetail(&details, "Cycle count", battery?.cycleCount.map { count in rated.map { "\(count) of \($0)" } ?? String(count) })
+        appendDetail(&details, "Design capacity", battery?.designCapacity_mAh.map { "\($0) mAh" })
+        appendDetail(&details, "Nominal charge capacity", battery?.nominalChargeCapacity_mAh.map { "\($0) mAh" })
+        appendDetail(&details, "Raw max capacity", battery?.rawMaxCapacity_mAh.map { "\($0) mAh" })
+    }
+
+    private func appendBatteryStatusDetails(_ details: inout [DiagnosticDetail], _ battery: BatterySnapshot?) {
+        appendDetail(&details, "Temperature", battery?.temperatureC.map { String(format: "%.1f °C", $0) })
+        appendDetail(&details, "Permanent failure status", battery?.permanentFailureStatus.map { String(format: "0x%x", $0) })
+        appendDetail(&details, "Not charging reason", battery?.notChargingReason.map { String(format: "0x%x", $0) })
+        appendDetail(&details, "Adapter", battery?.adapter?.watts.map { "\($0) W" }) // watts only: names are accessory names
+    }
+
+    private func appendDetail(_ details: inout [DiagnosticDetail], _ label: String, _ value: String?) {
+        guard let value else { return }
+        details.append(DiagnosticDetail(label, value))
+    }
+
+    private func batteryStatus(_ condition: BatteryCondition, health: Double?) -> DiagnosticStatus {
         switch condition {
-        case .permanentFailure, .serviceRecommended: return (.warning, finding, details)
+        case .permanentFailure, .serviceRecommended: return .warning
         case .normal, .unknown:
-            if let h = health, h < 80 { return (.info, finding, details) }
-            return (condition == .unknown ? .unknown : .ok, finding, details)
+            if let health, health < 80 { return .info }
+            return condition == .unknown ? .unknown : .ok
         }
     }
 
@@ -405,39 +547,55 @@ public struct DiagnosticsEngine: Sendable {
         guard let drives = c.slow.nvme, !drives.isEmpty else {
             return (.unknown, .storage(percentUsed: nil, temperatureC: nil, criticalWarning: false), [])
         }
-        func severity(_ d: NVMeHealth) -> DiagnosticStatus {
-            d.criticalWarning != 0 ? .error : (d.percentageUsed >= 90 ? .warning : .ok)
-        }
-        var details: [DiagnosticDetail] = []
-        for (i, d) in drives.enumerated() {
-            let name = [d.bsdName, d.model].compactMap { $0 }.joined(separator: " · ")
-            let tb = d.dataWrittenBytes / 1e12
-            var parts = ["\(d.percentageUsed) % used", "\(d.temperatureC) °C",
-                         "spare \(d.availableSparePercent) % (threshold \(d.availableSpareThresholdPercent) %)",
-                         String(format: "%.1f TB written", tb), "\(d.powerOnHours) h powered on",
-                         "\(d.unsafeShutdowns) unsafe shutdowns", "\(d.mediaErrors) media errors"]
-            if d.criticalWarning != 0 { parts.insert(String(format: "CRITICAL WARNING 0x%02x", d.criticalWarning), at: 0) }
-            if let fw = d.firmware { parts.append("firmware \(fw)") }
-            details.append(DiagnosticDetail(name.isEmpty ? "Drive \(i)" : name, parts.joined(separator: ", ")))
-        }
-        let worst = drives.max { severity($0) < severity($1) } ?? drives[0]
-        return (severity(worst), .storage(percentUsed: worst.percentageUsed, temperatureC: worst.temperatureC,
-                                          criticalWarning: worst.criticalWarning != 0), details)
+        let details = drives.enumerated().map { storageDetail(index: $0.offset, drive: $0.element) }
+        let worst = drives.max { storageSeverity($0) < storageSeverity($1) } ?? drives[0]
+        return (storageSeverity(worst), .storage(percentUsed: worst.percentageUsed, temperatureC: worst.temperatureC,
+                                                 criticalWarning: worst.criticalWarning != 0), details)
+    }
+
+    private func storageSeverity(_ drive: NVMeHealth) -> DiagnosticStatus {
+        drive.criticalWarning != 0 ? .error : (drive.percentageUsed >= 90 ? .warning : .ok)
+    }
+
+    private func storageDetail(index: Int, drive: NVMeHealth) -> DiagnosticDetail {
+        let name = [drive.bsdName, drive.model].compactMap { $0 }.joined(separator: " · ")
+        var parts = storageParts(drive)
+        if drive.criticalWarning != 0 { parts.insert(String(format: "CRITICAL WARNING 0x%02x", drive.criticalWarning), at: 0) }
+        if let firmware = drive.firmware { parts.append("firmware \(firmware)") }
+        return DiagnosticDetail(name.isEmpty ? "Drive \(index)" : name, parts.joined(separator: ", "))
+    }
+
+    private func storageParts(_ drive: NVMeHealth) -> [String] {
+        let written = drive.dataWrittenBytes / 1e12
+        return ["\(drive.percentageUsed) % used", "\(drive.temperatureC) °C",
+                "spare \(drive.availableSparePercent) % (threshold \(drive.availableSpareThresholdPercent) %)",
+                String(format: "%.1f TB written", written), "\(drive.powerOnHours) h powered on",
+                "\(drive.unsafeShutdowns) unsafe shutdowns", "\(drive.mediaErrors) media errors"]
     }
 
     private func helperItem(_ c: DiagnosticsContext) -> Evaluation {
-        var health = c.helper
-        var thermikHelper: HelperHealth?                              // Thermik's own helper behind a foreign controller
-        if foreignControlSuspected {
-            switch health {
-            case .foreignController(let name): health = .foreignController(name ?? foreignControllerName)
-            case .notApplicable: break
-            default: thermikHelper = health; health = .foreignController(foreignControllerName)
-            }
-        }
+        let (health, thermikHelper) = resolvedHelper(c.helper)
         var details = [DiagnosticDetail("State", Self.helperName(health))]
-        if let h = thermikHelper { details.append(DiagnosticDetail("Thermik helper", Self.helperName(h))) }
+        if let thermikHelper { details.append(DiagnosticDetail("Thermik helper", Self.helperName(thermikHelper))) }
         if case .foreignController = health, let ftst = lastFanState?.ftst { details.append(DiagnosticDetail("Ftst", String(ftst))) }
+        return helperEvaluation(health, details: details)
+    }
+
+    private func resolvedHelper(_ health: HelperHealth) -> (HelperHealth, HelperHealth?) {
+        guard foreignControlSuspected else { return (health, nil) }
+        switch health {
+        case .foreignController(let name):
+            return (.foreignController(name ?? foreignControllerName), nil)
+        case .notApplicable:
+            return (health, nil)
+        default:
+            // Thermik's own helper behind a foreign controller.
+            return (.foreignController(foreignControllerName), health)
+        }
+    }
+
+    private func helperEvaluation(_ health: HelperHealth, details: [DiagnosticDetail]) -> Evaluation {
+        var details = details
         switch health {
         case .ready: return (.ok, .helper(health), details)
         case .requiresApproval, .needsUpgrade, .foreignController: return (.warning, .helper(health), details)
@@ -449,23 +607,34 @@ public struct DiagnosticsEngine: Sendable {
     }
 
     private func smcItem(_ c: DiagnosticsContext) -> Evaluation {
-        guard let inv = c.inventory else { return (.unknown, .unknown, []) }
-        let finding = DiagnosticFinding.smc(available: inv.smcAvailable, keyCount: inv.smcKeyCount, catalog: inv.catalogStatus)
-        let id = inv.identity
-        var details = [DiagnosticDetail("SMC keys", String(inv.smcKeyCount)),
-                       DiagnosticDetail("Catalog", Self.catalogName(inv.catalogStatus)),
-                       DiagnosticDetail("Platform", id.platformName),
-                       DiagnosticDetail("Chip", id.chipName),
-                       DiagnosticDetail("Model", id.modelIdentifier)]
-        if let t = id.targetType { details.append(DiagnosticDetail("Target type", t)) }
-        if let s = id.smcPlatform { details.append(DiagnosticDetail("SMC platform (RPlt)", s)) }
-        details.append(DiagnosticDetail("Temperature sensors", String(inv.sensors.count)))
-        details.append(DiagnosticDetail("Heuristic sensor names", String(inv.sensors.filter(\.isHeuristic).count)))
-        guard inv.smcAvailable else { return (.error, finding, details) }
-        switch inv.catalogStatus {
+        guard let inventory = c.inventory else { return (.unknown, .unknown, []) }
+        let finding = DiagnosticFinding.smc(available: inventory.smcAvailable, keyCount: inventory.smcKeyCount,
+                                            catalog: inventory.catalogStatus)
+        let details = smcDetails(inventory)
+        guard inventory.smcAvailable else { return (.error, finding, details) }
+        switch inventory.catalogStatus {
         case .verified: return (.ok, finding, details)
         case .unverified, .heuristic: return (.info, finding, details)
         }
+    }
+
+    private func smcDetails(_ inventory: SensorInventory) -> [DiagnosticDetail] {
+        var details = smcIdentityDetails(inventory)
+        details.append(DiagnosticDetail("Temperature sensors", String(inventory.sensors.count)))
+        details.append(DiagnosticDetail("Heuristic sensor names", String(inventory.sensors.filter(\.isHeuristic).count)))
+        return details
+    }
+
+    private func smcIdentityDetails(_ inventory: SensorInventory) -> [DiagnosticDetail] {
+        let id = inventory.identity
+        var details = [DiagnosticDetail("SMC keys", String(inventory.smcKeyCount)),
+                       DiagnosticDetail("Catalog", Self.catalogName(inventory.catalogStatus)),
+                       DiagnosticDetail("Platform", id.platformName),
+                       DiagnosticDetail("Chip", id.chipName),
+                       DiagnosticDetail("Model", id.modelIdentifier)]
+        if let target = id.targetType { details.append(DiagnosticDetail("Target type", target)) }
+        if let platform = id.smcPlatform { details.append(DiagnosticDetail("SMC platform (RPlt)", platform)) }
+        return details
     }
 
     // MARK: Report
@@ -474,41 +643,66 @@ public struct DiagnosticsEngine: Sendable {
     public func report(items: [DiagnosticItem], machine: MachineInfo?, inventory: SensorInventory?, appVersion: String) -> String {
         var md = "## Thermik diagnostics report\n\n"
         md += "| | |\n|---|---|\n"
-        func row(_ k: String, _ v: String?) { if let v, !v.isEmpty { md += "| \(k) | \(Self.cell(v)) |\n" } }
-        row("Generated", Self.iso(Date()))
-        row("App", "Thermik \(appVersion)")
-        row("macOS", machine?.osVersion ?? ProcessInfo.processInfo.operatingSystemVersionString)
-        row("Model", machine.map { m in m.marketingName.map { "\(m.modelIdentifier) (\($0))" } ?? m.modelIdentifier }
-            ?? inventory?.identity.modelIdentifier)
-        row("Chip", machine?.chip ?? inventory?.identity.chipName)
-        if let m = machine {
-            row("Memory", m.memoryBytes > 0 ? "\(m.memoryBytes >> 30) GB" : nil)
-            row("CPUs", m.perfLevels.isEmpty ? String(m.logicalCPUs)
-                : m.perfLevels.map { "\($0.logicalCPUs) \($0.name)" }.joined(separator: " + "))
-            row("GPU", m.gpuName.map { n in m.gpuCores.map { "\(n), \($0) cores" } ?? n })
-            row("Rosetta", m.isTranslated ? "yes" : nil)
-        }
-        if let inv = inventory {
-            row("Sensor catalog", Self.catalogName(inv.catalogStatus))
-            row("SMC", inv.smcAvailable ? "\(inv.smcKeyCount) keys" : "unavailable")
-            row("Temperature sensors", String(inv.sensors.count))
-        }
-        let p = profile.fans.isEmpty ? (inventory?.fanProfile ?? .none) : profile
-        row("Fan scheme", p.scheme.description)
-        row("Fans", p.fans.isEmpty ? "none"
-            : p.fans.map { String(format: "%d: %.0f–%.0f rpm", $0.index, $0.minRPM, $0.maxRPM) }.joined(separator: "; "))
-        if let h = items.first(where: { $0.id == .helper }), case .helper(let health) = h.finding { row("Helper", Self.helperName(health)) }
+        appendGeneralRows(&md, machine: machine, inventory: inventory, appVersion: appVersion)
+        appendFanRows(&md, items: items, inventory: inventory)
+        appendChecks(&md, items: items)
+        appendDetails(&md, items: items)
+        return Self.redact(md)
+    }
 
+    private func appendGeneralRows(_ md: inout String, machine: MachineInfo?, inventory: SensorInventory?, appVersion: String) {
+        appendRow(&md, "Generated", Self.iso(Date()))
+        appendRow(&md, "App", "Thermik \(appVersion)")
+        appendRow(&md, "macOS", machine?.osVersion ?? ProcessInfo.processInfo.operatingSystemVersionString)
+        appendRow(&md, "Model", machine.map { m in m.marketingName.map { "\(m.modelIdentifier) (\($0))" } ?? m.modelIdentifier }
+            ?? inventory?.identity.modelIdentifier)
+        appendRow(&md, "Chip", machine?.chip ?? inventory?.identity.chipName)
+        if let machine { appendMachineRows(&md, machine: machine) }
+        if let inventory { appendInventoryRows(&md, inventory: inventory) }
+    }
+
+    private func appendMachineRows(_ md: inout String, machine: MachineInfo) {
+        appendRow(&md, "Memory", machine.memoryBytes > 0 ? "\(machine.memoryBytes >> 30) GB" : nil)
+        appendRow(&md, "CPUs", machine.perfLevels.isEmpty ? String(machine.logicalCPUs)
+            : machine.perfLevels.map { "\($0.logicalCPUs) \($0.name)" }.joined(separator: " + "))
+        appendRow(&md, "GPU", machine.gpuName.map { name in machine.gpuCores.map { "\(name), \($0) cores" } ?? name })
+        appendRow(&md, "Rosetta", machine.isTranslated ? "yes" : nil)
+    }
+
+    private func appendInventoryRows(_ md: inout String, inventory: SensorInventory) {
+        appendRow(&md, "Sensor catalog", Self.catalogName(inventory.catalogStatus))
+        appendRow(&md, "SMC", inventory.smcAvailable ? "\(inventory.smcKeyCount) keys" : "unavailable")
+        appendRow(&md, "Temperature sensors", String(inventory.sensors.count))
+    }
+
+    private func appendFanRows(_ md: inout String, items: [DiagnosticItem], inventory: SensorInventory?) {
+        let fanProfile = profile.fans.isEmpty ? (inventory?.fanProfile ?? .none) : profile
+        appendRow(&md, "Fan scheme", fanProfile.scheme.description)
+        appendRow(&md, "Fans", fanProfile.fans.isEmpty ? "none"
+            : fanProfile.fans.map { String(format: "%d: %.0f–%.0f rpm", $0.index, $0.minRPM, $0.maxRPM) }.joined(separator: "; "))
+        if let item = items.first(where: { $0.id == .helper }), case .helper(let health) = item.finding {
+            appendRow(&md, "Helper", Self.helperName(health))
+        }
+    }
+
+    private func appendChecks(_ md: inout String, items: [DiagnosticItem]) {
         md += "\n### Checks\n\n| Check | Status | Result |\n|---|---|---|\n"
         for item in items {
             md += "| \(item.id.rawValue) | \(Self.statusName(item.status)) | \(Self.cell(Self.summary(item.finding))) |\n"
         }
+    }
+
+    private func appendDetails(_ md: inout String, items: [DiagnosticItem]) {
         md += "\n### Details\n"
         for item in items where !item.details.isEmpty {
             md += "\n**\(item.id.rawValue)** (\(Self.statusName(item.status)))\n\n"
-            for d in item.details { md += "- \(d.label): `\(d.value.replacingOccurrences(of: "`", with: "'"))`\n" }
+            for detail in item.details { md += "- \(detail.label): `\(detail.value.replacingOccurrences(of: "`", with: "'"))`\n" }
         }
-        return Self.redact(md)
+    }
+
+    private func appendRow(_ md: inout String, _ key: String, _ value: String?) {
+        guard let value, !value.isEmpty else { return }
+        md += "| \(key) | \(Self.cell(value)) |\n"
     }
 
     /// The "Recent events" Markdown section (newest last), redacted. DiagnosticsStore appends it to `report(…)`.
@@ -525,21 +719,32 @@ public struct DiagnosticsEngine: Sendable {
     /// removes identifying strings: 10–12 character upper-case alphanumerics that mix letters and
     /// digits (Apple serial numbers), UUIDs, MAC / Bluetooth addresses, the user's home path and the host name.
     public static func redact(_ text: String) -> String {
-        var s = text
+        var s = redactingHome(text)
+        for (pattern, template) in redactionRules() {
+            s = applyRedaction(pattern, template: template, to: s)
+        }
+        if let host = hostName(), host.count >= 3 { s = s.replacingOccurrences(of: host, with: "[host]") }
+        return s
+    }
+
+    private static func redactingHome(_ text: String) -> String {
         let home = NSHomeDirectory()
-        if home.count > 1 { s = s.replacingOccurrences(of: home, with: "~") }
-        let rules: [(String, String)] = [
+        guard home.count > 1 else { return text }
+        return text.replacingOccurrences(of: home, with: "~")
+    }
+
+    private static func redactionRules() -> [(String, String)] {
+        return [
             (#"/Users/[^/\s`|]+"#, "/Users/[user]"),
             (#"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b"#, "[uuid]"),
             (#"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"#, "[mac-address]"),
             (#"(?<![A-Za-z0-9])(?=[A-Z0-9]{10,12}(?![A-Za-z0-9]))(?=[A-Z0-9]*[0-9])(?=[A-Z0-9]*[A-Z])[A-Z0-9]{10,12}"#, "[serial]"),
         ]
-        for (pattern, template) in rules {
-            guard let re = try? NSRegularExpression(pattern: pattern) else { continue }
-            s = re.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: template)
-        }
-        if let host = hostName(), host.count >= 3 { s = s.replacingOccurrences(of: host, with: "[host]") }
-        return s
+    }
+
+    private static func applyRedaction(_ pattern: String, template: String, to text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        return regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: template)
     }
 
     private static func hostName() -> String? {
@@ -588,36 +793,68 @@ public struct DiagnosticsEngine: Sendable {
 
     public static func summary(_ f: DiagnosticFinding) -> String {
         switch f {
-        case .shutdown(let v, let panic): return verdictName(v) + (panic ? " (panic report present)" : "")
-        case .fansOK(let n): return "\(n) fan\(n == 1 ? "" : "s") OK"
+        case .fansOK, .fanless, .fansStalled, .fansNotReachingTarget, .sensorsOK, .sensorsSuspect:
+            return hardwareSummary(f)
+        case .battery(let condition, let health, let cycles, let rated):
+            return batterySummary(condition, health: health, cycles: cycles, rated: rated)
+        case .storage(let used, let temperature, let critical):
+            return storageSummary(used: used, temperature: temperature, critical: critical)
+        case .shutdown, .noBattery, .thermal, .helper, .smc, .unknown:
+            return generalSummary(f)
+        }
+    }
+
+    private static func hardwareSummary(_ finding: DiagnosticFinding) -> String {
+        switch finding {
+        case .fansOK(let count): return "\(count) fan\(count == 1 ? "" : "s") OK"
         case .fanless: return "no fans (passively cooled)"
         case .fansStalled(let ids): return "stalled: fan " + ids.map(String.init).joined(separator: ", ")
         case .fansNotReachingTarget(let ids): return "not reaching target: fan " + ids.map(String.init).joined(separator: ", ")
-        case .sensorsOK(let n): return "\(n) sensors, none suspect"
+        case .sensorsOK(let count): return "\(count) sensors, none suspect"
         case .sensorsSuspect(let ids): return "suspect: " + ids.map(\.description).joined(separator: ", ")
-        case .battery(let c, let h, let cycles, let rated):
-            var parts = [conditionName(c)]
-            if let h { parts.append(String(format: "health %.0f %%", h)) }
-            if let cycles { parts.append(rated.map { "\(cycles) of \($0) cycles" } ?? "\(cycles) cycles") }
-            return parts.joined(separator: ", ")
+        default: return "no data"
+        }
+    }
+
+    private static func batterySummary(_ condition: BatteryCondition, health: Double?, cycles: Int?, rated: Int?) -> String {
+        var parts = [conditionName(condition)]
+        if let health { parts.append(String(format: "health %.0f %%", health)) }
+        if let cycles { parts.append(rated.map { "\(cycles) of \($0) cycles" } ?? "\(cycles) cycles") }
+        return parts.joined(separator: ", ")
+    }
+
+    private static func storageSummary(used: Int?, temperature: Int?, critical: Bool) -> String {
+        guard used != nil || temperature != nil || critical else { return "no NVMe health data" }
+        var parts: [String] = []
+        if critical { parts.append("CRITICAL WARNING") }
+        if let used { parts.append("\(used) % used") }
+        if let temperature { parts.append("\(temperature) °C") }
+        return parts.joined(separator: ", ")
+    }
+
+    private static func generalSummary(_ finding: DiagnosticFinding) -> String {
+        switch finding {
+        case .shutdown(let verdict, let panic): return verdictName(verdict) + (panic ? " (panic report present)" : "")
         case .noBattery: return "no battery"
-        case .thermal(let p, let n): return "\(pressureName(p)), \(n) event\(n == 1 ? "" : "s") today"
-        case .storage(let used, let temp, let critical):
-            guard used != nil || temp != nil || critical else { return "no NVMe health data" }
-            var parts: [String] = []
-            if critical { parts.append("CRITICAL WARNING") }
-            if let used { parts.append("\(used) % used") }
-            if let temp { parts.append("\(temp) °C") }
-            return parts.joined(separator: ", ")
-        case .helper(let h): return helperName(h)
-        case .smc(let available, let keys, let catalog):
-            return available ? "\(keys) keys, \(catalogName(catalog)) catalog" : "SMC unavailable"
-        case .unknown: return "no data"
+        case .thermal(let pressure, let count): return "\(pressureName(pressure)), \(count) event\(count == 1 ? "" : "s") today"
+        case .helper(let health): return helperName(health)
+        case .smc(let available, let keys, let catalog): return available ? "\(keys) keys, \(catalogName(catalog)) catalog" : "SMC unavailable"
+        default: return "no data"
         }
     }
 
     public static func verdictName(_ v: ShutdownVerdict) -> String {
         switch v {
+        case .normalRestart, .normalShutdown, .forced, .thermal, .powerLoss, .watchdog, .kernelPanic:
+            return standardVerdictName(v)
+        case .intelCode(let code): return "shutdown cause code \(code)"
+        case .other: return "other"
+        case .unknown: return "unknown"
+        }
+    }
+
+    private static func standardVerdictName(_ verdict: ShutdownVerdict) -> String {
+        switch verdict {
         case .normalRestart: return "normal restart"
         case .normalShutdown: return "normal shutdown"
         case .forced: return "forced (power button)"
@@ -625,9 +862,7 @@ public struct DiagnosticsEngine: Sendable {
         case .powerLoss: return "power loss or empty battery"
         case .watchdog: return "watchdog reset"
         case .kernelPanic: return "kernel panic"
-        case .intelCode(let c): return "shutdown cause code \(c)"
-        case .other: return "other"
-        case .unknown: return "unknown"
+        default: return "unknown"
         }
     }
 

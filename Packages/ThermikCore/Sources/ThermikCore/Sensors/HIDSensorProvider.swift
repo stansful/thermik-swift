@@ -78,18 +78,23 @@ package final class HIDSensorReader {
     package func read(products wanted: some Sequence<String>) -> [String: Double] {
         var out: [String: Double] = [:]
         for product in wanted {
-            guard let instances = services[product] else { continue }
-            var perLocation: [UInt32: (sum: Double, n: Int)] = [:]
-            for (info, service) in instances {
-                guard let v = value(service), v.isFinite else { continue }
-                let acc = perLocation[info.locationID] ?? (0, 0)
-                perLocation[info.locationID] = (acc.sum + v, acc.n + 1)
-            }
-            guard !perLocation.isEmpty else { continue }
-            let means = perLocation.values.map { $0.sum / Double($0.n) }
-            out[product] = means.reduce(0, +) / Double(means.count)
+            guard let instances = services[product],
+                  let mean = meanByLocation(instances) else { continue }
+            out[product] = mean
         }
         return out
+    }
+
+    private func meanByLocation(_ instances: [(info: HIDServiceInfo, service: IOHIDServiceClient)]) -> Double? {
+        var perLocation: [UInt32: (sum: Double, n: Int)] = [:]
+        for (info, service) in instances {
+            guard let v = value(service), v.isFinite else { continue }
+            let acc = perLocation[info.locationID] ?? (0, 0)
+            perLocation[info.locationID] = (acc.sum + v, acc.n + 1)
+        }
+        guard !perLocation.isEmpty else { return nil }
+        let means = perLocation.values.map { $0.sum / Double($0.n) }
+        return means.reduce(0, +) / Double(means.count)
     }
 
     /// Raw per-instance readings (probe snapshot / discovery). NaN is kept so the probe can show it.

@@ -110,18 +110,23 @@ struct SpikeFilter: Sendable {
     func update(valid: Double?, raw: Double?, gated: Bool, alpha: Double, now: Date) {
         lastSeenDate = now
         if rawValue != raw { rawValue = raw }
-        guard let v = valid else {
-            let hold = gated && lastValidDate.map { now.timeIntervalSince($0) <= SensorSmoothing.gatedHoldSeconds } == true
-            publish(hold ? ema : nil, gated ? .gated : .invalid)
-            return
-        }
-        let a = alpha.isFinite ? min(max(alpha, 0), 1) : 1
-        let next: Double
-        if let e = ema, a < 1 { next = e + a * (v - e) } else { next = v }
+        guard let value = valid else { publishInvalid(gated: gated, now: now); return }
+        let factor = alpha.isFinite ? min(max(alpha, 0), 1) : 1
+        let next = nextValue(value, alpha: factor)
         ema = next
         lastValidDate = now
         publish(next, .ok)
         accumulate(next, now: now)
+    }
+
+    private func publishInvalid(gated: Bool, now: Date) {
+        let hold = gated && lastValidDate.map { now.timeIntervalSince($0) <= SensorSmoothing.gatedHoldSeconds } == true
+        publish(hold ? ema : nil, gated ? .gated : .invalid)
+    }
+
+    private func nextValue(_ value: Double, alpha: Double) -> Double {
+        if let ema, alpha < 1 { return ema + alpha * (value - ema) }
+        return value
     }
 
     /// SensorStore's per-tick entry: gap/wake restart, spike filter (hotspot roles), dt-based α, then `update`.
@@ -302,19 +307,27 @@ struct SpikeFilter: Sendable {
         self.inventory = inventory
         loadError = nil
         aggregator = SensorAggregator(inventory: inventory)
-        let ru = settings.preferRussian
-        var seen = Set<SensorID>()
-        sensors = inventory.sensors.compactMap { s in
-            guard seen.insert(s.id).inserted else { return nil }             // ForEach identity needs unique ids
-            if let existing = byID[s.id], existing.sensor == s { return existing }   // re-discovery keeps stats
-            let o = settings.override(for: s.id)
-            return LiveSensor(sensor: s, displayName: o.name ?? s.name(preferRussian: ru),
-                              isHidden: o.hidden ?? !s.isVisibleByDefault, isPinned: o.pinned ?? false,
-                              isExcludedFromHottest: o.excludedFromHottest ?? false)
-        }
+        sensors = makeSensors(inventory)
         byID = Dictionary(uniqueKeysWithValues: sensors.map { ($0.id, $0) })
         rebuildHottestExclusions()
         rebuildGroups()
+    }
+
+    private func makeSensors(_ inventory: SensorInventory) -> [LiveSensor] {
+        let preferRussian = settings.preferRussian
+        var seen = Set<SensorID>()
+        return inventory.sensors.compactMap { descriptor in
+            guard seen.insert(descriptor.id).inserted else { return nil }             // ForEach identity needs unique ids
+            if let existing = byID[descriptor.id], existing.sensor == descriptor { return existing }   // re-discovery keeps stats
+            return makeSensor(descriptor, preferRussian: preferRussian)
+        }
+    }
+
+    private func makeSensor(_ descriptor: Sensor, preferRussian: Bool) -> LiveSensor {
+        let override = settings.override(for: descriptor.id)
+        return LiveSensor(sensor: descriptor, displayName: override.name ?? descriptor.name(preferRussian: preferRussian),
+                          isHidden: override.hidden ?? !descriptor.isVisibleByDefault, isPinned: override.pinned ?? false,
+                          isExcludedFromHottest: override.excludedFromHottest ?? false)
     }
 
     /// Discovery threw (SamplingCoordinator retries after wake).
@@ -326,51 +339,89 @@ struct SpikeFilter: Sendable {
         visibleIDs = Set(sensors.lazy.filter { !$0.isHidden }.map(\.id))
         let shown = sensors.filter { settings.showHiddenSensors || !$0.isHidden }
         shownIDs = Set(shown.map(\.id))
-        var next: [LiveSensorGroup] = []
-        for g in DisplayGroup.allCases {
-            let members = shown.filter { $0.sensor.displayGroup == g }
-            guard !members.isEmpty else { groupByID[g] = nil; continue }
-            let group = groupByID[g] ?? LiveSensorGroup(group: g, sensors: members)   // keep identity for SwiftUI
-            if group.sensors.map(\.id) != members.map(\.id) { group.setSensors(members) }
-            groupByID[g] = group
-            next.append(group)
-        }
+        let next = DisplayGroup.allCases.compactMap { updatedGroup(for: $0, shown: shown) }
         if next.map(\.id) != groups.map(\.id) { groups = next }
     }
 
+    private func updatedGroup(for kind: DisplayGroup, shown: [LiveSensor]) -> LiveSensorGroup? {
+        let members = shown.filter { $0.sensor.displayGroup == kind }
+        guard !members.isEmpty else { groupByID[kind] = nil; return nil }
+        let group = groupByID[kind] ?? LiveSensorGroup(group: kind, sensors: members)   // keep identity for SwiftUI
+        if group.sensors.map(\.id) != members.map(\.id) { group.setSensors(members) }
+        groupByID[kind] = group
+        return group
+    }
+
+    private struct ConsumptionContext {
+        let frame: SensorFrame
+        let now: Date
+        let nominal: TimeInterval
+        let staleAfter: TimeInterval
+        let restart: Bool
+    }
+
     func consume(_ tick: Tick) {
-        let f = tick.sensors
-        let now = tick.date
+        let context = consumptionContext(for: tick)
+        let readings = ingestSensors(context)
+        updateAggregates(context, smoothed: readings.values, presentGroups: readings.presentGroups)
+        publish(context.frame, at: context.now)
+    }
+
+    private func consumptionContext(for tick: Tick) -> ConsumptionContext {
         let nominal = max(nominalInterval, 0.25)
-        let restart = tick.isFirstAfterWake
-        let staleAfter = SensorSmoothing.staleFactor * nominal
+        return ConsumptionContext(frame: tick.sensors, now: tick.date, nominal: nominal,
+                                  staleAfter: SensorSmoothing.staleFactor * nominal, restart: tick.isFirstAfterWake)
+    }
+
+    private func ingestSensors(_ context: ConsumptionContext) -> (values: [SensorID: Double], presentGroups: Set<DisplayGroup>) {
         var smoothed: [SensorID: Double] = [:]
-        smoothed.reserveCapacity(f.values.count)
+        smoothed.reserveCapacity(context.frame.values.count)
         var presentGroups = Set<DisplayGroup>()
-        for s in sensors {
-            let id = s.id
-            let valid = f.values[id], raw = f.raw[id]
-            // The 3 s post-wake window forces P-core keys invalid: that is not a power-gated cluster.
-            let gated = f.gated.contains(id) && !f.isPostWake
-            if valid != nil || raw != nil || f.gated.contains(id) {
-                s.ingest(valid: valid, raw: raw, gated: gated, now: now, nominal: nominal, restart: restart)
-                presentGroups.insert(s.sensor.displayGroup)
-                if valid != nil, let v = s.value { smoothed[id] = v }
-            } else if let seen = s.lastSeenDate, now.timeIntervalSince(seen) > staleAfter {
-                s.markNotSampled()                                // not requested lately (popover closed)
-            }
+        for sensor in sensors {
+            ingest(sensor, context: context, smoothed: &smoothed, presentGroups: &presentGroups)
         }
-        if let a = aggregator {
-            let raw = a.aggregates(f.values, visible: visibleIDs)
-            if raw != rawAggregates { rawAggregates = raw }
-            let smooth = smoothAggregates(raw, now: now, nominal: nominal, restart: restart)
-            if smooth != aggregates { aggregates = smooth }
-            // Group headers summarize the smoothed values of the listed sensors; groups not read this tick keep theirs.
-            let stats = a.groupStats(smoothed, visible: shownIDs)
-            for g in groups where presentGroups.contains(g.group) { g.setStat(stats[g.group]) }
+        return (smoothed, presentGroups)
+    }
+
+    private func ingest(_ sensor: LiveSensor, context: ConsumptionContext,
+                        smoothed: inout [SensorID: Double], presentGroups: inout Set<DisplayGroup>) {
+        let id = sensor.id
+        let valid = context.frame.values[id], raw = context.frame.raw[id]
+        guard valid != nil || raw != nil || context.frame.gated.contains(id) else {
+            markNotSampledIfNeeded(sensor, context: context)
+            return
         }
-        if power != f.power { power = f.power }
-        lastFrame = f
+        ingestPresentSensor(sensor, valid: valid, raw: raw, context: context, smoothed: &smoothed, presentGroups: &presentGroups)
+    }
+
+    private func markNotSampledIfNeeded(_ sensor: LiveSensor, context: ConsumptionContext) {
+        guard let seen = sensor.lastSeenDate, context.now.timeIntervalSince(seen) > context.staleAfter else { return }
+        sensor.markNotSampled()                                // not requested lately (popover closed)
+    }
+
+    private func ingestPresentSensor(_ sensor: LiveSensor, valid: Double?, raw: Double?, context: ConsumptionContext,
+                                     smoothed: inout [SensorID: Double], presentGroups: inout Set<DisplayGroup>) {
+        // The 3 s post-wake window forces P-core keys invalid: that is not a power-gated cluster.
+        let gated = context.frame.gated.contains(sensor.id) && !context.frame.isPostWake
+        sensor.ingest(valid: valid, raw: raw, gated: gated, now: context.now, nominal: context.nominal, restart: context.restart)
+        presentGroups.insert(sensor.sensor.displayGroup)
+        if valid != nil, let value = sensor.value { smoothed[sensor.id] = value }
+    }
+
+    private func updateAggregates(_ context: ConsumptionContext, smoothed: [SensorID: Double], presentGroups: Set<DisplayGroup>) {
+        guard let aggregator else { return }
+        let raw = aggregator.aggregates(context.frame.values, visible: visibleIDs)
+        if raw != rawAggregates { rawAggregates = raw }
+        let smooth = smoothAggregates(raw, now: context.now, nominal: context.nominal, restart: context.restart)
+        if smooth != aggregates { aggregates = smooth }
+        // Group headers summarize the smoothed values of the listed sensors; groups not read this tick keep theirs.
+        let stats = aggregator.groupStats(smoothed, visible: shownIDs)
+        for group in groups where presentGroups.contains(group.group) { group.setStat(stats[group.group]) }
+    }
+
+    private func publish(_ frame: SensorFrame, at now: Date) {
+        if power != frame.power { power = frame.power }
+        lastFrame = frame
         lastUpdate = now
         if !hasReading { hasReading = true }
         if staleMarked { staleMarked = false }
@@ -429,20 +480,22 @@ struct SpikeFilter: Sendable {
     /// Re-applies `settings.sensorOverrides` (after "Show hidden sensors", a rename elsewhere, a "Hottest" block
     /// toggle or a settings reset).
     private func applyOverrides() {
-        let ru = settings.preferRussian
-        for s in sensors {
-            let o = settings.override(for: s.id)
-            let name = o.name ?? s.sensor.name(preferRussian: ru)
-            let hidden = o.hidden ?? !s.sensor.isVisibleByDefault
-            let pinned = o.pinned ?? false
-            let excluded = o.excludedFromHottest ?? false
-            if s.displayName != name { s.displayName = name }
-            if s.isHidden != hidden { s.isHidden = hidden }
-            if s.isPinned != pinned { s.isPinned = pinned }
-            if s.isExcludedFromHottest != excluded { s.isExcludedFromHottest = excluded }
-        }
+        let preferRussian = settings.preferRussian
+        for sensor in sensors { applyOverride(to: sensor, preferRussian: preferRussian) }
         rebuildHottestExclusions()
         rebuildGroups()
+    }
+
+    private func applyOverride(to sensor: LiveSensor, preferRussian: Bool) {
+        let override = settings.override(for: sensor.id)
+        let name = override.name ?? sensor.sensor.name(preferRussian: preferRussian)
+        let hidden = override.hidden ?? !sensor.sensor.isVisibleByDefault
+        let pinned = override.pinned ?? false
+        let excluded = override.excludedFromHottest ?? false
+        if sensor.displayName != name { sensor.displayName = name }
+        if sensor.isHidden != hidden { sensor.isHidden = hidden }
+        if sensor.isPinned != pinned { sensor.isPinned = pinned }
+        if sensor.isExcludedFromHottest != excluded { sensor.isExcludedFromHottest = excluded }
     }
 
     /// `hottestExcluded` from each sensor's own flag and Settings › Sensors' excluded hardware blocks
@@ -454,25 +507,36 @@ struct SpikeFilter: Sendable {
     }
 
     private func smoothAggregates(_ raw: AggregateValues, now: Date, nominal: TimeInterval, restart: Bool) -> AggregateValues {
-        var out = AggregateValues(values: [:], sources: raw.sources)
-        for (kind, x) in raw.values {
-            var st = aggregateState[kind] ?? AggregateSmoother()
-            let hotspot = SensorSmoothing.hotspotAggregates.contains(kind)
-            let gap = st.last.map { now.timeIntervalSince($0) } ?? .infinity
-            if restart || st.ema == nil || gap < 0 || gap > SensorSmoothing.gapFactor * nominal {
-                st.ema = nil; st.spike.reset()
-            }
-            if let v = hotspot ? st.spike.filter(x) : x {           // nil: suspected spike held, keep the average
-                if let e = st.ema {
-                    st.ema = e + SensorSmoothing.alpha(dt: gap, tau: hotspot ? SensorSmoothing.hotspotTau : SensorSmoothing.tau) * (v - e)
-                } else {
-                    st.ema = v
-                }
-            }
-            st.last = now
-            aggregateState[kind] = st
-            if let e = st.ema { out.values[kind] = SensorSmoothing.rounded(e) }
+        var output = AggregateValues(values: [:], sources: raw.sources)
+        for (kind, value) in raw.values {
+            output.values[kind] = smoothAggregate(value, kind: kind, now: now, nominal: nominal, restart: restart)
         }
-        return out
+        return output
+    }
+
+    private func smoothAggregate(_ value: Double, kind: AggregateKind, now: Date,
+                                 nominal: TimeInterval, restart: Bool) -> Double? {
+        var state = aggregateState[kind] ?? AggregateSmoother()
+        let hotspot = SensorSmoothing.hotspotAggregates.contains(kind)
+        let gap = state.last.map { now.timeIntervalSince($0) } ?? .infinity
+        resetAggregateIfNeeded(&state, gap: gap, nominal: nominal, restart: restart)
+        let filtered = hotspot ? state.spike.filter(value) : value       // nil: suspected spike held, keep the average
+        let tau = hotspot ? SensorSmoothing.hotspotTau : SensorSmoothing.tau
+        if let filtered { state.ema = nextAggregate(state, value: filtered, gap: gap, tau: tau) }
+        state.last = now
+        aggregateState[kind] = state
+        return state.ema.map(SensorSmoothing.rounded)
+    }
+
+    private func resetAggregateIfNeeded(_ state: inout AggregateSmoother, gap: TimeInterval,
+                                        nominal: TimeInterval, restart: Bool) {
+        guard restart || state.ema == nil || gap < 0 || gap > SensorSmoothing.gapFactor * nominal else { return }
+        state.ema = nil
+        state.spike.reset()
+    }
+
+    private func nextAggregate(_ state: AggregateSmoother, value: Double, gap: TimeInterval, tau: TimeInterval) -> Double {
+        guard let ema = state.ema else { return value }
+        return ema + SensorSmoothing.alpha(dt: gap, tau: tau) * (value - ema)
     }
 }

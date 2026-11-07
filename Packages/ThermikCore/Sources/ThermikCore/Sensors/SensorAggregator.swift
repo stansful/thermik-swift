@@ -33,48 +33,105 @@ public struct SensorAggregator: Sendable {
         safety = inventory.safetySet
     }
 
+    private struct ReadingAccumulator {
+        var sum = 0.0, n = 0, sumDup = 0.0, nDup = 0, valid = 0, total = 0
+        var best: (id: SensorID, value: Double)?
+
+        var mean: Double? {
+            if n > 0 { return sum / Double(n) }
+            guard nDup > 0 else { return nil }
+            return sumDup / Double(nDup)
+        }
+
+        var stat: GroupStat {
+            GroupStat(mean: mean, max: best?.value, hottest: best?.id, valid: valid, total: total)
+        }
+
+        mutating func add(_ id: SensorID, value: Double?, role: SensorRole) {
+            total += 1
+            guard let value else { return }
+            valid += 1
+            updateBest(id, value: value)
+            addToMean(value, role: role)
+        }
+
+        private mutating func addToMean(_ value: Double, role: SensorRole) {
+            if role == .duplicate {
+                sumDup += value
+                nDup += 1
+                return
+            }
+            sum += value
+            n += 1
+        }
+
+        private mutating func updateBest(_ id: SensorID, value: Double) {
+            guard let current = best else {
+                best = (id, value)
+                return
+            }
+            guard value > current.value || (value == current.value && id < current.id) else { return }
+            best = (id, value)
+        }
+    }
+
     /// Headline aggregates from valid (sanitized, unsmoothed) values. Missing inputs → key absent.
     public func aggregates(_ values: [SensorID: Double], visible: Set<SensorID>) -> AggregateValues {
         var out = AggregateValues()
-        func put(_ k: AggregateKind, _ v: Double?, _ source: SensorID? = nil) {
-            guard let v, v.isFinite else { return }
-            out.values[k] = v
-            if let source { out.sources[k] = source }
-        }
+        addHeadline(values, to: &out)
+        addVisible(values, visible: visible, to: &out)
+        addSafety(values, to: &out)
+        return out
+    }
+
+    private func addHeadline(_ values: [SensorID: Double], to out: inout AggregateValues) {
         let cpuAvg = Self.mean(cpu, values)
         let gpuAvg = Self.mean(gpu, values)
-        put(.cpuAverage, cpuAvg)
-        let hot = Self.max(cpuHotspot, values); put(.cpuHottest, hot?.value, hot?.id)
-        put(.gpuAverage, gpuAvg)
-        let gHot = Self.max(gpu, values); put(.gpuHottest, gHot?.value, gHot?.id)
-        put(.socHottest, [cpuAvg, gpuAvg].compactMap { $0 }.max())
-        put(.socDie, Self.mean(soc, values))
-        put(.memory, Self.mean(memory, values))
-        put(.ssd, Self.mean(ssd, values))
-        put(.battery, Self.mean(battery, values))
+        addCPU(values, average: cpuAvg, to: &out)
+        addGPU(values, average: gpuAvg, to: &out)
+        Self.put(.socHottest, [cpuAvg, gpuAvg].compactMap { $0 }.max(), to: &out)
+        Self.put(.socDie, Self.mean(soc, values), to: &out)
+        Self.put(.memory, Self.mean(memory, values), to: &out)
+        Self.put(.ssd, Self.mean(ssd, values), to: &out)
+        Self.put(.battery, Self.mean(battery, values), to: &out)
+    }
 
-        // Visible sensors (any order): one pass for both whole-Mac figures.
-        var best: (id: SensorID, value: Double)?
-        var sum = 0.0, n = 0, sumDup = 0.0, nDup = 0
+    private func addCPU(_ values: [SensorID: Double], average: Double?, to out: inout AggregateValues) {
+        Self.put(.cpuAverage, average, to: &out)
+        let hot = Self.max(cpuHotspot, values)
+        Self.put(.cpuHottest, hot?.value, hot?.id, to: &out)
+    }
+
+    private func addGPU(_ values: [SensorID: Double], average: Double?, to out: inout AggregateValues) {
+        Self.put(.gpuAverage, average, to: &out)
+        let hot = Self.max(gpu, values)
+        Self.put(.gpuHottest, hot?.value, hot?.id, to: &out)
+    }
+
+    private func addVisible(_ values: [SensorID: Double], visible: Set<SensorID>, to out: inout AggregateValues) {
+        var acc = ReadingAccumulator()
         for id in visible {
-            guard let v = values[id], let role = roles[id] else { continue }
-            if let b = best { if v > b.value || (v == b.value && id < b.id) { best = (id, v) } } else { best = (id, v) }
-            if role != .duplicate { sum += v; n += 1 } else { sumDup += v; nDup += 1 }
+            guard let value = values[id], let role = roles[id] else { continue }
+            acc.add(id, value: value, role: role)
         }
-        put(.highestAll, best?.value, best?.id)
-        put(.averageAll, n > 0 ? sum / Double(n) : (nDup > 0 ? sumDup / Double(nDup) : nil))
+        Self.put(.highestAll, acc.best?.value, acc.best?.id, to: &out)
+        Self.put(.averageAll, acc.mean, to: &out)
+    }
 
-        // Safety set: the engine's critical inputs.
-        var top: [(id: SensorID, value: Double)] = []
-        top.reserveCapacity(safety.count)
-        for id in safety { if let v = values[id] { top.append((id, v)) } }
-        if !top.isEmpty {
-            top.sort { $0.value != $1.value ? $0.value > $1.value : $0.id < $1.id }
-            let four = top.prefix(4)
-            put(.safetyTop4, four.reduce(0) { $0 + $1.value } / Double(four.count))
-            put(.rawHottestDie, top[0].value, top[0].id)
-        }
-        return out
+    private func addSafety(_ values: [SensorID: Double], to out: inout AggregateValues) {
+        let top = safety.compactMap { id in values[id].map { (id: id, value: $0) } }
+            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.id < $1.id }
+        guard let hottest = top.first else { return }
+        let four = top.prefix(4)
+        Self.put(.safetyTop4, four.reduce(0) { $0 + $1.value } / Double(four.count), to: &out)
+        Self.put(.rawHottestDie, hottest.value, hottest.id, to: &out)
+    }
+
+    private static func put(_ kind: AggregateKind, _ value: Double?, _ source: SensorID? = nil,
+                            to out: inout AggregateValues) {
+        guard let value, value.isFinite else { return }
+        out.values[kind] = value
+        if let source { out.sources[kind] = source }
     }
 
     /// Mean / max / hottest per display group over `visible` sensors that have a valid value.
@@ -82,23 +139,14 @@ public struct SensorAggregator: Sendable {
     /// `duplicate`, shown only if the user un-hides it — is not counted twice), `max` / `hottest` over all of them,
     /// so the group header always agrees with its hottest row. `total` counts the visible sensors of the group.
     public func groupStats(_ values: [SensorID: Double], visible: Set<SensorID>) -> [DisplayGroup: GroupStat] {
-        struct Acc { var sum = 0.0, n = 0, sumDup = 0.0, nDup = 0, valid = 0, total = 0; var best: (SensorID, Double)? }
-        var acc: [DisplayGroup: Acc] = [:]
+        var acc: [DisplayGroup: ReadingAccumulator] = [:]
         for id in visible {
-            guard let g = displayGroups[id], let role = roles[id] else { continue }
-            var a = acc[g] ?? Acc()
-            a.total += 1
-            if let v = values[id] {
-                a.valid += 1
-                if role != .duplicate { a.sum += v; a.n += 1 } else { a.sumDup += v; a.nDup += 1 }
-                if let b = a.best { if v > b.1 || (v == b.1 && id < b.0) { a.best = (id, v) } } else { a.best = (id, v) }
-            }
-            acc[g] = a
+            guard let group = displayGroups[id], let role = roles[id] else { continue }
+            var groupAcc = acc[group] ?? ReadingAccumulator()
+            groupAcc.add(id, value: values[id], role: role)
+            acc[group] = groupAcc
         }
-        return acc.mapValues { a in
-            let mean = a.n > 0 ? a.sum / Double(a.n) : (a.nDup > 0 ? a.sumDup / Double(a.nDup) : nil)
-            return GroupStat(mean: mean, max: a.best?.1, hottest: a.best?.0, valid: a.valid, total: a.total)
-        }
+        return acc.mapValues { $0.stat }
     }
 
     // MARK: Helpers

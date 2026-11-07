@@ -164,15 +164,22 @@ enum FanCommandFailure: Equatable, Sendable {
         generation += 1
         let gen = generation
         let wasHolding = mayHoldFans
+        resetStateForRelease()
+        lastReleaseAt = Date()
+        if phase != .idle { phase = .idle; onStateChange() }
+        if wasHolding { logger.notice("releasing all fans (\(reason))") }
+        resetAllFansOnHelper(client: helper.client, generation: gen)
+    }
+
+    private func resetStateForRelease() {
         inFlight = false
         leaseDecisionUntil = nil
         lastSent = desired.isEmpty ? [:] : desired.mapValues { _ in .system }
         appliedRPM.removeAll()
         stopLease()
-        lastReleaseAt = Date()
-        if phase != .idle { phase = .idle; onStateChange() }
-        if wasHolding { logger.notice("releasing all fans (\(reason))") }
-        let client = helper.client
+    }
+
+    private func resetAllFansOnHelper(client: any FanHelperClient, generation gen: Int) {
         Task { @MainActor in
             do {
                 try await client.resetAllFans()
@@ -223,34 +230,53 @@ enum FanCommandFailure: Equatable, Sendable {
 
     private func flush(now: Date) {
         guard !isSleeping, !inFlight else { return }
-        if let until = suspendedUntil {
-            guard now >= until else { return }
-            suspendedUntil = nil
-        }
+        guard commandsAllowedAfterSuspension(now: now) else { return }
         if desired.values.allSatisfy({ $0 == .system }) {                // releasing is always allowed
-            if mayHoldFans { releaseAll(reason: "all fans System") } else { lastSent = desired }
+            releaseSystemOnly()
             return
         }
-        if let until = leaseDecisionUntil {
-            guard now >= until else { return }
-            leaseDecisionUntil = nil
-            logger.notice("no decision after the lost lease; re-sending")
-        }
-        var changes = desired.filter { lastSent[$0.key] != $0.value }.sorted { $0.key < $1.key }
-        if let until = backoffUntil {
-            if now >= until {
-                backoffUntil = nil
-            } else {
-                guard desiredIsSafety else { return }
-                changes = changes.filter { Self.isRaise($0.value, over: lastSent[$0.key]) }
-            }
-        }
+        guard leaseDecisionAllowsCommands(now: now) else { return }
+        let changes = desiredChanges(now: now)
         guard !changes.isEmpty else { return }
+        startSending(changes)
+    }
+
+    private func commandsAllowedAfterSuspension(now: Date) -> Bool {
+        guard let until = suspendedUntil else { return true }
+        guard now >= until else { return false }
+        suspendedUntil = nil
+        return true
+    }
+
+    private func releaseSystemOnly() {
+        if mayHoldFans { releaseAll(reason: "all fans System") } else { lastSent = desired }
+    }
+
+    private func leaseDecisionAllowsCommands(now: Date) -> Bool {
+        guard let until = leaseDecisionUntil else { return true }
+        guard now >= until else { return false }
+        leaseDecisionUntil = nil
+        logger.notice("no decision after the lost lease; re-sending")
+        return true
+    }
+
+    private func desiredChanges(now: Date) -> [(fan: Int, command: FanCommand)] {
+        let changes = desired.filter { lastSent[$0.key] != $0.value }.sorted { $0.key < $1.key }
+            .map { (fan: $0.key, command: $0.value) }
+        guard let until = backoffUntil else { return changes }
+        if now >= until {
+            backoffUntil = nil
+            return changes
+        }
+        guard desiredIsSafety else { return [] }
+        return changes.filter { Self.isRaise($0.command, over: lastSent[$0.fan]) }
+    }
+
+    private func startSending(_ items: [(fan: Int, command: FanCommand)]) {
         inFlight = true
         if phase == .idle { phase = .engaging; onStateChange() }
         let gen = generation
         let client = helper.client
-        let items = changes.map { (fan: $0.key, command: $0.value) }
         Task { @MainActor in await self.send(items, client: client, generation: gen) }
     }
 
@@ -262,43 +288,75 @@ enum FanCommandFailure: Equatable, Sendable {
 
     private func send(_ items: [(fan: Int, command: FanCommand)], client: any FanHelperClient, generation gen: Int) async {
         for item in items {
-            do {
-                switch item.command {
-                case .rpm(let rpm):
-                    helperMayHoldUntil = Date().addingTimeInterval(Self.helperHoldSeconds)
-                    let applied = try await client.setFanTarget(item.fan, rpm: rpm, leaseSeconds: Self.leaseSeconds)
-                    guard gen == generation else { return }              // superseded: a release already reset us
-                    lastSent[item.fan] = item.command
-                    appliedRPM[item.fan] = applied
-                    lastLeaseExtendedAt = Date()
-                    if phase != .engaged {
-                        phase = .engaged
-                        startLease()
-                        logger.notice("fan control engaged (fan \(item.fan, privacy: .public) at \(Int(applied), privacy: .public) rpm)")
-                        onStateChange()
-                    }
-                case .system:
-                    try await client.setFanAutomatic(item.fan)
-                    guard gen == generation else { return }
-                    lastSent[item.fan] = .system
-                    appliedRPM[item.fan] = nil
-                }
-                lastCommandAt = Date()
-                onSuccess()
-            } catch {
-                guard gen == generation else { return }
-                inFlight = false
-                if phase == .engaging, !lastSent.values.contains(where: { $0 != .system }) { phase = .idle; onStateChange() }
-                handle(FanCommandFailure(error))
-                return
-            }
+            guard await send(item, client: client, generation: gen) else { return }
         }
         guard gen == generation else { return }
         inFlight = false
-        if phase != .idle, !lastSent.values.contains(where: { $0 != .system }) {
-            phase = .idle; stopLease(); lastReleaseAt = Date(); onStateChange()
-        }
+        finishSendingIfReleased()
         flush(now: Date())                                               // desired may have changed meanwhile
+    }
+
+    private func send(_ item: (fan: Int, command: FanCommand), client: any FanHelperClient, generation gen: Int) async -> Bool {
+        do {
+            guard try await performCommand(item, client: client, generation: gen) else { return false }
+        } catch {
+            sendFailed(error, generation: gen)
+            return false
+        }
+        lastCommandAt = Date()
+        onSuccess()
+        return true
+    }
+
+    private func performCommand(_ item: (fan: Int, command: FanCommand), client: any FanHelperClient,
+                                generation gen: Int) async throws -> Bool {
+        switch item.command {
+        case .rpm(let rpm): return try await setRPM(item, rpm: rpm, client: client, generation: gen)
+        case .system: return try await setAutomatic(item.fan, client: client, generation: gen)
+        }
+    }
+
+    private func setRPM(_ item: (fan: Int, command: FanCommand), rpm: Double, client: any FanHelperClient,
+                        generation gen: Int) async throws -> Bool {
+        helperMayHoldUntil = Date().addingTimeInterval(Self.helperHoldSeconds)
+        let applied = try await client.setFanTarget(item.fan, rpm: rpm, leaseSeconds: Self.leaseSeconds)
+        guard gen == generation else { return false }                    // superseded: a release already reset us
+        lastSent[item.fan] = item.command
+        appliedRPM[item.fan] = applied
+        lastLeaseExtendedAt = Date()
+        markEngaged(fan: item.fan, appliedRPM: applied)
+        return true
+    }
+
+    private func markEngaged(fan: Int, appliedRPM: Double) {
+        guard phase != .engaged else { return }
+        phase = .engaged
+        startLease()
+        logger.notice("fan control engaged (fan \(fan, privacy: .public) at \(Int(appliedRPM), privacy: .public) rpm)")
+        onStateChange()
+    }
+
+    private func setAutomatic(_ fan: Int, client: any FanHelperClient, generation gen: Int) async throws -> Bool {
+        try await client.setFanAutomatic(fan)
+        guard gen == generation else { return false }
+        lastSent[fan] = .system
+        appliedRPM[fan] = nil
+        return true
+    }
+
+    private func sendFailed(_ error: Error, generation gen: Int) {
+        guard gen == generation else { return }
+        inFlight = false
+        if phase == .engaging, !lastSent.values.contains(where: { $0 != .system }) { phase = .idle; onStateChange() }
+        handle(FanCommandFailure(error))
+    }
+
+    private func finishSendingIfReleased() {
+        guard phase != .idle, !lastSent.values.contains(where: { $0 != .system }) else { return }
+        phase = .idle
+        stopLease()
+        lastReleaseAt = Date()
+        onStateChange()
     }
 
     // MARK: Lease (I3: the helper reverts after `leaseSeconds` without a command or renewal)
@@ -348,23 +406,43 @@ enum FanCommandFailure: Equatable, Sendable {
 
     private func renewOnce() async {
         let gen = generation
-        let client = helper.client
-        helperMayHoldUntil = Date().addingTimeInterval(Self.helperHoldSeconds)
+        let client = renewalClient()
         do {
             let stillControlling = try await client.renewLease(seconds: Self.leaseSeconds)
             guard gen == generation, phase == .engaged else { return }
             if stillControlling { lastLeaseExtendedAt = Date(); return }
-            logger.notice("helper no longer controls the fans (reverted or macOS reclaimed a fan)")
-            leaseWasLost()
+            leaseRenewalReverted()
         } catch {
-            guard gen == generation else { return }
-            handle(FanCommandFailure(error))
+            renewalFailed(error, generation: gen)
         }
+    }
+
+    private func renewalClient() -> any FanHelperClient {
+        let client = helper.client
+        helperMayHoldUntil = Date().addingTimeInterval(Self.helperHoldSeconds)
+        return client
+    }
+
+    private func leaseRenewalReverted() {
+        logger.notice("helper no longer controls the fans (reverted or macOS reclaimed a fan)")
+        leaseWasLost()
+    }
+
+    private func renewalFailed(_ error: Error, generation gen: Int) {
+        guard gen == generation else { return }
+        handle(FanCommandFailure(error))
     }
 
     // MARK: Errors (transport-level part; FanStore owns the policy)
 
     private func handle(_ failure: FanCommandFailure) {
+        handleConnectionFailure(failure)
+        handleSuspension(failure)
+        logger.error("fan command failed: \(String(describing: failure))")
+        onFailure(failure)
+    }
+
+    private func handleConnectionFailure(_ failure: FanCommandFailure) {
         switch failure {
         case .interrupted:
             forgetSentState()                                            // the restarted helper restored System
@@ -372,14 +450,19 @@ enum FanCommandFailure: Equatable, Sendable {
             forgetSentState()
             suspend(until: Date().addingTimeInterval(5))                 // do not hammer a helper that refuses us
             Task { @MainActor [helper] in await helper.refresh() }       // → monitoring-only until it is ready again
+        case .unlockTimeout, .foreignController, .safetyOverride, .rateLimited, .sleeping, .notControllable, .failed:
+            break
+        }
+    }
+
+    private func handleSuspension(_ failure: FanCommandFailure) {
+        switch failure {
         case .rateLimited:
             suspend(until: Date().addingTimeInterval(1))                 // drop this tick
         case .sleeping:
             suspend(until: Date().addingTimeInterval(3))                 // the wake path re-applies
-        case .unlockTimeout, .foreignController, .safetyOverride, .notControllable, .failed:
+        case .unlockTimeout, .foreignController, .safetyOverride, .unavailable, .interrupted, .notControllable, .failed:
             break
         }
-        logger.error("fan command failed: \(String(describing: failure))")
-        onFailure(failure)
     }
 }

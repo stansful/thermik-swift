@@ -39,18 +39,24 @@ enum PowerSources {
     /// P2. `IOPSCopyPowerSourcesByType` is exported by IOKit but declared only in the open-source IOKitUser
     /// `IOPowerSourcesPrivate.h` (APSL 2.0) → resolved with dlsym; returns [] when the symbol disappears. ~1 ms.
     static func accessories() -> [AccessoryBattery] {
-        typealias ByType = @convention(c) (Int32) -> Unmanaged<CFTypeRef>?
-        guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "IOPSCopyPowerSourcesByType") else { return [] }   // RTLD_DEFAULT
-        let copyByType = unsafeBitCast(sym, to: ByType.self)
-        guard let blob = copyByType(0 /* kIOPSSourceAll */)?.takeRetainedValue() else { return [] }
+        guard let blob = copyAllSources() else { return [] }
         let list = IOPSCopyPowerSourcesList(blob).takeRetainedValue() as [CFTypeRef]
         return list.compactMap { IOPSGetPowerSourceDescription(blob, $0)?.takeUnretainedValue() as? [String: Any] }
             .filter { ($0[kIOPSTypeKey] as? String) == "Accessory Source" }
-            .map { d in
-                AccessoryBattery(category: d["Accessory Category"] as? String,
-                                 percent: (d[kIOPSCurrentCapacityKey] as? NSNumber)?.intValue,
-                                 isCharging: (d[kIOPSIsChargingKey] as? NSNumber)?.boolValue ?? false,
-                                 transport: d[kIOPSTransportTypeKey] as? String)
-            }
+            .map(accessory)
+    }
+
+    private static func copyAllSources() -> CFTypeRef? {
+        typealias ByType = @convention(c) (Int32) -> Unmanaged<CFTypeRef>?
+        guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "IOPSCopyPowerSourcesByType") else { return nil } // RTLD_DEFAULT
+        let copyByType = unsafeBitCast(sym, to: ByType.self)
+        return copyByType(0 /* kIOPSSourceAll */)?.takeRetainedValue()
+    }
+
+    private static func accessory(_ description: [String: Any]) -> AccessoryBattery {
+        AccessoryBattery(category: description["Accessory Category"] as? String,
+                         percent: (description[kIOPSCurrentCapacityKey] as? NSNumber)?.intValue,
+                         isCharging: (description[kIOPSIsChargingKey] as? NSNumber)?.boolValue ?? false,
+                         transport: description[kIOPSTransportTypeKey] as? String)
     }
 }

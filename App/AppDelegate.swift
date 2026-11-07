@@ -39,9 +39,21 @@ import ThermikCore
     func applicationDidFinishLaunching(_ notification: Notification) {
         let env = AppEnvironment(demo: AppEnvironment.launchedInDemoMode)
         self.env = env
+        configureInterface(env)
+        configureRuntime(env)
+        recordLaunch(env)
+        finishLaunching(env)
+    }
+
+    private func configureInterface(_ env: AppEnvironment) {
         windows = WindowManager(env: env)
         menuBar = MenuBarController(env: env)
         logging = CSVLoggingService(settings: env.settings, sensors: env.sensors, fans: env.fans, system: env.system, events: env.events)
+        configureRouting(env)
+        menuBar.install()
+    }
+
+    private func configureRouting(_ env: AppEnvironment) {
         env.router.showMain = { [weak self] r in self?.windows.showMain(r) }
         env.router.showSettings = { [weak self] t in self?.windows.showSettings(t) }
         env.router.showOnboarding = { [weak self] in self?.windows.showOnboarding() }
@@ -49,44 +61,80 @@ import ThermikCore
         #if DEBUG
         installDebugMenu()
         #endif
-        menuBar.install()
-        // FIXED consumer order: stores first, then engines that read them, then outputs.
-        sampling = SamplingCoordinator(env: env, consumers: [env.sensors, env.system, env.history, env.fans,
-                                                             env.alerts, env.diagnostics, logging, menuBar])
-        env.router.requestTick = { [weak self] in self?.sampling.requestTickSoon() }
+    }
+
+    private func configureRuntime(_ env: AppEnvironment) {
+        configureSampling(env)
         power.onEvent = { [weak self] e in self?.handle(e) }
         power.start()
         urlRouter = URLRouter(env: env)
         LaunchAtLogin.shared.bind(to: env.settings)
+        configureHotKeys(env)
+        installSignalHandlers()
+        observeSecondInstanceActivation()
+    }
+
+    private func configureSampling(_ env: AppEnvironment) {
+        // FIXED consumer order: stores first, then engines that read them, then outputs.
+        sampling = SamplingCoordinator(env: env, consumers: [env.sensors, env.system, env.history, env.fans,
+                                                             env.alerts, env.diagnostics, logging, menuBar])
+        env.router.requestTick = { [weak self] in self?.sampling.requestTickSoon() }
+    }
+
+    private func configureHotKeys(_ env: AppEnvironment) {
         HotKeys.shared.start(settings: env.settings, handlers: [
             .showMainWindow: { [weak self] in self?.env.router.showMain(nil) },
-            .togglePopover: { [weak self] in
-                guard let env = self?.env else { return }
-                env.visibility.popoverOpen ? env.router.closePopover() : env.router.openPopover()
-            },
+            .togglePopover: { [weak self] in self?.togglePopover() },
         ])
-        installSignalHandlers()
+    }
+
+    private func togglePopover() {
+        guard let env else { return }
+        env.visibility.popoverOpen ? env.router.closePopover() : env.router.openPopover()
+    }
+
+    private func observeSecondInstanceActivation() {
         activationObserver = DistributedNotificationCenter.default().addObserver(
             forName: SingleInstance.activateNotification, object: SingleInstance.bundleID, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.env.router.showMain(nil) }       // a second launch → show this instance
         }
+    }
+
+    private func recordLaunch(_ env: AppEnvironment) {
         env.events.record(.appLaunched(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"))
         log.info("launched (demo \(env.isDemo, privacy: .public))")
-        Task { @MainActor in
-            await env.helper.refresh()
-            await sampling.start()
-            if !env.settings.onboardingCompleted { env.router.showOnboarding() }
-            isReady = true
-            let urls = pendingURLs
-            pendingURLs.removeAll()
-            urls.forEach { urlRouter?.handle($0) }
-            env.updater.start()
-            #if DEBUG
-            if UserDefaults.standard.string(forKey: "ThermikUpdateFixture") != nil {
-                env.router.showSettings(.general)
-            }
-            #endif
+    }
+
+    private func finishLaunching(_ env: AppEnvironment) {
+        Task { @MainActor in await finishLaunch(env) }
+    }
+
+    private func finishLaunch(_ env: AppEnvironment) async {
+        await env.helper.refresh()
+        await sampling.start()
+        showOnboardingIfNeeded(env)
+        isReady = true
+        handlePendingURLs()
+        env.updater.start()
+        showUpdateFixtureIfNeeded()
+    }
+
+    private func showOnboardingIfNeeded(_ env: AppEnvironment) {
+        if !env.settings.onboardingCompleted { env.router.showOnboarding() }
+    }
+
+    private func handlePendingURLs() {
+        let urls = pendingURLs
+        pendingURLs.removeAll()
+        urls.forEach { urlRouter?.handle($0) }
+    }
+
+    private func showUpdateFixtureIfNeeded() {
+        #if DEBUG
+        if UserDefaults.standard.string(forKey: "ThermikUpdateFixture") != nil {
+            env.router.showSettings(.general)
         }
+        #endif
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -100,28 +148,35 @@ import ThermikCore
 
     private func handle(_ e: PowerEvent) {
         switch e {
-        case .willSleep:
-            sleepGeneration &+= 1
-            sampling.pause(); env.fans.systemWillSleep(); env.events.record(.systemWillSleep)
-            Task { await env.sensorSampler.willSleep() }
-        case .didWake:
-            env.events.record(.systemDidWake)
-            let generation = sleepGeneration
-            Task { @MainActor in
-                await env.sensorSampler.didWake(); await env.systemSampler.didWake()
-                guard generation == sleepGeneration else {
-                    log.info("wake sequence superseded by a newer sleep")
-                    return
-                }
-                sampling.resume(afterWake: true); env.fans.systemDidWake()
-            }
-        case .powerSourceChanged:
-            sampling.powerSourcesChanged()
+        case .willSleep: handleWillSleep()
+        case .didWake: handleDidWake()
+        case .powerSourceChanged: sampling.powerSourcesChanged()
         case .willPowerOff, .screensDidSleep, .screensDidWake, .lowPowerModeChanged:
             // Logged by PowerEventMonitor. Logout/shutdown quits through applicationShouldTerminate (a cancelled
             // logout must not leave sampling paused); the cadence ignores display sleep and Low Power Mode.
             break
         }
+    }
+
+    private func handleWillSleep() {
+        sleepGeneration &+= 1
+        sampling.pause(); env.fans.systemWillSleep(); env.events.record(.systemWillSleep)
+        Task { await env.sensorSampler.willSleep() }
+    }
+
+    private func handleDidWake() {
+        env.events.record(.systemDidWake)
+        let generation = sleepGeneration
+        Task { @MainActor in await resumeAfterWake(generation: generation) }
+    }
+
+    private func resumeAfterWake(generation: Int) async {
+        await env.sensorSampler.didWake(); await env.systemSampler.didWake()
+        guard generation == sleepGeneration else {
+            log.info("wake sequence superseded by a newer sleep")
+            return
+        }
+        sampling.resume(afterWake: true); env.fans.systemDidWake()
     }
 
     // MARK: Termination
@@ -175,17 +230,22 @@ import ThermikCore
     /// Quits and starts this bundle again once this process has exited (language change, reset to defaults).
     /// The waiting shell gives up after 30 s.
     static func relaunch() {
-        let script = "i=0; while /bin/kill -0 \"$0\" 2>/dev/null && [ $i -lt 150 ]; do /bin/sleep 0.2; i=$((i+1)); done; "
-            + "/usr/bin/open \"$1\"" + (AppEnvironment.current?.isDemo == true ? " --args -ThermikDemo YES" : "")
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", script, String(ProcessInfo.processInfo.processIdentifier), Bundle.main.bundlePath]
-        do { try p.run() } catch {
+        let process = makeRelaunchProcess()
+        do { try process.run() } catch {
             Logger(subsystem: "app.thermik.Thermik", category: "lifecycle")
                 .error("relaunch failed: \(error.localizedDescription, privacy: .public)")
             return
         }
         NSApp.terminate(nil)
+    }
+
+    private static func makeRelaunchProcess() -> Process {
+        let script = "i=0; while /bin/kill -0 \"$0\" 2>/dev/null && [ $i -lt 150 ]; do /bin/sleep 0.2; i=$((i+1)); done; "
+            + "/usr/bin/open \"$1\"" + (AppEnvironment.current?.isDemo == true ? " --args -ThermikDemo YES" : "")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", script, String(ProcessInfo.processInfo.processIdentifier), Bundle.main.bundlePath]
+        return process
     }
 
     #if DEBUG
@@ -223,9 +283,13 @@ import ThermikCore
             .filter { $0.processIdentifier != me.processIdentifier && !$0.isTerminated }
         // Two copies started together each see the other: only the younger one leaves.
         guard let running = others.first(where: { isOlder($0, than: me) }) else { return }
+        activateAndExit(running: running, from: me)
+    }
+
+    private static func activateAndExit(running: NSRunningApplication, from current: NSRunningApplication) -> Never {
         Logger(subsystem: "app.thermik.Thermik", category: "lifecycle")
             .notice("another instance is running (pid \(running.processIdentifier, privacy: .public)); exiting")
-        running.activate(from: me, options: [])
+        running.activate(from: current, options: [])
         DistributedNotificationCenter.default().postNotificationName(activateNotification, object: bundleID, userInfo: nil,
                                                                      deliverImmediately: true)
         exit(0)

@@ -254,15 +254,19 @@ private struct HelperStep: View {
         busy = true
         errorText = nil
         Task { @MainActor in
-            do {
-                try await helper.install()
-                settings.helperWanted = true
-                if case .requiresApproval = helper.state { _ = await helper.awaitApproval() }
-                await helper.refresh()
-            } catch {
-                errorText = (error as NSError).localizedDescription
-            }
+            await installHelper()
             busy = false
+        }
+    }
+
+    private func installHelper() async {
+        do {
+            try await helper.install()
+            settings.helperWanted = true
+            if case .requiresApproval = helper.state { _ = await helper.awaitApproval() }
+            await helper.refresh()
+        } catch {
+            errorText = (error as NSError).localizedDescription
         }
     }
 }

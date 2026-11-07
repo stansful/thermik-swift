@@ -25,13 +25,26 @@ private let log = Logger(subsystem: "app.thermik.Thermik", category: "menubar")
 
     func install() {
         guard status == nil else { return }
+        let status = makeStatus()
+        self.status = status
+        configureStatus(status)
+        installVisibilityMonitor(status)
+        installStaleTimer()
+        finishInstall()
+        log.info("status item installed")
+    }
+
+    private func makeStatus() -> StatusItemController {
         let env = self.env, debug = self.debug
-        let status = StatusItemController(autosaveName: "ThermikStatusItem") {
+        return StatusItemController(autosaveName: "ThermikStatusItem") {
             PopoverRoot()
                 .thermikEnvironment(env)
                 .environment(debug)
         }
-        self.status = status
+    }
+
+    private func configureStatus(_ status: StatusItemController) {
+        let env = self.env
         status.onOpen = { [weak self] in self?.popoverDidOpen() }
         status.onClose = { [weak self] in self?.popoverDidClose() }
         status.menuProvider = { [weak self] in self?.makeContextMenu() }
@@ -39,12 +52,19 @@ private let log = Logger(subsystem: "app.thermik.Thermik", category: "menubar")
         status.onAppearanceChange = { [weak self] in self?.refreshLabel() }
         env.router.openPopover = { [weak self] in self?.status?.open() }
         env.router.closePopover = { [weak self] in self?.status?.close() }
+        observeOpenMain()
+    }
+
+    private func observeOpenMain() {
+        let env = self.env
         // The kit's right-click "Open Thermik" item posts `.thermikOpenMainWindow`; route it to the main window.
         openMainObserver = NotificationCenter.default.addObserver(forName: .thermikOpenMainWindow, object: nil,
                                                                   queue: .main) { _ in
             MainActor.assumeIsolated { env.router.showMain(nil) }
         }
+    }
 
+    private func installVisibilityMonitor(_ status: StatusItemController) {
         let monitor = MenuBarVisibility(status: status, settings: env.settings)
         monitor.onChange = { [weak self] reason in
             guard let self, reason == nil, let status = self.status else { return }
@@ -52,7 +72,9 @@ private let log = Logger(subsystem: "app.thermik.Thermik", category: "menubar")
         }
         monitor.start()
         visibilityMonitor = monitor
+    }
 
+    private func installStaleTimer() {
         // Ticks stop while the sampler is paused or stuck: re-check the stale marker every few seconds (0.2 Hz).
         let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkStale() }
@@ -60,11 +82,12 @@ private let log = Logger(subsystem: "app.thermik.Thermik", category: "menubar")
         timer.tolerance = 2.5
         RunLoop.main.add(timer, forMode: .common)
         staleTimer = timer
+    }
 
+    private func finishInstall() {
         observeConfiguration()
         configureStyleCycling()
         refreshLabel()                                    // "—" immediately, before the first tick
-        log.info("status item installed")
     }
 
     var isItemOnScreen: Bool { status?.isOnScreen ?? false }
@@ -92,66 +115,94 @@ private let log = Logger(subsystem: "app.thermik.Thermik", category: "menubar")
 
     private var isStale: Bool { env.sensors.showsStaleReadings || debug.stale }
 
+    private struct LabelValues {
+        let cfg: MenuBarConfig
+        let unit: UnitTemperature
+        let style: MenuBarStyle
+        let readings: MenuBarReadings
+        let primary: MenuBarReading
+        let secondary: MenuBarReading
+        let fanState: FanPanelState
+    }
+
     /// Builds the label from the stores (the rendering decides whether anything visible changed).
     func makeLabel(appearance: NSAppearance.Name) -> (MenuBarSnapshot, MenuBarStyle, MenuBarRenderOptions) {
+        let values = labelValues()
+        var snapshot = makeSnapshot(for: values)
+        addHistory(to: &snapshot, values: values)
+        snapshot.accessibilityText = spoken(primary: values.primary, secondary: values.secondary, metricP: values.cfg.primary,
+                                            metricS: values.cfg.secondary, unit: values.unit, stale: snapshot.stale, badge: snapshot.badge)
+        addComposed(to: &snapshot, values: values)
+        let options = MenuBarRenderOptions(colored: values.cfg.colored, alertColor: values.cfg.alertColor,
+                                           colorBlind: env.settings.colorBlindScale, appearance: appearance)
+        return (snapshot, values.style, options)
+    }
+
+    private func labelValues() -> LabelValues {
         let cfg = env.settings.menuBar
         let fanState = FanPanelState(fans: env.fans, debug: debug)
-        // Fanless Macs default to `temp` (a stacked/temp+fan label would have nothing to show on its fan line).
         let fanless = (env.sensors.isLoaded && !env.fans.hasFans) || debug.fanless
-        var style = debug.styleOverride ?? cfg.style
-        if fanless && (style == .stacked || style == .tempFan) && cfg.secondary.isFanMetric { style = .temp }
-        let unit = env.settings.effectiveUnit
+        let style = resolvedStyle(cfg: cfg, fanless: fanless)
         let readings = MenuBarReadings(sensors: env.sensors, fans: env.fans, history: env.history, fanless: fanless)
-
         let primary = readings.reading(cfg.primary)
         let usesSecondary = style == .stacked || style == .tempFan
         let secondary = usesSecondary ? readings.reading(cfg.secondary) : .none
+        return LabelValues(cfg: cfg, unit: env.settings.effectiveUnit, style: style, readings: readings,
+                           primary: primary, secondary: secondary, fanState: fanState)
+    }
 
-        var celsius = 0.0, normalized = 0.0
-        var level: ThermalLevel?
+    private func resolvedStyle(cfg: MenuBarConfig, fanless: Bool) -> MenuBarStyle {
+        let style = debug.styleOverride ?? cfg.style
+        // Fanless Macs default to `temp` (a stacked/temp+fan label would have nothing to show on its fan line).
+        if fanless && (style == .stacked || style == .tempFan) && cfg.secondary.isFanMetric { return .temp }
+        return style
+    }
+
+    private func makeSnapshot(for values: LabelValues) -> MenuBarSnapshot {
+        let metrics = labelMetrics(for: values.primary, readings: values.readings)
+        let alert = env.alerts.hasActiveAlert || (metrics.level ?? .frost) >= .veryHot
+        let badge = labelBadge(for: values)
+        var snapshot = MenuBarSnapshot(celsius: metrics.celsius, rpm: nil, normalized: metrics.normalized, alert: alert)
+        snapshot.primary = values.primary
+        snapshot.secondary = values.secondary
+        snapshot.fahrenheit = values.unit == .fahrenheit
+        snapshot.stale = isStale && values.primary.kind != .none
+        snapshot.badge = badge
+        return snapshot
+    }
+
+    private func labelMetrics(for primary: MenuBarReading, readings: MenuBarReadings)
+            -> (celsius: Double, normalized: Double, level: ThermalLevel?) {
         switch primary {
-        case .temperature(let c, let scale):
-            celsius = c; normalized = scale.normalized(c); level = scale.level(c)
+        case .temperature(let c, let scale): return (c, scale.normalized(c), scale.level(c))
         case .rpm(let r):
             let maxRPM = readings.maxRPM
-            normalized = maxRPM > 0 ? min(max(r / maxRPM, 0), 1) : 0
-        case .watts, .unavailable, .none:
-            break
+            return (0, maxRPM > 0 ? min(max(r / maxRPM, 0), 1) : 0, nil)
+        case .watts, .unavailable, .none: return (0, 0, nil)
         }
-        let alert = env.alerts.hasActiveAlert || (level ?? .frost) >= .veryHot
-        let badge: MenuBarBadge
-        if let forced = debug.badge {
-            badge = forced
-        } else if fanState.safetyTemperature != nil {
-            badge = .safety
-        } else if cfg.showOverrideBadge && env.fans.isOverriding {
-            badge = .override
-        } else {
-            badge = .none
-        }
-        var snapshot = MenuBarSnapshot(celsius: celsius, rpm: nil, normalized: normalized, alert: alert)
-        snapshot.primary = primary
-        snapshot.secondary = secondary
-        snapshot.fahrenheit = unit == .fahrenheit
-        snapshot.stale = isStale && primary.kind != .none
-        snapshot.badge = badge
-        if style == .sparkline, let id = Self.seriesID(cfg.primary) {
-            snapshot.history = env.history.sparkline(id, points: 24).map(Double.init)
-        }
-        snapshot.accessibilityText = spoken(primary: primary, secondary: secondary, metricP: cfg.primary,
-                                            metricS: cfg.secondary, unit: unit, stale: snapshot.stale, badge: badge)
-        if let label = style.composition(cfg) {
-            let values = readings.composed(label)
-            snapshot.composition = label
-            snapshot.composed = values
-            // VoiceOver reads every value of a composed label, by its caption when it has one.
-            let shown = label.items.filter { if case .none = readings.reading($0.metric) { false } else { true } }
-            snapshot.accessibilityText = spoken(values: zip(shown, values).map { ($0.metric, $0.caption, $1.reading) },
-                                                unit: unit, stale: snapshot.stale, badge: badge)
-        }
-        let options = MenuBarRenderOptions(colored: cfg.colored, alertColor: cfg.alertColor,
-                                           colorBlind: env.settings.colorBlindScale, appearance: appearance)
-        return (snapshot, style, options)
+    }
+
+    private func labelBadge(for values: LabelValues) -> MenuBarBadge {
+        if let forced = debug.badge { return forced }
+        if values.fanState.safetyTemperature != nil { return .safety }
+        if values.cfg.showOverrideBadge && env.fans.isOverriding { return .override }
+        return .none
+    }
+
+    private func addHistory(to snapshot: inout MenuBarSnapshot, values: LabelValues) {
+        guard values.style == .sparkline, let id = Self.seriesID(values.cfg.primary) else { return }
+        snapshot.history = env.history.sparkline(id, points: 24).map(Double.init)
+    }
+
+    private func addComposed(to snapshot: inout MenuBarSnapshot, values: LabelValues) {
+        guard let label = values.style.composition(values.cfg) else { return }
+        let resolved = values.readings.composed(label)
+        snapshot.composition = label
+        snapshot.composed = resolved
+        // VoiceOver reads every value of a composed label, by its caption when it has one.
+        let shown = label.items.filter { if case .none = values.readings.reading($0.metric) { false } else { true } }
+        snapshot.accessibilityText = spoken(values: zip(shown, resolved).map { ($0.metric, $0.caption, $1.reading) },
+                                            unit: values.unit, stale: snapshot.stale, badge: snapshot.badge)
     }
 
     /// History series behind a menu bar metric, for the sparkline style (fan average/max: the first fan's curve).
@@ -202,36 +253,38 @@ private let log = Logger(subsystem: "app.thermik.Thermik", category: "menubar")
         switch r {
         case .temperature(let c, _):
             return metricName(metric) + " " + String(localized: "\(ThermikFormat.degrees(c, unit: unit)) degrees")
-        case .rpm(let v):
-            let off = v <= 50
-            if case .fan(let i) = metric, let f = env.fans.fans.first(where: { $0.id == i }) {
-                let name = popoverFanName(f)
-                return off ? name + " " + String(localized: "Off") : String(localized: "\(name) \(ThermikFormat.rpm(v)) rpm")
-            }
-            return off ? String(localized: "fans off") : String(localized: "fans \(ThermikFormat.rpm(v)) rpm")
-        case .watts(let w):
-            return String(localized: "system power \(ThermikFormat.watts(w))")
-        case .unavailable:
-            return metricName(metric) + " " + String(localized: "no data")
-        case .none:
-            return nil
+        case .rpm(let v): return rpmPhrase(v, metric: metric)
+        case .watts(let w): return String(localized: "system power \(ThermikFormat.watts(w))")
+        case .unavailable: return metricName(metric) + " " + String(localized: "no data")
+        case .none: return nil
         }
+    }
+
+    private func rpmPhrase(_ value: Double, metric: MenuBarMetric) -> String {
+        let off = value <= 50
+        if case .fan(let i) = metric, let f = env.fans.fans.first(where: { $0.id == i }) {
+            let name = popoverFanName(f)
+            return off ? name + " " + String(localized: "Off") : String(localized: "\(name) \(ThermikFormat.rpm(value)) rpm")
+        }
+        return off ? String(localized: "fans off") : String(localized: "fans \(ThermikFormat.rpm(value)) rpm")
     }
 
     private func metricName(_ m: MenuBarMetric) -> String {
         switch m {
-        case .temperature(.aggregate(let k)):
-            switch k {
-            case .cpuAverage, .cpuHottest: return String(localized: "CPU")
-            case .gpuAverage, .gpuHottest: return String(localized: "GPU")
-            case .socHottest, .socDie: return String(localized: "SoC")
-            default: return k.title
-            }
-        case .temperature(.sensor(let id)):
-            return env.sensors.sensor(id)?.displayName ?? id.key
+        case .temperature(.aggregate(let k)): return aggregateMetricName(k)
+        case .temperature(.sensor(let id)): return env.sensors.sensor(id)?.displayName ?? id.key
         case .fanAverage, .fanMax, .fan: return String(localized: "Fans")
         case .systemPower: return String(localized: "Power")
         case .none: return ""
+        }
+    }
+
+    private func aggregateMetricName(_ kind: AggregateKind) -> String {
+        switch kind {
+        case .cpuAverage, .cpuHottest: return String(localized: "CPU")
+        case .gpuAverage, .gpuHottest: return String(localized: "GPU")
+        case .socHottest, .socDie: return String(localized: "SoC")
+        default: return kind.title
         }
     }
 
@@ -251,86 +304,135 @@ private let log = Logger(subsystem: "app.thermik.Thermik", category: "menubar")
 
     private func observeConfiguration() {
         withObservationTracking {
-            _ = env.settings.menuBar
-            _ = env.settings.temperatureUnit
-            _ = env.settings.colorBlindScale
-            _ = env.settings.colorScales
-            _ = env.fans.isOverriding
-            _ = env.fans.status
-            _ = env.fans.hasFans
-            _ = env.alerts.hasActiveAlert
-            _ = debug.isActive
-            _ = debug.badge; _ = debug.stale; _ = debug.fanless; _ = debug.styleOverride; _ = debug.cycleStyles
+            trackConfiguration()
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.refreshLabel()
-                self.configureStyleCycling()
-                self.observeConfiguration()
+                self?.configurationDidChange()
             }
         }
     }
 
+    private func trackConfiguration() {
+        trackLabelConfiguration()
+        trackFanConfiguration()
+        trackDebugConfiguration()
+    }
+
+    private func trackLabelConfiguration() {
+        _ = env.settings.menuBar
+        _ = env.settings.temperatureUnit
+        _ = env.settings.colorBlindScale
+        _ = env.settings.colorScales
+        _ = env.alerts.hasActiveAlert
+    }
+
+    private func trackFanConfiguration() {
+        _ = env.fans.isOverriding
+        _ = env.fans.status
+        _ = env.fans.hasFans
+    }
+
+    private func trackDebugConfiguration() {
+        _ = debug.isActive
+        _ = debug.badge
+        _ = debug.stale
+        _ = debug.fanless
+        _ = debug.styleOverride
+        _ = debug.cycleStyles
+    }
+
+    private func configurationDidChange() {
+        refreshLabel()
+        configureStyleCycling()
+        observeConfiguration()
+    }
+
     /// DEBUG: cycles through every label style every 3 s (acceptance: "all label styles render").
     private func configureStyleCycling() {
-        guard debug.cycleStyles else {
-            if styleTimer != nil { styleTimer?.invalidate(); styleTimer = nil; debug.styleOverride = nil }
-            return
-        }
+        guard debug.cycleStyles else { stopStyleCycling(); return }
         guard styleTimer == nil else { return }
         let t = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let all = MenuBarStyle.allCases
-                let current = self.debug.styleOverride ?? self.env.settings.menuBar.style
-                let next = all[((all.firstIndex(of: current) ?? 0) + 1) % all.count]
-                self.debug.styleOverride = next
-                log.debug("debug style: \(next.rawValue)")
-            }
+            MainActor.assumeIsolated { self?.cycleStyle() }
         }
         RunLoop.main.add(t, forMode: .common)
         styleTimer = t
+    }
+
+    private func stopStyleCycling() {
+        guard styleTimer != nil else { return }
+        styleTimer?.invalidate()
+        styleTimer = nil
+        debug.styleOverride = nil
+    }
+
+    private func cycleStyle() {
+        let all = MenuBarStyle.allCases
+        let current = debug.styleOverride ?? env.settings.menuBar.style
+        let next = all[((all.firstIndex(of: current) ?? 0) + 1) % all.count]
+        debug.styleOverride = next
+        log.debug("debug style: \(next.rawValue)")
     }
 
     // MARK: Right-click menu
 
     private func makeContextMenu() -> NSMenu {
         let m = NSMenu()
-        let fans = env.fans
-        let state = FanPanelState(fans: fans, debug: debug)
-        if state.hasFans {
-            let modeItem = NSMenuItem(title: String(localized: "Fan mode"), action: nil, keyEquivalent: "")
-            let sub = NSMenu()
-            for mode in FanMode.allCases {
-                let item = MenuItemAction.item(mode.title) { [weak self] in
-                    self?.env.fans.setMode(mode, reason: .user)
-                    self?.env.router.requestTick()
-                }
-                item.state = state.mode == mode ? .on : .off
-                item.isEnabled = state.canControl
-                sub.addItem(item)
-            }
-            if !state.canControl {
-                sub.addItem(.separator())
-                let why = NSMenuItem(title: disabledReason(state), action: nil, keyEquivalent: "")
-                why.isEnabled = false
-                sub.addItem(why)
-            }
-            sub.autoenablesItems = false
-            modeItem.submenu = sub
-            m.addItem(modeItem)
-            m.addItem(.separator())
-        }
-        m.addItem(MenuItemAction.item(String(localized: "Open Thermik")) { [weak self] in self?.env.router.showMain(nil) })
-        m.addItem(MenuItemAction.item(String(localized: "Settings…"), key: ",") { [weak self] in self?.env.router.showSettings(nil) })
-        #if DEBUG
-        m.addItem(.separator())
-        m.addItem(debugMenuItem())
-        #endif
+        addFanModeItem(to: m)
+        addMainMenuItems(to: m)
+        addDebugMenuItem(to: m)
         m.addItem(.separator())
         m.addItem(withTitle: String(localized: "Quit Thermik"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         m.autoenablesItems = false
         return m
+    }
+
+    private func addFanModeItem(to m: NSMenu) {
+        let state = FanPanelState(fans: env.fans, debug: debug)
+        guard state.hasFans else { return }
+        let modeItem = NSMenuItem(title: String(localized: "Fan mode"), action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        addFanModeItems(to: sub, state: state)
+        addDisabledReason(to: sub, state: state)
+        sub.autoenablesItems = false
+        modeItem.submenu = sub
+        m.addItem(modeItem)
+        m.addItem(.separator())
+    }
+
+    private func addFanModeItems(to sub: NSMenu, state: FanPanelState) {
+        for mode in FanMode.allCases {
+            sub.addItem(fanModeItem(mode, state: state))
+        }
+    }
+
+    private func fanModeItem(_ mode: FanMode, state: FanPanelState) -> NSMenuItem {
+        let item = MenuItemAction.item(mode.title) { [weak self] in
+            self?.env.fans.setMode(mode, reason: .user)
+            self?.env.router.requestTick()
+        }
+        item.state = state.mode == mode ? .on : .off
+        item.isEnabled = state.canControl
+        return item
+    }
+
+    private func addDisabledReason(to sub: NSMenu, state: FanPanelState) {
+        guard !state.canControl else { return }
+        sub.addItem(.separator())
+        let why = NSMenuItem(title: disabledReason(state), action: nil, keyEquivalent: "")
+        why.isEnabled = false
+        sub.addItem(why)
+    }
+
+    private func addMainMenuItems(to m: NSMenu) {
+        m.addItem(MenuItemAction.item(String(localized: "Open Thermik")) { [weak self] in self?.env.router.showMain(nil) })
+        m.addItem(MenuItemAction.item(String(localized: "Settings…"), key: ",") { [weak self] in self?.env.router.showSettings(nil) })
+    }
+
+    private func addDebugMenuItem(to m: NSMenu) {
+        #if DEBUG
+        m.addItem(.separator())
+        m.addItem(debugMenuItem())
+        #endif
     }
 
     private func disabledReason(_ s: FanPanelState) -> String {
@@ -346,67 +448,147 @@ private let log = Logger(subsystem: "app.thermik.Thermik", category: "menubar")
     /// Developer-only verification menu (not localized: never shipped in Release builds).
     private func debugMenuItem() -> NSMenuItem {
         let root = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
+        root.submenu = makeDebugMenu()
+        return root
+    }
+
+    private func makeDebugMenu() -> NSMenu {
         let m = NSMenu()
         let d = debug
-        func toggle(_ title: String, _ on: Bool, _ action: @escaping @MainActor () -> Void) {
-            let i = MenuItemAction.item(title, action: action); i.state = on ? .on : .off; m.addItem(i)
-        }
-        toggle("Cycle label styles (3 s)", d.cycleStyles) { d.cycleStyles.toggle() }
+        addDebugStyleItems(to: m)
+        addDebugReadingItems(to: m)
+        addDebugFanStateItems(to: m)
+        addDebugHelperItems(to: m)
+        addDebugPressureItems(to: m)
+        addDebugHintItems(to: m)
+        m.addItem(MenuItemAction.item("Reset debug overrides") { d.reset() })
+        return m
+    }
+
+    private func addToggle(_ title: String, selected: Bool, to m: NSMenu, action: @escaping @MainActor () -> Void) {
+        let item = MenuItemAction.item(title, action: action)
+        item.state = selected ? .on : .off
+        m.addItem(item)
+    }
+
+    private func addDebugStyleItems(to m: NSMenu) {
+        let d = debug
+        addToggle("Cycle label styles (3 s)", selected: d.cycleStyles, to: m) { d.cycleStyles.toggle() }
         let styles = NSMenuItem(title: "Label style", action: nil, keyEquivalent: "")
-        let sm = NSMenu()
-        for s in MenuBarStyle.allCases {
-            let i = MenuItemAction.item(s.title) { d.cycleStyles = false; d.styleOverride = s }
-            i.state = d.styleOverride == s ? .on : .off
-            sm.addItem(i)
-        }
-        sm.addItem(MenuItemAction.item("Use setting") { d.styleOverride = nil })
-        styles.submenu = sm
+        styles.submenu = debugStylesMenu()
         m.addItem(styles)
         m.addItem(.separator())
-        toggle("Simulate stale readings", d.stale) { d.stale.toggle() }
-        toggle("Simulate fanless Mac", d.fanless) { d.fanless.toggle() }
-        toggle("Force ◆ override badge", d.badge == .override) { d.badge = d.badge == .override ? nil : .override }
-        toggle("Simulate safety override (103°)", d.safetyOverrideC != nil) {
-            if d.safetyOverrideC == nil { d.safetyOverrideC = 103; d.badge = .safety } else { d.safetyOverrideC = nil; d.badge = nil }
+    }
+
+    private func debugStylesMenu() -> NSMenu {
+        let d = debug
+        let sm = NSMenu()
+        for s in MenuBarStyle.allCases {
+            sm.addItem(debugStyleItem(s, overrides: d))
         }
-        toggle("Simulate engaging", d.engaging) { d.engaging.toggle() }
-        toggle("Simulate Max countdown (30 min)", d.maxDeadline != nil) {
+        sm.addItem(MenuItemAction.item("Use setting") { d.styleOverride = nil })
+        return sm
+    }
+
+    private func debugStyleItem(_ style: MenuBarStyle, overrides d: PopoverDebugOverrides) -> NSMenuItem {
+        let item = MenuItemAction.item(style.title) {
+            d.cycleStyles = false
+            d.styleOverride = style
+        }
+        item.state = d.styleOverride == style ? .on : .off
+        return item
+    }
+
+    private func addDebugReadingItems(to m: NSMenu) {
+        let d = debug
+        addToggle("Simulate stale readings", selected: d.stale, to: m) { d.stale.toggle() }
+        addToggle("Simulate fanless Mac", selected: d.fanless, to: m) { d.fanless.toggle() }
+        addToggle("Force ◆ override badge", selected: d.badge == .override, to: m) { d.badge = d.badge == .override ? nil : .override }
+        addToggle("Simulate safety override (103°)", selected: d.safetyOverrideC != nil, to: m) { Self.toggleSafetyOverride(d) }
+    }
+
+    private static func toggleSafetyOverride(_ d: PopoverDebugOverrides) {
+        if d.safetyOverrideC == nil {
+            d.safetyOverrideC = 103
+            d.badge = .safety
+        } else {
+            d.safetyOverrideC = nil
+            d.badge = nil
+        }
+    }
+
+    private func addDebugFanStateItems(to m: NSMenu) {
+        let d = debug
+        addToggle("Simulate engaging", selected: d.engaging, to: m) { d.engaging.toggle() }
+        addToggle("Simulate Max countdown (30 min)", selected: d.maxDeadline != nil, to: m) {
             d.maxDeadline = d.maxDeadline == nil ? Date().addingTimeInterval(30 * 60) : nil
         }
-        toggle("Simulate foreign controller (TG Pro)", d.foreignController != nil) {
+        addToggle("Simulate foreign controller (TG Pro)", selected: d.foreignController != nil, to: m) {
             d.foreignController = d.foreignController == nil ? "TG Pro" : nil
         }
+    }
+
+    private func addDebugHelperItems(to m: NSMenu) {
         let helper = NSMenuItem(title: "Helper state", action: nil, keyEquivalent: "")
+        helper.submenu = debugHelperMenu()
+        m.addItem(helper)
+    }
+
+    private func debugHelperMenu() -> NSMenu {
+        let d = debug
         let hm = NSMenu()
         for a in [HelperAvailability.notInstalled, .requiresApproval, .needsUpgrade, .unreachable, .connecting] {
-            let i = MenuItemAction.item(a.rawValue) { d.helper = d.helper == a ? nil : a }
-            i.state = d.helper == a ? .on : .off
-            hm.addItem(i)
+            hm.addItem(debugHelperItem(a, overrides: d))
         }
         hm.addItem(MenuItemAction.item("Real state") { d.helper = nil })
-        helper.submenu = hm
-        m.addItem(helper)
+        return hm
+    }
+
+    private func debugHelperItem(_ availability: HelperAvailability, overrides d: PopoverDebugOverrides) -> NSMenuItem {
+        let item = MenuItemAction.item(availability.rawValue) { d.helper = d.helper == availability ? nil : availability }
+        item.state = d.helper == availability ? .on : .off
+        return item
+    }
+
+    private func addDebugPressureItems(to m: NSMenu) {
         let pressure = NSMenuItem(title: "Thermal pressure", action: nil, keyEquivalent: "")
+        pressure.submenu = debugPressureMenu()
+        m.addItem(pressure)
+    }
+
+    private func debugPressureMenu() -> NSMenu {
+        let d = debug
         let pm = NSMenu()
         for p in ThermalPressure.allCases {
-            let i = MenuItemAction.item(p.title) { d.pressure = d.pressure == p ? nil : p }
-            i.state = d.pressure == p ? .on : .off
-            pm.addItem(i)
+            pm.addItem(debugPressureItem(p, overrides: d))
         }
         pm.addItem(MenuItemAction.item("Real pressure") { d.pressure = nil })
-        pressure.submenu = pm
-        m.addItem(pressure)
+        return pm
+    }
+
+    private func debugPressureItem(_ pressure: ThermalPressure, overrides d: PopoverDebugOverrides) -> NSMenuItem {
+        let item = MenuItemAction.item(pressure.title) { d.pressure = d.pressure == pressure ? nil : pressure }
+        item.state = d.pressure == pressure ? .on : .off
+        return item
+    }
+
+    private func addDebugHintItems(to m: NSMenu) {
         m.addItem(.separator())
-        m.addItem(MenuItemAction.item("Show first-run hint") { [weak self] in
+        m.addItem(firstRunHintDebugItem())
+        m.addItem(hiddenHintDebugItem())
+    }
+
+    private func firstRunHintDebugItem() -> NSMenuItem {
+        MenuItemAction.item("Show first-run hint") { [weak self] in
             guard let b = self?.status?.item.button else { return }
             self?.firstRunHint.show(relativeTo: b)
-        })
-        m.addItem(MenuItemAction.item("Show hidden-item hint") { [weak self] in
+        }
+    }
+
+    private func hiddenHintDebugItem() -> NSMenuItem {
+        MenuItemAction.item("Show hidden-item hint") { [weak self] in
             self?.visibilityMonitor?.showHint(self?.visibilityMonitor?.reason ?? .notch)
-        })
-        m.addItem(MenuItemAction.item("Reset debug overrides") { d.reset() })
-        root.submenu = m
-        return root
+        }
     }
     #endif
 }

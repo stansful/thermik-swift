@@ -43,24 +43,30 @@ import ThermikCore
     }
 
     func consume(_ tick: Tick) {
-        guard let s = tick.system else { return }
-        if let l = s.cpuLoad {
-            if l != cpuLoad { cpuLoad = l }
-            let total = s.cpuTotalPercent
-            if total != cpuTotalPercent { cpuTotalPercent = total }
-        }
-        if let m = s.memory, m != memory { memory = m }
-        if let g = s.gpu, g != gpu { gpu = g }
+        guard let frame = tick.system else { return }
+        updateCPU(frame)
+        if let memory = frame.memory, memory != self.memory { self.memory = memory }
+        if let gpu = frame.gpu, gpu != self.gpu { self.gpu = gpu }
         // nil too: off the System page IOReport is not read, and its last numbers must not reappear on the next visit.
-        if s.soc != soc { soc = s.soc }
-        if let b = s.battery, b != battery { battery = b }
-        if let p = s.powerSources, p != powerSource {
-            let old = powerSource?.kind
-            powerSource = p
-            if let old, old != p.kind { events?.record(.powerSourceChanged(p.kind), date: tick.date) }
-        }
-        updatePressure(s.pressure, at: tick.date)
-        if s.processThermalState != processThermalState { processThermalState = s.processThermalState }
+        if frame.soc != soc { soc = frame.soc }
+        if let battery = frame.battery, battery != self.battery { self.battery = battery }
+        updatePowerSource(frame, at: tick.date)
+        updatePressure(frame.pressure, at: tick.date)
+        if frame.processThermalState != processThermalState { processThermalState = frame.processThermalState }
+    }
+
+    private func updateCPU(_ frame: SystemFrame) {
+        guard let load = frame.cpuLoad else { return }
+        if load != cpuLoad { cpuLoad = load }
+        let total = frame.cpuTotalPercent
+        if total != cpuTotalPercent { cpuTotalPercent = total }
+    }
+
+    private func updatePowerSource(_ frame: SystemFrame, at date: Date) {
+        guard let source = frame.powerSources, source != powerSource else { return }
+        let old = powerSource?.kind
+        powerSource = source
+        if let old, old != source.kind { events?.record(.powerSourceChanged(source.kind), date: date) }
     }
 
     private func updatePressure(_ p: ThermalPressure, at date: Date) {

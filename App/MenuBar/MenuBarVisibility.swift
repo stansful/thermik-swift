@@ -47,10 +47,21 @@ enum MenuBarHiddenReason: String, Sendable {
     var isHidden: Bool { reason != nil }
 
     func start() {
+        observeScreenParameters()
+        observeSpaceChanges()
+        observeSessionTransitions()
+        observeItemVisibility()
+        schedule(after: 2)
+    }
+
+    private func observeScreenParameters() {
         let nc = NotificationCenter.default
         observers.append(nc.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.schedule(after: 1) }
         })
+    }
+
+    private func observeSpaceChanges() {
         let wc = NSWorkspace.shared.notificationCenter
         // Entering / leaving a full-screen Space switches the active Space (the menu bar hides / returns).
         for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.activeSpaceDidChangeNotification] {
@@ -58,27 +69,36 @@ enum MenuBarHiddenReason: String, Sendable {
                 MainActor.assumeIsolated { self?.schedule(after: 1) }
             })
         }
-        let suspend: [(Notification.Name, @MainActor @Sendable (MenuBarVisibility) -> Void)] = [
+    }
+
+    private func observeSessionTransitions() {
+        let wc = NSWorkspace.shared.notificationCenter
+        for (name, apply) in sessionTransitions() {
+            workspaceObservers.append(wc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.applySessionTransition(apply) }
+            })
+        }
+    }
+
+    private func sessionTransitions() -> [(Notification.Name, @MainActor @Sendable (MenuBarVisibility) -> Void)] {
+        [
             (NSWorkspace.screensDidSleepNotification, { $0.screensAsleep = true }),
             (NSWorkspace.screensDidWakeNotification, { $0.screensAsleep = false }),
             (NSWorkspace.sessionDidResignActiveNotification, { $0.sessionInactive = true }),
             (NSWorkspace.sessionDidBecomeActiveNotification, { $0.sessionInactive = false }),
         ]
-        for (name, apply) in suspend {
-            workspaceObservers.append(wc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    apply(self)
-                    self.schedule(after: 2)
-                }
-            })
-        }
-        if let item = status?.item {
-            visibleObservation = item.observe(\.isVisible, options: [.new]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.schedule(after: 0.5) }
-            }
-        }
+    }
+
+    private func applySessionTransition(_ apply: @MainActor @Sendable (MenuBarVisibility) -> Void) {
+        apply(self)
         schedule(after: 2)
+    }
+
+    private func observeItemVisibility() {
+        guard let item = status?.item else { return }
+        visibleObservation = item.observe(\.isVisible, options: [.new]) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.schedule(after: 0.5) }
+        }
     }
 
     /// Coalesced re-check.
@@ -97,25 +117,32 @@ enum MenuBarHiddenReason: String, Sendable {
         // Occluded / off screen / behind the notch only count while the menu bar is shown. Otherwise keep the last
         // verdict and restart the grace period when the bar is back (its return changes the item window's occlusion,
         // which re-evaluates). A removed item (`isVisible == false`) is a verdict on its own.
-        if let r, r != .removed, menuBarConcealed(status) {
-            if hiddenSince != nil { log.info("menu bar not shown (\(r.rawValue) ignored); hidden time reset") }
-            hiddenSince = nil
-            return
-        }
-        if r != reason {
-            reason = r
-            log.info("menu bar item visibility: \(r?.rawValue ?? "visible")")
-            onChange?(r)
-        }
+        if ignoreConcealedReason(r, status: status) { return }
+        updateReason(r)
+        updateHiddenDuration(for: r)
+    }
+
+    private func ignoreConcealedReason(_ r: MenuBarHiddenReason?, status: StatusItemController) -> Bool {
+        guard let r, r != .removed, menuBarConcealed(status) else { return false }
+        if hiddenSince != nil { log.info("menu bar not shown (\(r.rawValue) ignored); hidden time reset") }
+        hiddenSince = nil
+        return true
+    }
+
+    private func updateReason(_ r: MenuBarHiddenReason?) {
+        guard r != reason else { return }
+        reason = r
+        log.info("menu bar item visibility: \(r?.rawValue ?? "visible")")
+        onChange?(r)
+    }
+
+    private func updateHiddenDuration(for r: MenuBarHiddenReason?) {
         guard r != nil else { hiddenSince = nil; return }
         let now = Date()
         if hiddenSince == nil { hiddenSince = now }
         let elapsed = now.timeIntervalSince(hiddenSince ?? now)
-        if elapsed >= Self.hiddenGrace {
-            warnIfNeeded()
-        } else {
-            schedule(after: Self.hiddenGrace - elapsed + 0.25)
-        }
+        if elapsed >= Self.hiddenGrace { warnIfNeeded(); return }
+        schedule(after: Self.hiddenGrace - elapsed + 0.25)
     }
 
     /// Hidden means `!isVisible`, an occluded item window, a window pushed off the screen, or one that intersects
@@ -157,14 +184,16 @@ enum MenuBarHiddenReason: String, Sendable {
         let f = screen.frame
         let target = CGRect(x: f.minX, y: primary.frame.maxY - f.maxY, width: f.width, height: f.height).insetBy(dx: 1, dy: 1)
         let me = ProcessInfo.processInfo.processIdentifier
-        return list.contains { info in
-            guard info[kCGWindowLayer as String] as? Int == 0,
-                  info[kCGWindowOwnerPID as String] as? pid_t != me,
-                  (info[kCGWindowAlpha as String] as? Double ?? 1) > 0,
-                  let b = info[kCGWindowBounds as String] as? NSDictionary,
-                  let rect = CGRect(dictionaryRepresentation: b as CFDictionary) else { return false }
-            return rect.contains(target)
-        }
+        return list.contains { fullScreenWindow($0, covers: target, excluding: me) }
+    }
+
+    private static func fullScreenWindow(_ info: [String: Any], covers target: CGRect, excluding me: pid_t) -> Bool {
+        guard info[kCGWindowLayer as String] as? Int == 0,
+              info[kCGWindowOwnerPID as String] as? pid_t != me,
+              (info[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+              let b = info[kCGWindowBounds as String] as? NSDictionary,
+              let rect = CGRect(dictionaryRepresentation: b as CFDictionary) else { return false }
+        return rect.contains(target)
     }
 
     private func watchOcclusion(of window: NSWindow?) {
@@ -190,9 +219,25 @@ enum MenuBarHiddenReason: String, Sendable {
     /// Also used by the DEBUG menu to preview the hint.
     func showHint(_ reason: MenuBarHiddenReason) {
         hintWindow?.close()
+        let panel = makeHintPanel()
+        let host = NSHostingView(rootView: makeHintView(for: reason).fixedSize())
+        panel.contentView = host
+        panel.setContentSize(host.fittingSize)
+        positionHintPanel(panel)
+        panel.orderFrontRegardless()
+        hintWindow = panel
+        log.info("hidden-item hint shown (\(reason.rawValue))")
+    }
+
+    private func makeHintPanel() -> NSPanel {
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 220),
                             styleMask: [.titled, .closable, .nonactivatingPanel, .utilityWindow, .fullSizeContentView],
                             backing: .buffered, defer: true)
+        configureHintPanel(panel)
+        return panel
+    }
+
+    private func configureHintPanel(_ panel: NSPanel) {
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.isFloatingPanel = true
@@ -200,7 +245,10 @@ enum MenuBarHiddenReason: String, Sendable {
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let view = MenuBarHiddenHint(
+    }
+
+    private func makeHintView(for reason: MenuBarHiddenReason) -> MenuBarHiddenHint {
+        MenuBarHiddenHint(
             reason: reason,
             currentStyle: settings.menuBar.style,
             canReAdd: status.map { !$0.item.isVisible } ?? false,
@@ -209,15 +257,11 @@ enum MenuBarHiddenReason: String, Sendable {
             onOpenSettings: { [weak self] in Self.openMenuBarSettings(); self?.closeHint() },
             onNeverWarn: { [weak self] in self?.settings.menuBar.warnWhenHidden = false; self?.closeHint() },
             onDismiss: { [weak self] in self?.closeHint() })
-        let host = NSHostingView(rootView: view.fixedSize())
-        panel.contentView = host
-        panel.setContentSize(host.fittingSize)
-        if let vf = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
-            panel.setFrameTopLeftPoint(NSPoint(x: vf.maxX - panel.frame.width - 16, y: vf.maxY - 12))
-        }
-        panel.orderFrontRegardless()
-        hintWindow = panel
-        log.info("hidden-item hint shown (\(reason.rawValue))")
+    }
+
+    private func positionHintPanel(_ panel: NSPanel) {
+        guard let vf = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame else { return }
+        panel.setFrameTopLeftPoint(NSPoint(x: vf.maxX - panel.frame.width - 16, y: vf.maxY - 12))
     }
 
     private func closeHint() {

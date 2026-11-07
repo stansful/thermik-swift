@@ -41,27 +41,62 @@ public enum SMCCodec {
     // MARK: Decoding
 
     public static func decode(_ b: [UInt8], as info: SMCKeyInfo) -> SMCValue {
+        if let special = decodeSpecial(b, as: info) { return special }
+        return decodeInteger(b, as: info) ?? decodeFallback(b, as: info)
+    }
+
+    private static func decodeSpecial(_ b: [UInt8], as info: SMCKeyInfo) -> SMCValue? {
+        switch info.type {
+        case .flt where b.count >= 4: return .number(Double(decodeFloat32LE(b)))
+        case .ioft where b.count >= 8: return .number(Double(Int64(bitPattern: uint(b, 8, littleEndian: true))) / 65536.0)
+        case .ch8: return .string(String(decoding: b.prefix { $0 != 0 }, as: UTF8.self))
+        case .fds where b.count >= 4: return decodeFanDescriptor(b)
+        default: return nil
+        }
+    }
+
+    private static func decodeFanDescriptor(_ b: [UInt8]) -> SMCValue {
+        let name = String(decoding: b.dropFirst(4).prefix { $0 != 0 }, as: UTF8.self)
+            .trimmingCharacters(in: .whitespaces)
+        return .fanDescriptor(type: b[0], zone: b[1], location: b[2], name: name)
+    }
+
+    private static func decodeInteger(_ b: [UInt8], as info: SMCKeyInfo) -> SMCValue? {
+        decodeUnsigned(b, as: info)
+            ?? decodeSigned(b, as: info)
+            ?? decodeFlag(b, as: info)
+    }
+
+    private static func decodeUnsigned(_ b: [UInt8], as info: SMCKeyInfo) -> SMCValue? {
         let le = info.integersAreLittleEndian
         switch info.type {
-        case .flt where b.count >= 4:  return .number(Double(decodeFloat32LE(b)))
-        case .ioft where b.count >= 8: return .number(Double(Int64(bitPattern: uint(b, 8, littleEndian: true))) / 65536.0)
-        case .ui8 where b.count >= 1:  return .unsigned(UInt64(b[0]))
+        case .ui8 where b.count >= 1: return .unsigned(UInt64(b[0]))
         case .ui16 where b.count >= 2: return .unsigned(uint(b, 2, littleEndian: le))
         case .ui32 where b.count >= 4: return .unsigned(uint(b, 4, littleEndian: le))
         case .ui64 where b.count >= 8: return .unsigned(uint(b, 8, littleEndian: le))
-        case .si8 where b.count >= 1:  return .signed(Int64(Int8(bitPattern: b[0])))
+        default: return nil
+        }
+    }
+
+    private static func decodeSigned(_ b: [UInt8], as info: SMCKeyInfo) -> SMCValue? {
+        let le = info.integersAreLittleEndian
+        switch info.type {
+        case .si8 where b.count >= 1: return .signed(Int64(Int8(bitPattern: b[0])))
         case .si16 where b.count >= 2: return .signed(Int64(Int16(bitPattern: UInt16(uint(b, 2, littleEndian: le)))))
         case .si32 where b.count >= 4: return .signed(Int64(Int32(bitPattern: UInt32(uint(b, 4, littleEndian: le)))))
         case .si64 where b.count >= 8: return .signed(Int64(bitPattern: uint(b, 8, littleEndian: le)))
-        case .flag where b.count >= 1: return .bool(b[0] != 0)
-        case .ch8:                     return .string(String(decoding: b.prefix { $0 != 0 }, as: UTF8.self))
-        case .fds where b.count >= 4:
-            let name = String(decoding: b.dropFirst(4).prefix { $0 != 0 }, as: UTF8.self).trimmingCharacters(in: .whitespaces)
-            return .fanDescriptor(type: b[0], zone: b[1], location: b[2], name: name)
-        default:
-            if let fixed = decodeFixedPoint(b, type: info.type) { return .number(fixed) }
-            return .bytes(b)
+        default: return nil
         }
+    }
+
+    private static func decodeFlag(_ b: [UInt8], as info: SMCKeyInfo) -> SMCValue? {
+        guard info.type == .flag, b.count >= 1 else { return nil }
+        return .bool(b[0] != 0)
+    }
+
+    private static func decodeFallback(_ b: [UInt8], as info: SMCKeyInfo) -> SMCValue {
+        if let fixed = decodeFixedPoint(b, type: info.type) { return .number(fixed) }
+        return .bytes(b)
     }
 
     /// Apple fixed point, 2 bytes big-endian: "fpXY" unsigned / "spXY" signed, Y = fraction bits (hex digit).
@@ -99,16 +134,22 @@ public enum SMCCodec {
     public static func encodeRPM(_ rpm: Double, as info: SMCKeyInfo, key: FourCC) throws -> [UInt8] {
         guard rpm.isFinite, rpm >= 0 else { throw SMCError.invalidValue("rpm \(rpm) for \(key)") }
         switch info.type {
-        case .flt:
-            guard info.size == 4 else { throw SMCError.sizeMismatch(key: key, expected: 4, actual: Int(info.size)) }
-            return encodeFloat32LE(Float(rpm))
-        case .fpe2:
-            guard info.size == 2 else { throw SMCError.sizeMismatch(key: key, expected: 2, actual: Int(info.size)) }
-            let raw = UInt16(min(rpm * 4.0, Double(UInt16.max)).rounded())     // 14.2 fixed point
-            return [UInt8(raw >> 8), UInt8(raw & 0xFF)]                          // big-endian
+        case .flt: return try encodeFloatRPM(rpm, as: info, key: key)
+        case .fpe2: return try encodeFixedPointRPM(rpm, as: info, key: key)
         default:
             throw SMCError.typeMismatch(key: key, expected: [.flt, .fpe2], actual: info.type)
         }
+    }
+
+    private static func encodeFloatRPM(_ rpm: Double, as info: SMCKeyInfo, key: FourCC) throws -> [UInt8] {
+        guard info.size == 4 else { throw SMCError.sizeMismatch(key: key, expected: 4, actual: Int(info.size)) }
+        return encodeFloat32LE(Float(rpm))
+    }
+
+    private static func encodeFixedPointRPM(_ rpm: Double, as info: SMCKeyInfo, key: FourCC) throws -> [UInt8] {
+        guard info.size == 2 else { throw SMCError.sizeMismatch(key: key, expected: 2, actual: Int(info.size)) }
+        let raw = UInt16(min(rpm * 4.0, Double(UInt16.max)).rounded()) // 14.2 fixed point
+        return [UInt8(raw >> 8), UInt8(raw & 0xFF)]                     // big-endian
     }
 
     public static func encodeFloat32LE(_ f: Float) -> [UInt8] {

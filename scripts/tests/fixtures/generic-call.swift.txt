@@ -1,0 +1,23 @@
+private func call<T: Sendable>(_ body: (any ThermikHelperXPC, @escaping @Sendable (Result<T, any Error>) -> Void) -> Void) async throws -> T {
+    let connection = current()
+    let seconds = timeoutSeconds
+    return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, any Error>) in
+        let once = OnceFlag()
+        // Cancelled as soon as the call completes, so nothing waits out the full timeout.
+        let timer = Task {
+            try await Task.sleep(for: .seconds(seconds))
+            if once.claim() { cont.resume(throwing: Self.timeoutError()) }
+        }
+        let finish: @Sendable (Result<T, any Error>) -> Void = { result in
+            guard once.claim() else { return }
+            timer.cancel()
+            cont.resume(with: result)
+        }
+        let proxy = connection.remoteObjectProxyWithErrorHandler { error in finish(.failure(error)) }
+        guard let helper = proxy as? any ThermikHelperXPC else {
+            finish(.failure(NSError.thermikHelper(.internalError, "bad XPC proxy")))
+            return
+        }
+        body(helper, finish)
+    }
+}

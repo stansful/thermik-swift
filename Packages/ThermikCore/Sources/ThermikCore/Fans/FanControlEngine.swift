@@ -102,97 +102,164 @@ public final class FanControlEngine {
     public func tick(now: Date, temperatures: [TemperatureSource: Double], gated: Set<TemperatureSource>,
                      safetyTempC: Double?, rawHottestC: Double?, pressure: ThermalPressure,
                      plan: FanPlan) -> [Int: FanCommand] {
-        var dt = lastTick.map { now.timeIntervalSince($0) } ?? nominalTick
-        if dt <= 0 { dt = nominalTick }
-        if dt > sleepGapFactor * nominalTick {                        // woke up / stalled / long in System mode
-            ema.removeAll(); safetyEMA = nil; dt = nominalTick
-            pressureElevatedSince = nil; pressureNominalSince = nil; guardEngaged = false
-        }
-        lastTick = now
+        let dt = prepareTick(now: now)
         usedThisTick.removeAll()
         gatedInputs = gated
-
         updateSafety(now: now, dt: dt, safetyTempC: safetyTempC, rawHottestC: rawHottestC, plan: plan)
         let guardFloor = updateThermalGuard(now: now, pressure: pressure, config: plan.thermalGuard)
+        var percents = desiredPercents(temperatures: temperatures, dt: dt, now: now, plan: plan, guardFloor: guardFloor)
+        applyAllOrNothing(to: &percents)
+        let out = commands(now: now, percents: percents)
+        ema = ema.filter { usedThisTick.contains($0.key) }     // an EMA of a strategy no longer in use is stale
+        return out
+    }
 
+    /// A long gap means sleep, a stall, or a long interval in System mode: restart filters and pressure timing.
+    private func prepareTick(now: Date) -> Double {
+        var dt = lastTick.map { now.timeIntervalSince($0) } ?? nominalTick
+        if dt <= 0 { dt = nominalTick }
+        if dt > sleepGapFactor * nominalTick {
+            resetAfterGap()
+            dt = nominalTick
+        }
+        lastTick = now
+        return dt
+    }
+
+    private func resetAfterGap() {
+        ema.removeAll()
+        safetyEMA = nil
+        pressureElevatedSince = nil
+        pressureNominalSince = nil
+        guardEngaged = false
+    }
+
+    private func desiredPercents(temperatures: [TemperatureSource: Double], dt: Double, now: Date,
+                                 plan: FanPlan, guardFloor: Double?) -> [Int: Double?] {
         var percents: [Int: Double?] = [:]
         var guardApplied = false
         for fan in profile.fans {
-            var st = fans[fan.index] ?? FanState()
-            let strategy = plan.strategy(for: fan.index)
-            var p = desiredPercent(strategy, fan: fan, state: &st, temps: temperatures, dt: dt, now: now, plan: plan)
-            // System (Auto) is macOS's alone: neither the guard nor the safety latch takes a fan from it.
-            let isSystem: Bool = if case .system = strategy { true } else { false }
-            if let floor = guardFloor, let cur = p { p = max(cur, floor); guardApplied = true }
-            // Safety: straight to 100 % (no slew), also when a curve had just released the fan to macOS.
-            if safetyLatched && !isSystem { p = 100 }
-            st.percent = p
-            fans[fan.index] = st
+            let p = fanPercent(fan, temperatures: temperatures, dt: dt, now: now, plan: plan,
+                               guardFloor: guardFloor, guardApplied: &guardApplied)
             percents[fan.index] = p
         }
         thermalGuardActive = guardApplied
+        return percents
+    }
 
-        // Ftst hardware: never leave a fan in firmware mode 0 while another is forced.
-        if profile.scheme.requiresAllOrNothing {
-            let demands = percents.values.compactMap { $0 }
-            if let maxDemand = demands.max(), demands.count < profile.fans.count {
-                for fan in profile.fans where percents[fan.index] == .some(nil) {
-                    percents[fan.index] = maxDemand
-                    fans[fan.index]?.percent = maxDemand
-                }
-            }
+    /// System remains macOS's alone. The guard floors forced speeds; safety jumps to 100 % without slew.
+    private func fanPercent(_ fan: FanDescriptor, temperatures: [TemperatureSource: Double], dt: Double,
+                            now: Date, plan: FanPlan, guardFloor: Double?, guardApplied: inout Bool) -> Double? {
+        var st = fans[fan.index] ?? FanState()
+        let strategy = plan.strategy(for: fan.index)
+        resetStoppedSentinel(for: strategy, state: &st)
+        var p = desiredPercent(strategy, fan: fan, state: &st, temps: temperatures, dt: dt, now: now, plan: plan)
+        let isSystem: Bool = if case .system = strategy { true } else { false }
+        p = applyGuardFloor(guardFloor, to: p, applied: &guardApplied)
+        if safetyLatched && !isSystem { p = 100 }
+        st.percent = p
+        fans[fan.index] = st
+        return p
+    }
+
+    private func applyGuardFloor(_ floor: Double?, to percent: Double?, applied: inout Bool) -> Double? {
+        guard let floor, let current = percent else { return percent }
+        applied = true
+        return max(current, floor)
+    }
+
+    /// Ftst hardware: never leave a fan in firmware mode 0 while another is forced.
+    private func applyAllOrNothing(to percents: inout [Int: Double?]) {
+        guard profile.scheme.requiresAllOrNothing else { return }
+        let demands = percents.values.compactMap { $0 }
+        guard let maxDemand = demands.max(), demands.count < profile.fans.count else { return }
+        for fan in profile.fans where percents[fan.index] == .some(nil) {
+            percents[fan.index] = maxDemand
+            fans[fan.index]?.percent = maxDemand
         }
+    }
 
+    private func commands(now: Date, percents: [Int: Double?]) -> [Int: FanCommand] {
         var out: [Int: FanCommand] = [:]
         for fan in profile.fans {
-            guard let p = percents[fan.index] ?? nil else {
-                out[fan.index] = .system
-                fans[fan.index]?.lastSentRPM = nil
-                fans[fan.index]?.pendingRPM = nil
-                fans[fan.index]?.pendingSince = nil
-                continue
-            }
-            let rpm = p < 0 ? 0 : fan.clamp(fan.rpm(forPercent: p)).rounded()   // stopped → 0 rpm
-            var st = fans[fan.index] ?? FanState()
-            let atExtreme = rpm <= fan.minRPM || rpm >= fan.maxRPM
-            if let last = st.lastSentRPM, abs(last - rpm) < writeDeadbandRPM, !atExtreme {
-                // Inside the deadband: keep the last written value, unless the small change has
-                // been stable for `settleSeconds` (so a fixed speed returns exactly to its value).
-                if abs(last - rpm) >= 1, let pending = st.pendingRPM, abs(pending - rpm) < 1, let since = st.pendingSince,
-                   now.timeIntervalSince(since) >= settleSeconds {
-                    st.lastSentRPM = rpm; st.pendingRPM = nil; st.pendingSince = nil
-                    out[fan.index] = .rpm(rpm)
-                } else {
-                    if st.pendingRPM.map({ abs($0 - rpm) >= 1 }) ?? true { st.pendingRPM = rpm; st.pendingSince = now }
-                    out[fan.index] = .rpm(last)
-                }
-            } else {
-                st.lastSentRPM = rpm; st.pendingRPM = nil; st.pendingSince = nil
-                out[fan.index] = .rpm(rpm)
-            }
-            fans[fan.index] = st
+            out[fan.index] = command(fan: fan, percent: percents[fan.index] ?? nil, now: now)
         }
-        ema = ema.filter { usedThisTick.contains($0.key) }     // an EMA of a strategy no longer in use is stale
         return out
+    }
+
+    private func command(fan: FanDescriptor, percent: Double?, now: Date) -> FanCommand {
+        guard let p = percent else {
+            resetSystemFan(fan.index)
+            return .system
+        }
+        return rpmCommand(fan: fan, percent: p, now: now)
+    }
+
+    private func resetSystemFan(_ index: Int) {
+        fans[index]?.lastSentRPM = nil
+        fans[index]?.pendingRPM = nil
+        fans[index]?.pendingSince = nil
+    }
+
+    private func rpmCommand(fan: FanDescriptor, percent: Double, now: Date) -> FanCommand {
+        let rpm = percent < 0 ? 0 : fan.clamp(fan.rpm(forPercent: percent)).rounded()   // stopped → 0 rpm
+        var st = fans[fan.index] ?? FanState()
+        defer { fans[fan.index] = st }
+        let atExtreme = rpm <= fan.minRPM || rpm >= fan.maxRPM
+        if let last = st.lastSentRPM, abs(last - rpm) < writeDeadbandRPM, !atExtreme {
+            return deadbandCommand(rpm: rpm, last: last, now: now, state: &st)
+        }
+        return acceptRPM(rpm, state: &st)
+    }
+
+    /// Keep the last write inside the deadband unless the small change has been stable for `settleSeconds`.
+    private func deadbandCommand(rpm: Double, last: Double, now: Date, state st: inout FanState) -> FanCommand {
+        if abs(last - rpm) >= 1, let pending = st.pendingRPM, abs(pending - rpm) < 1, let since = st.pendingSince,
+           now.timeIntervalSince(since) >= settleSeconds { return acceptRPM(rpm, state: &st) }
+        if st.pendingRPM.map({ abs($0 - rpm) >= 1 }) ?? true { recordPending(rpm, now: now, state: &st) }
+        return .rpm(last)
+    }
+
+    private func acceptRPM(_ rpm: Double, state st: inout FanState) -> FanCommand {
+        st.lastSentRPM = rpm
+        st.pendingRPM = nil
+        st.pendingSince = nil
+        return .rpm(rpm)
+    }
+
+    private func recordPending(_ rpm: Double, now: Date, state st: inout FanState) {
+        st.pendingRPM = rpm
+        st.pendingSince = now
     }
 
     // MARK: Safety (SPEC §2.9.2 item 3)
 
     private func updateSafety(now: Date, dt: Double, safetyTempC: Double?, rawHottestC: Double?, plan: FanPlan) {
-        if let s = safetyTempC, s.isFinite {
-            safetyEMA = smooth(previous: safetyEMA, raw: s, dt: dt, rise: 1, fall: 6)
-        }
-        safetyTemperatureC = safetyEMA
+        updateSafetyEMA(dt: dt, safetyTempC: safetyTempC)
         let cfg = plan.safety
         let smoothedTrip = safetyEMA.map { $0 >= cfg.criticalC } ?? false
         let rawTrip = rawHottestC.map { $0.isFinite && $0 >= cfg.rawCriticalC } ?? false
         if smoothedTrip || rawTrip {
             safetyLatched = true
             lastSafetyTripAt = now
-        } else if safetyLatched, let sm = safetyEMA, sm < cfg.criticalC - cfg.hysteresisC,
-                  now.timeIntervalSince(lastSafetyTripAt ?? .distantPast) >= safetyMinLatchSeconds {
-            safetyLatched = false          // a missing safety input keeps the latch (fail safe)
+        } else if shouldReleaseSafety(now: now, config: cfg) {
+            safetyLatched = false
         }
+    }
+
+    private func updateSafetyEMA(dt: Double, safetyTempC: Double?) {
+        if let s = safetyTempC, s.isFinite {
+            safetyEMA = smooth(previous: safetyEMA, raw: s, dt: dt, rise: 1, fall: 6)
+        }
+        safetyTemperatureC = safetyEMA
+    }
+
+    /// A missing safety input keeps the latch (fail safe); release requires cooling and the minimum latch time.
+    private func shouldReleaseSafety(now: Date, config cfg: SafetyConfig) -> Bool {
+        guard safetyLatched, let sm = safetyEMA else { return false }
+        let cooled = sm < cfg.criticalC - cfg.hysteresisC
+        let held = now.timeIntervalSince(lastSafetyTripAt ?? .distantPast) >= safetyMinLatchSeconds
+        return cooled && held
     }
 
     // MARK: Thermal guard (P1, SPEC §2.9.2 item 2)
@@ -200,111 +267,213 @@ public final class FanControlEngine {
     /// Returns the floor (%) while the guard is engaged, else nil.
     private func updateThermalGuard(now: Date, pressure: ThermalPressure, config g: ThermalGuardConfig) -> Double? {
         guard g.enabled else {
-            guardEngaged = false; pressureElevatedSince = nil; pressureNominalSince = nil
+            disableThermalGuard()
             return nil
         }
-        if pressure >= .moderate {
-            pressureNominalSince = nil
-            let since = pressureElevatedSince ?? now
-            pressureElevatedSince = since
-            if !guardEngaged, now.timeIntervalSince(since) >= g.engageAfterSeconds { guardEngaged = true }
-        } else {
-            pressureElevatedSince = nil
-            if guardEngaged {
-                let since = pressureNominalSince ?? now
-                pressureNominalSince = since
-                if now.timeIntervalSince(since) >= g.releaseAfterSeconds { guardEngaged = false; pressureNominalSince = nil }
-            }
-        }
+        updatePressureState(now: now, pressure: pressure, config: g)
         guard guardEngaged else { return nil }
         let floor = pressure >= .heavy ? g.heavyPercent : g.moderateFloorPercent
         return min(max(floor, 0), 100)
     }
 
+    private func disableThermalGuard() {
+        guardEngaged = false
+        pressureElevatedSince = nil
+        pressureNominalSince = nil
+    }
+
+    private func updatePressureState(now: Date, pressure: ThermalPressure, config g: ThermalGuardConfig) {
+        if pressure >= .moderate {
+            notePressureElevated(now: now, config: g)
+        } else {
+            notePressureNominal(now: now, config: g)
+        }
+    }
+
+    private func notePressureElevated(now: Date, config g: ThermalGuardConfig) {
+        pressureNominalSince = nil
+        let since = pressureElevatedSince ?? now
+        pressureElevatedSince = since
+        if !guardEngaged, now.timeIntervalSince(since) >= g.engageAfterSeconds { guardEngaged = true }
+    }
+
+    private func notePressureNominal(now: Date, config g: ThermalGuardConfig) {
+        pressureElevatedSince = nil
+        guard guardEngaged else { return }
+        let since = pressureNominalSince ?? now
+        pressureNominalSince = since
+        if now.timeIntervalSince(since) >= g.releaseAfterSeconds {
+            guardEngaged = false
+            pressureNominalSince = nil
+        }
+    }
+
     // MARK: Strategy evaluation
+
+    /// The stopped sentinel is only meaningful to a stopping curve: anything else starts from scratch (jump to its
+    /// own value) instead of slewing up from -1 %.
+    private func resetStoppedSentinel(for s: FanStrategy, state st: inout FanState) {
+        if st.percent == Self.stoppedPercent, !Self.stopsBelowFirstPoint(s) { st.percent = nil }
+    }
 
     private func desiredPercent(_ s: FanStrategy, fan: FanDescriptor, state st: inout FanState,
                                 temps: [TemperatureSource: Double], dt: Double, now: Date, plan: FanPlan) -> Double? {
-        // The stopped sentinel is only meaningful to a stopping curve: anything else starts from scratch (jump to its
-        // own value) instead of slewing up from -1 %.
-        if st.percent == Self.stoppedPercent, !Self.stopsBelowFirstPoint(s) { st.percent = nil }
         switch s {
-        case .system:
+        case .system: return systemPercent(state: &st)
+        case .fixedRPM(let r): return fixedRPMPercent(r, fan: fan, plan: plan)
+        case .fixedPercent(let p): return fixedPercentValue(p, plan: plan)
+        case let .autoMax(sensor, threshold, hyst, minHold): return autoMaxPercent(sensor, threshold: threshold, hyst: hyst, minHold: minHold, temps: temps, dt: dt, now: now, state: &st)
+        case let .autoBoost(sensor, lowC, highC, minP, maxP, gradual, hyst):
+            return autoBoostPercent(sensor, lowC: lowC, highC: highC, minP: minP, maxP: maxP, gradual: gradual, hyst: hyst, temps: temps, dt: dt, state: &st)
+        case let .curve(sensor, points, hyst, below, smoothing, slewCfg):
+            return curvePercent(sensor, points: points, hyst: hyst, below: below, smoothing: smoothing, slewCfg: slewCfg, temps: temps, dt: dt, now: now, state: &st)
+        }
+    }
+
+    private func systemPercent(state st: inout FanState) -> Double? {
+        st.autoMaxLatchedAt = nil
+        return nil
+    }
+
+    private func fixedRPMPercent(_ rpm: Double, fan: FanDescriptor, plan: FanPlan) -> Double? {
+        guard rpm.isFinite else { return nil }
+        return applyFixedFloor(fan.percent(forRPM: rpm), plan: plan)
+    }
+
+    private func fixedPercentValue(_ percent: Double, plan: FanPlan) -> Double? {
+        guard percent.isFinite else { return nil }
+        return applyFixedFloor(min(max(percent, 0), 100), plan: plan)
+    }
+
+    private func autoMaxPercent(_ sensor: TemperatureSource, threshold: Double, hyst: Double, minHold: Double,
+                                temps: [TemperatureSource: Double], dt: Double, now: Date, state st: inout FanState) -> Double? {
+        guard let t = smoothed(sensor, temps, dt: dt, rise: 1, fall: 6) else { return inputMissing(sensor, st) }
+        if let since = st.autoMaxLatchedAt {
+            return latchedAutoMaxPercent(t, threshold: threshold, hyst: hyst, minHold: minHold, since: since, now: now, state: &st)
+        }
+        if t >= threshold {
+            st.autoMaxLatchedAt = now
+            return 100
+        }
+        return nil
+    }
+
+    private func latchedAutoMaxPercent(_ t: Double, threshold: Double, hyst: Double, minHold: Double,
+                                       since: Date, now: Date, state st: inout FanState) -> Double? {
+        if t < threshold - hyst && now.timeIntervalSince(since) >= minHold {
             st.autoMaxLatchedAt = nil
             return nil
-
-        case .fixedRPM(let r):
-            guard r.isFinite else { return nil }
-            return applyFixedFloor(fan.percent(forRPM: r), plan: plan)
-
-        case .fixedPercent(let p):
-            guard p.isFinite else { return nil }
-            return applyFixedFloor(min(max(p, 0), 100), plan: plan)
-
-        case let .autoMax(sensor, threshold, hyst, minHold):
-            guard let t = smoothed(sensor, temps, dt: dt, rise: 1, fall: 6) else { return inputMissing(sensor, st) }
-            if let since = st.autoMaxLatchedAt {
-                if t < threshold - hyst && now.timeIntervalSince(since) >= minHold { st.autoMaxLatchedAt = nil; return nil }
-                return 100
-            }
-            if t >= threshold { st.autoMaxLatchedAt = now; return 100 }
-            return nil
-
-        case let .autoBoost(sensor, lowC, highC, minP, maxP, gradual, hyst):
-            guard let t = smoothed(sensor, temps, dt: dt, rise: 1, fall: 6) else { return inputMissing(sensor, st) }
-            let active = st.percent != nil
-            let rate = 100 / max(gradual, 1)
-            if !active && t < lowC { return nil }
-            if active && t < lowC - hyst {
-                // ramp down gradually, then release
-                let next = slew(from: st.percent ?? minP, to: minP, dt: dt, up: rate, down: rate)
-                return next <= minP + 0.01 ? nil : next
-            }
-            let span = max(highC - lowC, 0.1)
-            let target = minP + (maxP - minP) * min(max((t - lowC) / span, 0), 1)
-            return slew(from: st.percent ?? minP, to: target, dt: dt, up: rate, down: rate)
-
-        case let .curve(sensor, points, hyst, below, smoothing, slewCfg):
-            let pts = Self.normalized(points)
-            guard !pts.isEmpty else { return nil }
-            guard let t = smoothed(sensor, temps, dt: dt, rise: smoothing.riseTau, fall: smoothing.fallTau) else {
-                return inputMissing(sensor, st)
-            }
-            let up = Self.interpolate(pts, t)
-            let down = Self.interpolate(pts, t + hyst)        // only go down once temp fell by `hyst`
-            let current = st.percent
-            let releaseBelow = below == .system
-            let stopBelow = below == .stop && profile.scheme.allowsFanStop
-            // Engage at the first point, release below (first point − hysteresis): a real hysteresis band, so an
-            // input hovering near the threshold cannot flap System ↔ manual (each M3/M4 engagement is an Ftst unlock).
-            if releaseBelow, current == nil, t < pts[0].celsius { return nil }
-            if releaseBelow, t + hyst < pts[0].celsius, (current ?? 0) <= pts[0].percent + 0.01 {
-                st.lastDemandAboveAt = nil
-                return nil                                    // quiet idle: let macOS stop the fans
-            }
-            // Stop below the first point with the same band: stopped until the first point, stop again only once the
-            // speed has come down to the first point's and the input is `hyst` below it (after the slow-down hold).
-            if stopBelow {
-                let stopped = current == Self.stoppedPercent
-                if (current == nil || stopped), t < pts[0].celsius { st.lastDemandAboveAt = nil; return Self.stoppedPercent }
-                if !stopped, t + hyst < pts[0].celsius, (current ?? 0) <= pts[0].percent + 0.01 {
-                    st.lastDemandAboveAt = nil
-                    return Self.stoppedPercent
-                }
-                if stopped { st.lastDemandAboveAt = now; return up }   // restart: straight to the curve's speed
-            }
-            guard let cur = current else { return up }        // first sample: jump directly
-            if up > cur {
-                st.lastDemandAboveAt = now
-                return slew(from: cur, to: up, dt: dt, up: slewCfg.upPercentPerSecond, down: slewCfg.downPercentPerSecond)
-            }
-            if down < cur {
-                if let since = st.lastDemandAboveAt, now.timeIntervalSince(since) < slewCfg.downHoldSeconds { return cur }
-                return slew(from: cur, to: down, dt: dt, up: slewCfg.upPercentPerSecond, down: slewCfg.downPercentPerSecond)
-            }
-            st.lastDemandAboveAt = now
-            return cur
         }
+        return 100
+    }
+
+    private func autoBoostPercent(_ sensor: TemperatureSource, lowC: Double, highC: Double, minP: Double, maxP: Double,
+                                  gradual: Double, hyst: Double, temps: [TemperatureSource: Double], dt: Double,
+                                  state st: inout FanState) -> Double? {
+        guard let t = smoothed(sensor, temps, dt: dt, rise: 1, fall: 6) else { return inputMissing(sensor, st) }
+        let active = st.percent != nil
+        let rate = 100 / max(gradual, 1)
+        if !active && t < lowC { return nil }
+        if active && t < lowC - hyst { return releasingAutoBoostPercent(minP: minP, rate: rate, dt: dt, state: &st) }
+        let span = max(highC - lowC, 0.1)
+        let target = minP + (maxP - minP) * min(max((t - lowC) / span, 0), 1)
+        return slew(from: st.percent ?? minP, to: target, dt: dt, up: rate, down: rate)
+    }
+
+    /// Ramp down gradually, then release.
+    private func releasingAutoBoostPercent(minP: Double, rate: Double, dt: Double, state st: inout FanState) -> Double? {
+        let next = slew(from: st.percent ?? minP, to: minP, dt: dt, up: rate, down: rate)
+        return next <= minP + 0.01 ? nil : next
+    }
+
+    private func curvePercent(_ sensor: TemperatureSource, points: [CurvePoint], hyst: Double, below: BelowFirstPoint,
+                              smoothing: Smoothing, slewCfg: Slew, temps: [TemperatureSource: Double], dt: Double,
+                              now: Date, state st: inout FanState) -> Double? {
+        let pts = Self.normalized(points)
+        guard !pts.isEmpty else { return nil }
+        guard let t = smoothed(sensor, temps, dt: dt, rise: smoothing.riseTau, fall: smoothing.fallTau) else { return inputMissing(sensor, st) }
+        let up = Self.interpolate(pts, t)
+        let down = Self.interpolate(pts, t + hyst)        // only go down once temp fell by `hyst`
+        let current = st.percent
+        return evaluateCurve(below, points: pts, t: t, up: up, down: down, current: current,
+                             hyst: hyst, slewCfg: slewCfg, dt: dt, now: now, state: &st)
+    }
+
+    private func evaluateCurve(_ below: BelowFirstPoint, points: [CurvePoint], t: Double, up: Double, down: Double,
+                               current: Double?, hyst: Double, slewCfg: Slew, dt: Double, now: Date,
+                               state st: inout FanState) -> Double? {
+        switch below {
+        case .system:
+            return releasingCurvePercent(points: points, t: t, up: up, down: down, current: current, hyst: hyst, slewCfg: slewCfg, dt: dt, now: now, state: &st)
+        case .stop where profile.scheme.allowsFanStop:
+            return stoppingCurvePercent(points: points, t: t, up: up, down: down, current: current, hyst: hyst, slewCfg: slewCfg, dt: dt, now: now, state: &st)
+        case .stop, .minimum:
+            return trackingCurvePercent(up: up, down: down, current: current, slewCfg: slewCfg, dt: dt, now: now, state: &st)
+        }
+    }
+
+    /// Engage at the first point and release below first − hysteresis, preventing System ↔ manual flapping.
+    private func releasingCurvePercent(points: [CurvePoint], t: Double, up: Double, down: Double, current: Double?,
+                                       hyst: Double, slewCfg: Slew, dt: Double, now: Date, state st: inout FanState) -> Double? {
+        if current == nil, t < points[0].celsius { return nil }
+        if t + hyst < points[0].celsius, (current ?? 0) <= points[0].percent + 0.01 {
+            st.lastDemandAboveAt = nil
+            return nil                                    // quiet idle: let macOS stop the fans
+        }
+        return trackingCurvePercent(up: up, down: down, current: current, slewCfg: slewCfg, dt: dt, now: now, state: &st)
+    }
+
+    /// Stop below the first point with the same hysteresis band and restart directly at the curve's speed.
+    private func stoppingCurvePercent(points: [CurvePoint], t: Double, up: Double, down: Double, current: Double?,
+                                      hyst: Double, slewCfg: Slew, dt: Double, now: Date, state st: inout FanState) -> Double? {
+        if current == nil { return initialStoppingCurvePercent(points: points, t: t, up: up, hyst: hyst, state: &st) }
+        if current == Self.stoppedPercent { return restartStoppedCurvePercent(points: points, t: t, up: up, now: now, state: &st) }
+        if t + hyst < points[0].celsius, (current ?? 0) <= points[0].percent + 0.01 {
+            st.lastDemandAboveAt = nil
+            return Self.stoppedPercent
+        }
+        return trackingCurvePercent(up: up, down: down, current: current, slewCfg: slewCfg, dt: dt, now: now, state: &st)
+    }
+
+    private func initialStoppingCurvePercent(points: [CurvePoint], t: Double, up: Double, hyst: Double,
+                                             state st: inout FanState) -> Double {
+        if t < points[0].celsius { return stopCurveAtFirstPoint(state: &st) }
+        if t + hyst < points[0].celsius, 0 <= points[0].percent + 0.01 {
+            return stopCurveAtFirstPoint(state: &st)
+        }
+        return up
+    }
+
+    private func restartStoppedCurvePercent(points: [CurvePoint], t: Double, up: Double, now: Date,
+                                            state st: inout FanState) -> Double {
+        if t < points[0].celsius { return stopCurveAtFirstPoint(state: &st) }
+        st.lastDemandAboveAt = now
+        return up
+    }
+
+    private func stopCurveAtFirstPoint(state st: inout FanState) -> Double {
+        st.lastDemandAboveAt = nil
+        return Self.stoppedPercent
+    }
+
+    private func trackingCurvePercent(up: Double, down: Double, current: Double?, slewCfg: Slew,
+                                      dt: Double, now: Date, state st: inout FanState) -> Double {
+        guard let cur = current else { return up }        // first sample: jump directly
+        if up > cur {
+            st.lastDemandAboveAt = now
+            return slew(from: cur, to: up, dt: dt, up: slewCfg.upPercentPerSecond, down: slewCfg.downPercentPerSecond)
+        }
+        if down < cur {
+            return decreasingCurvePercent(cur, down: down, slewCfg: slewCfg, dt: dt, now: now, state: st)
+        }
+        st.lastDemandAboveAt = now
+        return cur
+    }
+
+    private func decreasingCurvePercent(_ cur: Double, down: Double, slewCfg: Slew, dt: Double,
+                                        now: Date, state st: FanState) -> Double {
+        if let since = st.lastDemandAboveAt, now.timeIntervalSince(since) < slewCfg.downHoldSeconds { return cur }
+        return slew(from: cur, to: down, dt: dt, up: slewCfg.upPercentPerSecond, down: slewCfg.downPercentPerSecond)
     }
 
     private static func stopsBelowFirstPoint(_ s: FanStrategy) -> Bool {
@@ -334,15 +503,19 @@ public final class FanControlEngine {
         let key = EMAKey(source: src, rise: rise, fall: fall)
         if usedThisTick.contains(key) { return ema[key] }       // second fan on the same input this tick
         guard let raw = temps[src], raw.isFinite else {
-            // Power-gated (idle cluster): keep the last value; the cluster was at most this warm when it gated.
-            guard gatedInputs.contains(src), let held = ema[key] else { return nil }
-            usedThisTick.insert(key)
-            return held
+            return heldSmoothedValue(key, source: src)
         }
         let v = smooth(previous: ema[key], raw: raw, dt: dt, rise: rise, fall: fall)
         ema[key] = v
         usedThisTick.insert(key)
         return v
+    }
+
+    /// Power-gated idle clusters keep their last value; truly missing inputs return nil for the fail-safe.
+    private func heldSmoothedValue(_ key: EMAKey, source: TemperatureSource) -> Double? {
+        guard gatedInputs.contains(source), let held = ema[key] else { return nil }
+        usedThisTick.insert(key)
+        return held
     }
 
     private func smooth(previous: Double?, raw: Double, dt: Double, rise: Double, fall: Double) -> Double {
@@ -387,29 +560,41 @@ public final class FanControlEngine {
 /// Builds the engine plan from the user's config for the current power source (SPEC §2.9.2 table).
 public enum FanPlanBuilder {
     public static func plan(config: FanUserConfig, power: PowerSourceKind, profile: FanHardwareProfile) -> FanPlan {
+        var plan = basePlan(config: config)
+        guard profile.isControllable else { return plan }            // fanless / unknown layout: System only
+        switch config.mode {
+        case .system: plan.shared = .system
+        case .max: plan.shared = .fixedPercent(100)
+        case .fixed: applyFixed(config: config, profile: profile, to: &plan)
+        case .curve: plan.shared = selectedCurve(config: config, power: power).strategy   // always linked in v1
+        }
+        return plan
+    }
+
+    private static func basePlan(config: FanUserConfig) -> FanPlan {
         var plan = FanPlan()
         plan.safety = config.safety
         plan.thermalGuard = config.thermalGuard
-        guard profile.isControllable else { return plan }            // fanless / unknown layout: System only
-        func percent(_ p: Double) -> Double { p.isFinite ? min(max(p, 0), 100) : 50 }
-        switch config.mode {
-        case .system:
-            plan.shared = .system
-        case .max:
-            plan.shared = .fixedPercent(100)
-        case .fixed:
-            if config.linked {
-                plan.shared = .fixedPercent(percent(config.fixedPercent))
-            } else {
-                plan.linked = false
-                for f in profile.fans {
-                    plan.perFan[f.index] = .fixedPercent(percent(config.fixedPercentPerFan[f.index] ?? config.fixedPercent))
-                }
-            }
-        case .curve:                                                  // always linked in v1
-            let curve = power == .battery ? (config.curveBattery ?? config.curveAC) : config.curveAC
-            plan.shared = curve.strategy
-        }
         return plan
+    }
+
+    private static func applyFixed(config: FanUserConfig, profile: FanHardwareProfile, to plan: inout FanPlan) {
+        if config.linked {
+            plan.shared = .fixedPercent(percent(config.fixedPercent))
+            return
+        }
+        plan.linked = false
+        for fan in profile.fans {
+            let value = config.fixedPercentPerFan[fan.index] ?? config.fixedPercent
+            plan.perFan[fan.index] = .fixedPercent(percent(value))
+        }
+    }
+
+    private static func percent(_ p: Double) -> Double {
+        p.isFinite ? min(max(p, 0), 100) : 50
+    }
+
+    private static func selectedCurve(config: FanUserConfig, power: PowerSourceKind) -> FanCurve {
+        power == .battery ? (config.curveBattery ?? config.curveAC) : config.curveAC
     }
 }

@@ -4,13 +4,20 @@ import SwiftUI
 
 extension View {
     @MainActor func thermikEnvironment(_ env: AppEnvironment) -> some View {
+        withBaseEnvironment(env).withFeatureEnvironment(env)
+    }
+
+    @MainActor private func withBaseEnvironment(_ env: AppEnvironment) -> some View {
         self.environment(env.settings)
             .environment(env.events)
             .environment(env.visibility)
             .environment(env.helper)
             .environment(env.sensors)
             .environment(env.system)
-            .environment(env.history)
+    }
+
+    @MainActor private func withFeatureEnvironment(_ env: AppEnvironment) -> some View {
+        self.environment(env.history)
             .environment(env.fans)
             .environment(env.alerts)
             .environment(env.diagnostics)

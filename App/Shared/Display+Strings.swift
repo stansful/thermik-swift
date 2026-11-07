@@ -325,26 +325,44 @@ extension FanModeChangeReason {
 /// An unknown token is shown as is.
 enum HelperRevertReason {
     static func title(_ token: String) -> String {
+        if let title = leaseTitle(token) { return title }
+        if let title = recoveryTitle(token) { return title }
+        if let title = commandResultTitle(token) { return title }
+        if token.hasPrefix("signal ") { return String(localized: "the helper was stopped") }   // "signal 15"
+        return token
+    }
+
+    private static func leaseTitle(_ token: String) -> String? {
         switch token {
-        case "leaseExpired": return String(localized: "the control lease expired")
-        case "leaseLost": return String(localized: "the control lease was lost")
-        case "macOSReclaimed": return String(localized: "macOS took back control of a fan")
-        case "clientGone": return String(localized: "Thermik disconnected from the helper")
-        case "sleep": return String(localized: "sleep")
-        case "startupRecovery": return String(localized: "recovery after a helper restart")
-        case "sensorFailure": return String(localized: "no chip temperature could be read")
-        case "overTemperature": return String(localized: "overheating")
-        case "resetAll": return String(localized: "reset requested by Thermik")
-        case "released": return String(localized: "Thermik released the fans")
-        case "uninstall": return String(localized: "the helper was uninstalled")
-        case "restoreRetry": return String(localized: "repeated restore attempt")
-        case "overrideWriteFailed": return String(localized: "the safety override could not be applied")
-        case "overrideReleased": return String(localized: "the safety override ended")
-        case "overrideReleaseFailed": return String(localized: "the safety override could not be released")
-        case "stopRestartFailed": return String(localized: "a stopped fan could not be restarted")
-        default:
-            if token.hasPrefix("signal ") { return String(localized: "the helper was stopped") }   // "signal 15"
-            return token
+        case "leaseExpired": String(localized: "the control lease expired")
+        case "leaseLost": String(localized: "the control lease was lost")
+        case "macOSReclaimed": String(localized: "macOS took back control of a fan")
+        case "clientGone": String(localized: "Thermik disconnected from the helper")
+        default: nil
+        }
+    }
+
+    private static func recoveryTitle(_ token: String) -> String? {
+        switch token {
+        case "sleep": String(localized: "sleep")
+        case "startupRecovery": String(localized: "recovery after a helper restart")
+        case "sensorFailure": String(localized: "no chip temperature could be read")
+        case "overTemperature": String(localized: "overheating")
+        case "restoreRetry": String(localized: "repeated restore attempt")
+        default: nil
+        }
+    }
+
+    private static func commandResultTitle(_ token: String) -> String? {
+        switch token {
+        case "resetAll": String(localized: "reset requested by Thermik")
+        case "released": String(localized: "Thermik released the fans")
+        case "uninstall": String(localized: "the helper was uninstalled")
+        case "overrideWriteFailed": String(localized: "the safety override could not be applied")
+        case "overrideReleased": String(localized: "the safety override ended")
+        case "overrideReleaseFailed": String(localized: "the safety override could not be released")
+        case "stopRestartFailed": String(localized: "a stopped fan could not be restarted")
+        default: nil
         }
     }
 }
@@ -408,16 +426,28 @@ extension LogRotation {
 extension AlertRule.Subject {
     /// Subject name for rule rows and the editor; `sensorName` resolves `.sensor(id)` to its live display name.
     func title(sensorName: (SensorID) -> String?) -> String {
+        if let title = sensorTitle(sensorName: sensorName) { return title }
+        return eventTitle
+    }
+
+    private func sensorTitle(sensorName: (SensorID) -> String?) -> String? {
         switch self {
         case .anySensor: String(localized: "Any sensor")
         case .aggregate(let k): k.title
         case .group(let g): String(localized: "Hottest sensor in \(g.title)")
         case .sensor(let id): sensorName(id) ?? id.description
+        default: nil
+        }
+    }
+
+    private var eventTitle: String {
+        switch self {
         case .fanStalled: String(localized: "A fan stalled")
         case .fanModeChanged: String(localized: "Fan mode changed")
         case .thermalPressure(let p): String(localized: "Thermal pressure at least \(p.title)")
         case .abnormalShutdown: String(localized: "Abnormal last shutdown")
         case .batteryService: String(localized: "Battery needs service")
+        default: preconditionFailure("Sensor subjects have their own title")
         }
     }
 }

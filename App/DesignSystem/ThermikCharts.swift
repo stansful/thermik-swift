@@ -51,15 +51,16 @@ struct ChartTick: Hashable {
         let span = domain.upperBound - domain.lowerBound
         guard span > 0, span.isFinite, count > 0 else { return [] }
         let magnitude = pow(10, log10(span / Double(count)).rounded(.down))
-        func ticks(_ step: Double) -> Int {
-            Int(((domain.upperBound + step * 1e-9) / step).rounded(.down) - (domain.lowerBound / step).rounded(.up)) + 1
-        }
         let steps = [0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50].map { $0 * magnitude }
         let step = steps.min { a, b in
-            let da = abs(ticks(a) - count), db = abs(ticks(b) - count)
+            let da = abs(tickCount(domain, step: a) - count), db = abs(tickCount(domain, step: b) - count)
             return da != db ? da < db : a < b
         } ?? magnitude
         return stride(domain, by: step, label: label)
+    }
+
+    private static func tickCount(_ domain: ClosedRange<Double>, step: Double) -> Int {
+        Int(((domain.upperBound + step * 1e-9) / step).rounded(.down) - (domain.lowerBound / step).rounded(.up)) + 1
     }
 }
 
@@ -99,72 +100,104 @@ struct ChartPath: Shape {
         var path = Path()
         guard n > 0 else { return path }
         let sx = rect.width / CGFloat(ChartScale.span(xDomain)), sy = rect.height / CGFloat(ChartScale.span(yDomain))
-        func point(_ i: Int, _ v: [Double]) -> CGPoint {
-            CGPoint(x: rect.minX + CGFloat(x[i] - xDomain.lowerBound) * sx, y: rect.maxY - CGFloat(v[i] - yDomain.lowerBound) * sy)
-        }
-        let top = (0..<n).map { point($0, y) }
+        let top = (0..<n).map { point($0, y, rect: rect, sx: sx, sy: sy) }
         path.move(to: top[0])
         Self.add(top, interpolation, to: &path)
-        if let lower, lower.count >= n {
-            let bottom = (0..<n).map { point($0, lower) }
-            path.addLine(to: bottom[n - 1])
-            if interpolation == .stepEnd {
-                // Backwards, a step is riser first, then run: the same steps as the top edge.
-                for i in stride(from: n - 1, through: 1, by: -1) {
-                    path.addLine(to: CGPoint(x: bottom[i].x, y: bottom[i - 1].y))
-                    path.addLine(to: bottom[i - 1])
-                }
-            } else {
-                Self.add(bottom.reversed(), interpolation, to: &path)     // the same curve as forwards
-            }
-            path.closeSubpath()
-        } else if let baseline {
-            let base = rect.maxY - CGFloat(baseline - yDomain.lowerBound) * sy
-            path.addLine(to: CGPoint(x: top[n - 1].x, y: base))
-            path.addLine(to: CGPoint(x: top[0].x, y: base))
-            path.closeSubpath()
-        }
+        finish(top, in: rect, sx: sx, sy: sy, to: &path)
         return path
+    }
+
+    private func point(_ i: Int, _ v: [Double], rect: CGRect, sx: CGFloat, sy: CGFloat) -> CGPoint {
+        CGPoint(x: rect.minX + CGFloat(x[i] - xDomain.lowerBound) * sx, y: rect.maxY - CGFloat(v[i] - yDomain.lowerBound) * sy)
+    }
+
+    private func finish(_ top: [CGPoint], in rect: CGRect, sx: CGFloat, sy: CGFloat, to path: inout Path) {
+        let n = top.count
+        if let lower, lower.count >= n {
+            addLower(lower, n: n, rect: rect, sx: sx, sy: sy, to: &path)
+        } else if let baseline {
+            addBaseline(baseline, top: top, rect: rect, sy: sy, to: &path)
+        }
+    }
+
+    private func addLower(_ lower: [Double], n: Int, rect: CGRect, sx: CGFloat, sy: CGFloat, to path: inout Path) {
+        let bottom = (0..<n).map { point($0, lower, rect: rect, sx: sx, sy: sy) }
+        path.addLine(to: bottom[n - 1])
+        if interpolation == .stepEnd {
+            Self.addReverseSteps(bottom, to: &path)
+        } else {
+            Self.add(bottom.reversed(), interpolation, to: &path)         // the same curve as forwards
+        }
+        path.closeSubpath()
+    }
+
+    private static func addReverseSteps(_ bottom: [CGPoint], to path: inout Path) {
+        // Backwards, a step is riser first, then run: the same steps as the top edge.
+        for i in stride(from: bottom.count - 1, through: 1, by: -1) {
+            path.addLine(to: CGPoint(x: bottom[i].x, y: bottom[i - 1].y))
+            path.addLine(to: bottom[i - 1])
+        }
+    }
+
+    private func addBaseline(_ baseline: Double, top: [CGPoint], rect: CGRect, sy: CGFloat, to path: inout Path) {
+        let base = rect.maxY - CGFloat(baseline - yDomain.lowerBound) * sy
+        path.addLine(to: CGPoint(x: top[top.count - 1].x, y: base))
+        path.addLine(to: CGPoint(x: top[0].x, y: base))
+        path.closeSubpath()
     }
 
     private static func add(_ p: [CGPoint], _ interpolation: ChartInterpolation, to path: inout Path) {
         guard p.count > 1 else { return }
         switch interpolation {
-        case .linear:
-            for q in p.dropFirst() { path.addLine(to: q) }
-        case .stepEnd:
-            for i in 1..<p.count {
-                path.addLine(to: CGPoint(x: p[i].x, y: p[i - 1].y))
-                path.addLine(to: p[i])
-            }
-        case .monotone:
-            let m = tangents(p)
-            for i in 0..<(p.count - 1) {
-                let dx = (p[i + 1].x - p[i].x) / 3
-                path.addCurve(to: p[i + 1], control1: CGPoint(x: p[i].x + dx, y: p[i].y + dx * m[i]),
-                              control2: CGPoint(x: p[i + 1].x - dx, y: p[i + 1].y - dx * m[i + 1]))
-            }
+        case .linear: addLinear(p, to: &path)
+        case .stepEnd: addSteps(p, to: &path)
+        case .monotone: addMonotone(p, to: &path)
+        }
+    }
+
+    private static func addLinear(_ p: [CGPoint], to path: inout Path) {
+        for q in p.dropFirst() { path.addLine(to: q) }
+    }
+
+    private static func addSteps(_ p: [CGPoint], to path: inout Path) {
+        for i in 1..<p.count {
+            path.addLine(to: CGPoint(x: p[i].x, y: p[i - 1].y))
+            path.addLine(to: p[i])
+        }
+    }
+
+    private static func addMonotone(_ p: [CGPoint], to path: inout Path) {
+        let m = tangents(p)
+        for i in 0..<(p.count - 1) {
+            let dx = (p[i + 1].x - p[i].x) / 3
+            path.addCurve(to: p[i + 1], control1: CGPoint(x: p[i].x + dx, y: p[i].y + dx * m[i]),
+                          control2: CGPoint(x: p[i + 1].x - dx, y: p[i + 1].y - dx * m[i + 1]))
         }
     }
 
     /// Steffen's monotone tangents (d3 `curveMonotoneX`, Swift Charts' `.monotone`): smooth, never overshoots. The
     /// same curve comes out when the points are passed in reverse (the band's lower edge).
     private static func tangents(_ p: [CGPoint]) -> [CGFloat] {
-        func slope(_ a: CGPoint, _ b: CGPoint) -> CGFloat { b.x != a.x ? (b.y - a.y) / (b.x - a.x) : 0 }
-        func sign(_ v: CGFloat) -> CGFloat { v > 0 ? 1 : v < 0 ? -1 : 0 }
         let n = p.count
         guard n > 2 else { let s = slope(p[0], p[1]); return [s, s] }
         var m = [CGFloat](repeating: 0, count: n)
-        for i in 1..<(n - 1) {
+        addInteriorTangents(p, to: &m)
+        m[0] = (3 * slope(p[0], p[1]) - m[1]) / 2
+        m[n - 1] = (3 * slope(p[n - 2], p[n - 1]) - m[n - 2]) / 2
+        return m
+    }
+
+    private static func addInteriorTangents(_ p: [CGPoint], to m: inout [CGFloat]) {
+        for i in 1..<(p.count - 1) {
             let h0 = p[i].x - p[i - 1].x, h1 = p[i + 1].x - p[i].x
             let s0 = slope(p[i - 1], p[i]), s1 = slope(p[i], p[i + 1])
             let q = h0 + h1 != 0 ? (s0 * h1 + s1 * h0) / (h0 + h1) : 0
             m[i] = (sign(s0) + sign(s1)) * min(abs(s0), abs(s1), 0.5 * abs(q))
         }
-        m[0] = (3 * slope(p[0], p[1]) - m[1]) / 2
-        m[n - 1] = (3 * slope(p[n - 2], p[n - 1]) - m[n - 2]) / 2
-        return m
     }
+
+    private static func slope(_ a: CGPoint, _ b: CGPoint) -> CGFloat { b.x != a.x ? (b.y - a.y) / (b.x - a.x) : 0 }
+    private static func sign(_ v: CGFloat) -> CGFloat { v > 0 ? 1 : v < 0 ? -1 : 0 }
 }
 
 /// Axis and annotation text (11 pt, as Swift Charts' axis labels): the size is measured so labels can be placed by
@@ -229,21 +262,32 @@ struct ChartFrame<Content: View>: View {
     }
 
     @ViewBuilder private func labels(_ s: ChartScale) -> some View {
-        let gap = Self.gap
+        xLabels(s)
+        primaryYLabels(s)
+        trailingLabels(s)
+    }
+
+    private func xLabels(_ s: ChartScale) -> some View {
         ForEach(visibleXTicks(s), id: \.self) { t in
             ChartLabel(t.label).placed(at: CGPoint(x: s.px(t.value) + 4, y: s.plot.maxY + 4), anchor: .topLeading)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func primaryYLabels(_ s: ChartScale) -> some View {
         ForEach(yTicks.filter { !$0.label.isEmpty }, id: \.self) { t in
             let label = ChartLabel(t.label)
             if leadingYLabels {
-                label.placed(at: CGPoint(x: s.plot.minX - gap, y: s.py(t.value)), anchor: .trailing).foregroundStyle(.secondary)
+                label.placed(at: CGPoint(x: s.plot.minX - Self.gap, y: s.py(t.value)), anchor: .trailing).foregroundStyle(.secondary)
             } else {
-                label.placed(at: CGPoint(x: s.plot.maxX + gap, y: s.py(t.value)), anchor: .leading).foregroundStyle(.secondary)
+                label.placed(at: CGPoint(x: s.plot.maxX + Self.gap, y: s.py(t.value)), anchor: .leading).foregroundStyle(.secondary)
             }
         }
-        let secondX = s.plot.maxX + gap + (leadingYLabels ? 0 : yGutter)
-        ForEach(trailingYLabels.filter { !$0.label.isEmpty }, id: \.self) { t in
+    }
+
+    private func trailingLabels(_ s: ChartScale) -> some View {
+        let secondX = s.plot.maxX + Self.gap + (leadingYLabels ? 0 : yGutter)
+        return ForEach(trailingYLabels.filter { !$0.label.isEmpty }, id: \.self) { t in
             ChartLabel(t.label).placed(at: CGPoint(x: secondX, y: s.py(t.value)), anchor: .leading)
                 .foregroundStyle(.secondary)
         }

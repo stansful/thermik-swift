@@ -64,41 +64,69 @@ public struct AlertEngine: Sendable {
     public mutating func evaluate(rules: [AlertRule], inputs: AlertInputs) -> [AlertEvent] {
         let now = inputs.date
         // Sleep, a stalled loop or a clock jump: nobody observed the interval, so pending timers restart now.
-        let gap = lastDate.map { now.timeIntervalSince($0) } ?? 0
-        let restartPending = gap > Self.maxGap || gap < 0
+        let restartPending = shouldRestartPending(at: now)
         lastDate = now
+        removeDeletedRules(keeping: Set(rules.map(\.id)))
+        var events: [AlertEvent] = []
+        for rule in rules { evaluate(rule, inputs: inputs, now: now, restartPending: restartPending, events: &events) }
+        return events
+    }
 
-        let ids = Set(rules.map(\.id))
+    private mutating func shouldRestartPending(at now: Date) -> Bool {
+        let gap = lastDate.map { now.timeIntervalSince($0) } ?? 0
+        return gap > Self.maxGap || gap < 0
+    }
+
+    private mutating func removeDeletedRules(keeping ids: Set<UUID>) {
         states = states.filter { ids.contains($0.key) }
         firedOnce.formIntersection(ids)
+    }
 
-        var events: [AlertEvent] = []
-        for rule in rules {
-            guard rule.enabled else { states[rule.id] = nil; continue }
-            let fingerprint = Fingerprint(rule)
-            var state = states[rule.id] ?? RuleState(fingerprint: fingerprint)
-            if state.fingerprint != fingerprint { state = RuleState(fingerprint: fingerprint) }
-            if restartPending, state.phase == .pending { state.since = now }
-
-            switch rule.subject {
-            case .abnormalShutdown:
-                if inputs.abnormalShutdown != nil, !firedOnce.contains(rule.id) {
-                    firedOnce.insert(rule.id)
-                    state.lastRaised = now
-                    events.append(AlertEvent(ruleID: rule.id, date: now, kind: .raised, subject: rule.subject, value: nil, sensorID: nil))
-                }
-            case .fanModeChanged:
-                if inputs.fanModeChange != nil, cooldownElapsed(state, rule, now) {
-                    state.lastRaised = now
-                    events.append(AlertEvent(ruleID: rule.id, date: now, kind: .raised, subject: rule.subject, value: nil, sensorID: nil))
-                }
-            default:
-                guard let reading = Self.read(rule, inputs) else { states[rule.id] = nil; continue }
-                step(&state, rule: rule, reading: reading, now: now, events: &events)
-            }
-            states[rule.id] = state
+    private mutating func evaluate(_ rule: AlertRule, inputs: AlertInputs, now: Date,
+                                   restartPending: Bool, events: inout [AlertEvent]) {
+        guard rule.enabled else { states[rule.id] = nil; return }
+        switch rule.subject {
+        case .abnormalShutdown: evaluateAbnormalShutdown(rule, inputs: inputs, now: now, restartPending: restartPending, events: &events)
+        case .fanModeChanged: evaluateFanModeChange(rule, inputs: inputs, now: now, restartPending: restartPending, events: &events)
+        default: evaluateReading(rule, inputs: inputs, now: now, restartPending: restartPending, events: &events)
         }
-        return events
+    }
+
+    private func currentState(for rule: AlertRule, now: Date, restartPending: Bool) -> RuleState {
+        let fingerprint = Fingerprint(rule)
+        var state = states[rule.id] ?? RuleState(fingerprint: fingerprint)
+        if state.fingerprint != fingerprint { state = RuleState(fingerprint: fingerprint) }
+        if restartPending, state.phase == .pending { state.since = now }
+        return state
+    }
+
+    private mutating func evaluateAbnormalShutdown(_ rule: AlertRule, inputs: AlertInputs, now: Date,
+                                                   restartPending: Bool, events: inout [AlertEvent]) {
+        var state = currentState(for: rule, now: now, restartPending: restartPending)
+        if inputs.abnormalShutdown != nil, !firedOnce.contains(rule.id) {
+            firedOnce.insert(rule.id)
+            state.lastRaised = now
+            events.append(AlertEvent(ruleID: rule.id, date: now, kind: .raised, subject: rule.subject, value: nil, sensorID: nil))
+        }
+        states[rule.id] = state
+    }
+
+    private mutating func evaluateFanModeChange(_ rule: AlertRule, inputs: AlertInputs, now: Date,
+                                                restartPending: Bool, events: inout [AlertEvent]) {
+        var state = currentState(for: rule, now: now, restartPending: restartPending)
+        if inputs.fanModeChange != nil, cooldownElapsed(state, rule, now) {
+            state.lastRaised = now
+            events.append(AlertEvent(ruleID: rule.id, date: now, kind: .raised, subject: rule.subject, value: nil, sensorID: nil))
+        }
+        states[rule.id] = state
+    }
+
+    private mutating func evaluateReading(_ rule: AlertRule, inputs: AlertInputs, now: Date,
+                                          restartPending: Bool, events: inout [AlertEvent]) {
+        var state = currentState(for: rule, now: now, restartPending: restartPending)
+        guard let reading = Self.read(rule, inputs) else { states[rule.id] = nil; return }
+        step(&state, rule: rule, reading: reading, now: now, events: &events)
+        states[rule.id] = state
     }
 
     public mutating func reset() {
@@ -111,31 +139,50 @@ public struct AlertEngine: Sendable {
 
     private func step(_ s: inout RuleState, rule: AlertRule, reading: Reading, now: Date, events: inout [AlertEvent]) {
         switch s.phase {
-        case .idle, .pending:
-            guard reading.active else { s.phase = .idle; s.since = nil; return }
-            if s.phase == .idle { s.phase = .pending; s.since = now }
-            let held = now.timeIntervalSince(s.since ?? now)
-            if held >= max(rule.forSeconds, 0), cooldownElapsed(s, rule, now) {
-                s.phase = .raised
-                s.since = nil
-                s.lastRaised = now
-                events.append(AlertEvent(ruleID: rule.id, date: now, kind: .raised, subject: rule.subject,
-                                         value: reading.value, sensorID: reading.sensorID))
-            }
-        case .raised:
-            let clears: Bool
-            if rule.subject.isTemperature, let threshold = rule.thresholdC {
-                // Re-arm only once the value fell clearly below the threshold. No value (sensor vanished) keeps it raised.
-                clears = reading.value.map { $0 < threshold - max(rule.hysteresisC, 0) } ?? false
-            } else {
-                clears = !reading.active
-            }
-            if clears {
-                s.phase = .idle
-                events.append(AlertEvent(ruleID: rule.id, date: now, kind: .cleared, subject: rule.subject,
-                                         value: reading.value, sensorID: reading.sensorID))
-            }
+        case .idle, .pending: stepWaiting(&s, rule: rule, reading: reading, now: now, events: &events)
+        case .raised: stepRaised(&s, rule: rule, reading: reading, now: now, events: &events)
         }
+    }
+
+    private func stepWaiting(_ s: inout RuleState, rule: AlertRule, reading: Reading, now: Date, events: inout [AlertEvent]) {
+        guard reading.active else { resetWaiting(&s); return }
+        if s.phase == .idle { beginPending(&s, now: now) }
+        let held = now.timeIntervalSince(s.since ?? now)
+        guard held >= max(rule.forSeconds, 0), cooldownElapsed(s, rule, now) else { return }
+        raise(&s, rule: rule, reading: reading, now: now, events: &events)
+    }
+
+    private func resetWaiting(_ s: inout RuleState) {
+        s.phase = .idle
+        s.since = nil
+    }
+
+    private func beginPending(_ s: inout RuleState, now: Date) {
+        s.phase = .pending
+        s.since = now
+    }
+
+    private func raise(_ s: inout RuleState, rule: AlertRule, reading: Reading, now: Date, events: inout [AlertEvent]) {
+        s.phase = .raised
+        s.since = nil
+        s.lastRaised = now
+        events.append(AlertEvent(ruleID: rule.id, date: now, kind: .raised, subject: rule.subject,
+                                 value: reading.value, sensorID: reading.sensorID))
+    }
+
+    private func stepRaised(_ s: inout RuleState, rule: AlertRule, reading: Reading, now: Date, events: inout [AlertEvent]) {
+        guard shouldClear(rule, reading: reading) else { return }
+        s.phase = .idle
+        events.append(AlertEvent(ruleID: rule.id, date: now, kind: .cleared, subject: rule.subject,
+                                 value: reading.value, sensorID: reading.sensorID))
+    }
+
+    private func shouldClear(_ rule: AlertRule, reading: Reading) -> Bool {
+        if rule.subject.isTemperature, let threshold = rule.thresholdC {
+            // Re-arm only once the value fell clearly below the threshold. No value (sensor vanished) keeps it raised.
+            return reading.value.map { $0 < threshold - max(rule.hysteresisC, 0) } ?? false
+        }
+        return !reading.active
     }
 
     private func cooldownElapsed(_ s: RuleState, _ rule: AlertRule, _ now: Date) -> Bool {
@@ -147,33 +194,47 @@ public struct AlertEngine: Sendable {
 
     /// nil = the rule cannot be evaluated (temperature subject without a threshold).
     private static func read(_ rule: AlertRule, _ inputs: AlertInputs) -> Reading? {
-        func temperature(_ value: Double?, _ id: SensorID?) -> Reading? {
-            guard let threshold = rule.thresholdC, threshold.isFinite else { return nil }
-            guard let v = value, v.isFinite else { return Reading(active: false, value: nil, sensorID: id) }
-            return Reading(active: v > threshold, value: v, sensorID: id)
-        }
         switch rule.subject {
-        case .anySensor:
-            let top = inputs.sensorValues.max { a, b in a.value < b.value || (a.value == b.value && a.key > b.key) }
-            return temperature(top?.value, top?.key)
-        case .aggregate(let kind):
-            return temperature(inputs.aggregates[kind], inputs.aggregates.sources[kind])
-        case .group(let group):
-            let top = inputs.sensorValues.filter { inputs.sensorGroups[$0.key] == group }
-                .max { a, b in a.value < b.value || (a.value == b.value && a.key > b.key) }
-            return temperature(top?.value, top?.key)
-        case .sensor(let id):
-            // A rule that names a sensor keeps watching it after the user hid it (hidden values come separately).
-            return temperature(inputs.sensorValues[id] ?? inputs.namedSensorValues[id], id)
-        case .fanStalled:
-            return Reading(active: !inputs.stalledFans.isEmpty, value: nil, sensorID: nil)
-        case .thermalPressure(let level):
-            return Reading(active: inputs.pressure >= level, value: nil, sensorID: nil)
-        case .batteryService:
-            return Reading(active: inputs.batteryNeedsService, value: nil, sensorID: nil)
+        case .anySensor, .aggregate, .group, .sensor:
+            return readTemperature(rule, inputs)
+        case .fanStalled, .thermalPressure, .batteryService:
+            return readCondition(rule, inputs)
         case .abnormalShutdown, .fanModeChanged:
             return nil   // one-shot, handled in evaluate
         }
+    }
+
+    private static func readTemperature(_ rule: AlertRule, _ inputs: AlertInputs) -> Reading? {
+        switch rule.subject {
+        case .anySensor: return hottestReading(rule, inputs.sensorValues)
+        case .aggregate(let kind): return temperature(rule, inputs.aggregates[kind], inputs.aggregates.sources[kind])
+        case .group(let group):
+            return hottestReading(rule, inputs.sensorValues.filter { inputs.sensorGroups[$0.key] == group })
+        case .sensor(let id):
+            // A rule that names a sensor keeps watching it after the user hid it (hidden values come separately).
+            return temperature(rule, inputs.sensorValues[id] ?? inputs.namedSensorValues[id], id)
+        default: return nil
+        }
+    }
+
+    private static func readCondition(_ rule: AlertRule, _ inputs: AlertInputs) -> Reading? {
+        switch rule.subject {
+        case .fanStalled: return Reading(active: !inputs.stalledFans.isEmpty, value: nil, sensorID: nil)
+        case .thermalPressure(let level): return Reading(active: inputs.pressure >= level, value: nil, sensorID: nil)
+        case .batteryService: return Reading(active: inputs.batteryNeedsService, value: nil, sensorID: nil)
+        default: return nil
+        }
+    }
+
+    private static func hottestReading(_ rule: AlertRule, _ values: [SensorID: Double]) -> Reading? {
+        let top = values.max { a, b in a.value < b.value || (a.value == b.value && a.key > b.key) }
+        return temperature(rule, top?.value, top?.key)
+    }
+
+    private static func temperature(_ rule: AlertRule, _ value: Double?, _ id: SensorID?) -> Reading? {
+        guard let threshold = rule.thresholdC, threshold.isFinite else { return nil }
+        guard let v = value, v.isFinite else { return Reading(active: false, value: nil, sensorID: id) }
+        return Reading(active: v > threshold, value: v, sensorID: id)
     }
 }
 

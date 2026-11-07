@@ -69,13 +69,16 @@ public final class ThermalSafetyMonitor {
         guard let n = try? smc.keyCount(), n > 0 else { return [] }
         var candidates: [FourCC] = []
         for i in 0..<n {
-            guard let k = try? smc.key(at: i) else { continue }
-            let name = k.description
-            guard prefixes.contains(where: { name.hasPrefix($0) }),
-                  let info = try? smc.keyInfo(k), types.contains(info.type), info.isReadable else { continue }
-            candidates.append(k)
+            guard let key = try? smc.key(at: i), isCandidate(key, smc: smc, prefixes: prefixes, types: types) else { continue }
+            candidates.append(key)
         }
         return selectKeys(candidates, prefixes: prefixes, limit: maxKeys)
+    }
+
+    private static func isCandidate(_ key: FourCC, smc: any SMCReading, prefixes: [String], types: Set<SMCDataType>) -> Bool {
+        guard prefixes.contains(where: { key.description.hasPrefix($0) }),
+              let info = try? smc.keyInfo(key), types.contains(info.type), info.isReadable else { return false }
+        return true
     }
 
     /// Cluster aggregates first, then round-robin across families (index order inside a family).
@@ -114,34 +117,53 @@ public final class ThermalSafetyMonitor {
     public func evaluate() -> SafetyVerdict {
         let keys = monitoredKeys
         guard !keys.isEmpty else { return .normal(hottestC: nil) }   // no die sensors known: rely on the app + macOS
-        let now = clock.now()
+        let values = sample(keys, at: clock.now())
+        guard !values.isEmpty else { return emptySampleVerdict() }
+        return verdict(for: values)
+    }
+
+    private func sample(_ keys: [FourCC], at now: Date) -> [Double] {
         var values: [Double] = []
         values.reserveCapacity(keys.count)
-        for k in keys {
-            guard let v = try? smc.readNumber(k), v.isFinite, thresholds.validRange.contains(v),
-                  v != thresholds.placeholderValue else { continue }
-            if let prev = lastValue[k], abs(prev.value - v) < 0.0005 {
-                if now.timeIntervalSince(prev.changedAt) > thresholds.staticKeySeconds { continue }   // static setpoint
-            } else {
-                lastValue[k] = (v, now)
-            }
-            values.append(v)
+        for key in keys {
+            guard let value = sampleValue(key, at: now) else { continue }
+            values.append(value)
         }
-        if values.isEmpty {
-            consecutiveFailures += 1
-            if consecutiveFailures >= thresholds.sensorFailureTicks { return .sensorFailure }       // I9
-            if overrideActive, let h = lastHottestC, let m = lastTop4MeanC { return .override(hottestC: h, top4MeanC: m) }
-            return .normal(hottestC: nil)
+        return values
+    }
+
+    private func sampleValue(_ key: FourCC, at now: Date) -> Double? {
+        guard let value = try? smc.readNumber(key), value.isFinite, thresholds.validRange.contains(value),
+              value != thresholds.placeholderValue else { return nil }
+        if let previous = lastValue[key], abs(previous.value - value) < 0.0005 {
+            if now.timeIntervalSince(previous.changedAt) > thresholds.staticKeySeconds { return nil }   // static setpoint
+        } else {
+            lastValue[key] = (value, now)
         }
+        return value
+    }
+
+    private func emptySampleVerdict() -> SafetyVerdict {
+        consecutiveFailures += 1
+        if consecutiveFailures >= thresholds.sensorFailureTicks { return .sensorFailure }       // I9
+        if overrideActive, let hottest = lastHottestC, let mean = lastTop4MeanC { return .override(hottestC: hottest, top4MeanC: mean) }
+        return .normal(hottestC: nil)
+    }
+
+    private func verdict(for values: [Double]) -> SafetyVerdict {
         consecutiveFailures = 0
-        values.sort(by: >)
-        let hottest = values[0]
-        let top = values.prefix(4)
+        let sorted = values.sorted(by: >)
+        let hottest = sorted[0]
+        let top = sorted.prefix(4)
         let top4 = top.reduce(0, +) / Double(top.count)
         lastHottestC = hottest
         lastTop4MeanC = top4
-        if top4 >= thresholds.overrideTop4MeanC || hottest >= thresholds.overrideHottestC { overrideActive = true }   // I8
-        else if overrideActive && top4 < thresholds.releaseTop4MeanC { overrideActive = false }
+        updateOverride(hottest: hottest, top4Mean: top4)
         return overrideActive ? .override(hottestC: hottest, top4MeanC: top4) : .normal(hottestC: hottest)
+    }
+
+    private func updateOverride(hottest: Double, top4Mean: Double) {
+        if top4Mean >= thresholds.overrideTop4MeanC || hottest >= thresholds.overrideHottestC { overrideActive = true }   // I8
+        else if overrideActive && top4Mean < thresholds.releaseTop4MeanC { overrideActive = false }
     }
 }

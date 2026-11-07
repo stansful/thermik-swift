@@ -91,17 +91,21 @@ public struct CodeIdentity: Sendable, CustomStringConvertible {
     public static func cdhashes(ofCodeAt url: URL) -> [String] {
         var result: [String] = []
         for arch in ["arm64", "x86_64"] {
-            var code: SecStaticCode?
-            let attrs = [kSecCodeAttributeArchitecture: arch] as CFDictionary
-            guard SecStaticCodeCreateWithPathAndAttributes(url as CFURL, [], attrs, &code) == errSecSuccess,
-                  let code else { continue }
-            var info: CFDictionary?
-            guard SecCodeCopySigningInformation(code, [], &info) == errSecSuccess,
-                  let d = info as? [String: Any], let u = d[kSecCodeInfoUnique as String] as? Data else { continue }
-            let h = hex(u)
-            if !result.contains(h) { result.append(h) }
+            guard let hash = cdhash(ofCodeAt: url, architecture: arch), !result.contains(hash) else { continue }
+            result.append(hash)
         }
         return result
+    }
+
+    private static func cdhash(ofCodeAt url: URL, architecture: String) -> String? {
+        var code: SecStaticCode?
+        let attrs = [kSecCodeAttributeArchitecture: architecture] as CFDictionary
+        guard SecStaticCodeCreateWithPathAndAttributes(url as CFURL, [], attrs, &code) == errSecSuccess,
+              let code else { return nil }
+        var info: CFDictionary?
+        guard SecCodeCopySigningInformation(code, [], &info) == errSecSuccess,
+              let d = info as? [String: Any], let u = d[kSecCodeInfoUnique as String] as? Data else { return nil }
+        return hex(u)
     }
 
     /// True for a cdhash as codesign prints it: 20 bytes (the CodeDirectory hash, truncated) = 40 hex digits.

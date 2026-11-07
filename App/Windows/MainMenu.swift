@@ -25,20 +25,32 @@ import ThermikCore
 
     private static func appMenu(router: AppRouter, updater: AppUpdater) -> NSMenu {
         let app = NSMenu(title: "Thermik")
+        addAppInfoItems(to: app, updater: updater)
+        app.addItem(.separator())
+        addAppNavigationItems(to: app, router: router)
+        app.addItem(.separator())
+        addAppVisibilityItems(to: app)
+        app.addItem(.separator())
+        app.addItem(withTitle: String(localized: "Quit Thermik"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        return app
+    }
+
+    private static func addAppInfoItems(to app: NSMenu, updater: AppUpdater) {
         app.addItem(withTitle: String(localized: "About Thermik"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         let updates = app.addItem(withTitle: String(localized: "Check for Updates…"), action: #selector(AppUpdater.checkForUpdates(_:)), keyEquivalent: "")
         updates.target = updater
-        app.addItem(.separator())
+    }
+
+    private static func addAppNavigationItems(to app: NSMenu, router: AppRouter) {
         app.addItem(MenuAction(title: String(localized: "Settings…"), key: ",") { router.showSettings(nil) }.item)
         app.addItem(MenuAction(title: String(localized: "Welcome Guide…"), key: "") { router.showOnboarding() }.item)
-        app.addItem(.separator())
+    }
+
+    private static func addAppVisibilityItems(to app: NSMenu) {
         app.addItem(withTitle: String(localized: "Hide Thermik"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let others = app.addItem(withTitle: String(localized: "Hide Others"), action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         others.keyEquivalentModifierMask = [.command, .option]
         app.addItem(withTitle: String(localized: "Show All"), action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
-        app.addItem(.separator())
-        app.addItem(withTitle: String(localized: "Quit Thermik"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        return app
     }
 
     private static func editMenu() -> NSMenu {
@@ -56,18 +68,26 @@ import ThermikCore
 
     private static func viewMenu(router: AppRouter) -> NSMenu {
         let view = NSMenu(title: String(localized: "View"))
+        addPageItems(to: view, router: router)
+        view.addItem(.separator())
+        addWindowItems(to: view)
+        return view
+    }
+
+    private static func addPageItems(to view: NSMenu, router: AppRouter) {
         for page in Route.Page.contentPages {
             let route = Self.route(page)
             let item = MenuAction(title: page.title, key: "\(page.shortcutDigit)") { router.showMain(route) }.item
             item.image = NSImage(systemSymbolName: page.symbol, accessibilityDescription: nil)
             view.addItem(item)
         }
-        view.addItem(.separator())
+    }
+
+    private static func addWindowItems(to view: NSMenu) {
         let sidebar = view.addItem(withTitle: String(localized: "Toggle Sidebar"), action: #selector(NSSplitViewController.toggleSidebar(_:)), keyEquivalent: "s")
         sidebar.keyEquivalentModifierMask = [.command, .control]
         let full = view.addItem(withTitle: String(localized: "Enter Full Screen"), action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         full.keyEquivalentModifierMask = [.command, .control]
-        return view
     }
 
     private static func windowMenu(router: AppRouter) -> NSMenu {

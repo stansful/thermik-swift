@@ -57,17 +57,8 @@ private func checker(_ answers: [FakeTransport.Answer], current: String = "1.0.4
 
 @Suite("ThermikUpdates") struct GitHubReleaseCheckerTests {
     @Test func configurationRejectsUntrustedSlugsAndInvalidVersions() throws {
-        for repository in ["", "owner", "owner/", "/repo", "a/b/c", "../repo", "owner/..", "a/.",
-                           "owner/repo?token=secret", "owner/repo#tag", "owner/répo", "owner/r epo"] {
-            #expect(throws: UpdateCheckError.invalidConfiguration) {
-                try ReleaseConfiguration(repository: repository, currentVersion: "1.0.4")
-            }
-        }
-        for version in ["", "v", "1.0", "1.0.0.0", "01.0.0", "-1.0.0", "1.0.0-", "1.0.0+", "1.0.0-01", "1.0.0+b..d"] {
-            #expect(throws: UpdateCheckError.invalidConfiguration) {
-                try ReleaseConfiguration(repository: "stansful/thermik-swift", currentVersion: version)
-            }
-        }
+        expectInvalidRepositories()
+        expectInvalidVersions()
         #expect(try ReleaseConfiguration(repository: "stansful/thermik-swift", currentVersion: "v1.0.4+local").currentVersion == "v1.0.4+local")
     }
 
@@ -189,20 +180,11 @@ private func checker(_ answers: [FakeTransport.Answer], current: String = "1.0.4
 
     @Test func fallbackValidatesReleaseArrayBeforeReportingUpToDate() async throws {
         let missing = ReleaseResponse(data: Data(), statusCode: 404)
-        for body in ["{\"message\":\"unexpected\"}", "not JSON", "[{}]"] {
-            await #expect(throws: UpdateCheckError.invalidResponse) {
-                try await checker([.response(missing), .response(ReleaseResponse(data: Data(body.utf8), statusCode: 200))]).check()
-            }
-        }
+        await expectFallbackRejectsInvalidBodies(missing: missing)
         let beta = release("2.0.0-beta.1", prerelease: true)
         let betaList = ReleaseResponse(data: Data("[".utf8) + beta.data + Data("]".utf8), statusCode: 200)
         #expect(try await checker([.response(missing), .response(betaList)]).check() == .upToDate)
-        let stable = release("1.0.5")
-        let stableList = ReleaseResponse(data: Data("[".utf8) + stable.data + Data("]".utf8), statusCode: 200)
-        guard case .available(let update) = try await checker([.response(missing), .response(stableList)]).check() else {
-            Issue.record("The fallback must still offer a newer stable release"); return
-        }
-        #expect(update.version == "1.0.5")
+        try await expectFallbackOffersStableRelease(missing: missing)
     }
 
     @Test func typedHTTPAndNetworkFailures() async throws {
@@ -239,34 +221,84 @@ private func checker(_ answers: [FakeTransport.Answer], current: String = "1.0.4
     }
 
     @Test func cancellingACheckDoesNotBecomeAnOfflineFailure() async throws {
-        let transport = GatedTransport()
-        let service = GitHubReleaseChecker(configuration: try ReleaseConfiguration(repository: "owner/repo", currentVersion: "1.0.4"), transport: transport)
+        let (transport, service) = try makeGatedChecker()
         let task = Task { try await service.check() }
         while await transport.requestCount == 0 { await Task.yield() }
         task.cancel()
         await transport.open()
         await #expect(throws: CancellationError.self) { try await task.value }
-        guard case .available = try await service.check() else {
-            Issue.record("A cancelled request must not poison subsequent checks"); return
-        }
+        try await expectAvailableUpdate(from: service, message: "A cancelled request must not poison subsequent checks")
         #expect(await transport.requestCount == 2)
     }
 
     @Test func cancellingACoalescedConsumerCancelsTheSharedRequest() async throws {
+        let (transport, service) = try makeGatedChecker()
+        let (first, second) = try await startTwoChecksAndCancelSecond(on: service, transport: transport)
+        await #expect(throws: CancellationError.self) { try await first.value }
+        await #expect(throws: CancellationError.self) { try await second.value }
+        #expect(await transport.requestCount == 1)
+        try await expectAvailableUpdate(from: service, message: "The shared cancelled request must be cleared")
+        #expect(await transport.requestCount == 2)
+    }
+
+    private func expectInvalidRepositories() {
+        for repository in ["", "owner", "owner/", "/repo", "a/b/c", "../repo", "owner/..", "a/.",
+                           "owner/repo?token=secret", "owner/repo#tag", "owner/répo", "owner/r epo"] {
+            #expect(throws: UpdateCheckError.invalidConfiguration) {
+                try ReleaseConfiguration(repository: repository, currentVersion: "1.0.4")
+            }
+        }
+    }
+
+    private func expectInvalidVersions() {
+        for version in ["", "v", "1.0", "1.0.0.0", "01.0.0", "-1.0.0", "1.0.0-", "1.0.0+", "1.0.0-01", "1.0.0+b..d"] {
+            #expect(throws: UpdateCheckError.invalidConfiguration) {
+                try ReleaseConfiguration(repository: "stansful/thermik-swift", currentVersion: version)
+            }
+        }
+    }
+
+    private func expectFallbackRejectsInvalidBodies(missing: ReleaseResponse) async {
+        for body in ["{\"message\":\"unexpected\"}", "not JSON", "[{}]"] {
+            await #expect(throws: UpdateCheckError.invalidResponse) {
+                try await checker([.response(missing), .response(ReleaseResponse(data: Data(body.utf8), statusCode: 200))]).check()
+            }
+        }
+    }
+
+    private func expectFallbackOffersStableRelease(missing: ReleaseResponse) async throws {
+        let stable = release("1.0.5")
+        let stableList = ReleaseResponse(data: Data("[".utf8) + stable.data + Data("]".utf8), statusCode: 200)
+        guard case .available(let update) = try await checker([.response(missing), .response(stableList)]).check() else {
+            Issue.record("The fallback must still offer a newer stable release")
+            return
+        }
+        #expect(update.version == "1.0.5")
+    }
+
+    private func makeGatedChecker() throws -> (GatedTransport, GitHubReleaseChecker) {
         let transport = GatedTransport()
         let service = GitHubReleaseChecker(configuration: try ReleaseConfiguration(repository: "owner/repo", currentVersion: "1.0.4"), transport: transport)
+        return (transport, service)
+    }
+
+    private func expectAvailableUpdate(from service: GitHubReleaseChecker, message: Comment) async throws {
+        guard case .available = try await service.check() else {
+            Issue.record(message)
+            return
+        }
+    }
+
+    private func startTwoChecksAndCancelSecond(
+        on service: GitHubReleaseChecker,
+        transport: GatedTransport
+    ) async throws -> (Task<UpdateCheckResult, Error>, Task<UpdateCheckResult, Error>) {
         let first = Task { try await service.check() }
         while await transport.requestCount == 0 { await Task.yield() }
         let second = Task { try await service.check() }
         try await Task.sleep(for: .milliseconds(10))
         second.cancel()
         await transport.open()
-        await #expect(throws: CancellationError.self) { try await first.value }
-        await #expect(throws: CancellationError.self) { try await second.value }
-        #expect(await transport.requestCount == 1)
-        guard case .available = try await service.check() else {
-            Issue.record("The shared cancelled request must be cleared"); return
-        }
-        #expect(await transport.requestCount == 2)
+        return (first, second)
     }
 }

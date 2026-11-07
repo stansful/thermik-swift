@@ -95,22 +95,31 @@ enum ProcessRunner {
     static func run(_ path: String, _ args: [String], timeout: TimeInterval) async -> Data? {
         await withCheckedContinuation { (cont: CheckedContinuation<Data?, Never>) in
             DispatchQueue.global(qos: .utility).async {
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: path)
-                p.arguments = args
-                let pipe = Pipe()
-                p.standardOutput = pipe
-                p.standardError = FileHandle.nullDevice
-                p.standardInput = FileHandle.nullDevice
-                do { try p.run() } catch { cont.resume(returning: nil); return }
-                let watchdog = ProcessWatchdog(p)
-                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) { watchdog.fire() }
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                p.waitUntilExit()
-                let killed = watchdog.finish()
-                cont.resume(returning: killed || p.terminationReason != .exit ? nil : data)
+                cont.resume(returning: runOnUtilityThread(path, args, timeout: timeout))
             }
         }
+    }
+
+    private static func runOnUtilityThread(_ path: String, _ args: [String], timeout: TimeInterval) -> Data? {
+        let (process, pipe) = configuredProcess(path, args)
+        do { try process.run() } catch { return nil }
+        let watchdog = ProcessWatchdog(process)
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) { watchdog.fire() }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let killed = watchdog.finish()
+        return killed || process.terminationReason != .exit ? nil : data
+    }
+
+    private static func configuredProcess(_ path: String, _ args: [String]) -> (Process, Pipe) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        return (process, pipe)
     }
 }
 

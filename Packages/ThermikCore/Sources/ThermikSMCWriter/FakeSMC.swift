@@ -183,43 +183,91 @@ public final class FakeSMC: SMCReadWriting, @unchecked Sendable {
     public func writeRaw(_ key: FourCC, _ bytes: [UInt8]) throws {
         try lock.withLock {
             evolveLocked()
-            guard let entry = store[key] else { throw SMCError.keyNotFound(key) }
-            guard entry.info.isWritable else { throw SMCError.notWritable(key) }
-            guard bytes.count == Int(entry.info.size) else {
-                throw SMCError.sizeMismatch(key: key, expected: Int(entry.info.size), actual: bytes.count)
-            }
-            let stamp = String(format: "t=%5.2f %@=%@", now().timeIntervalSince(epoch), key.description,
-                               bytes.map { String(format: "%02x", $0) }.joined())
-            if key == FanHardwareProfile.ftstKey {
-                if bytes[0] == 1 { ftstSetAt = now() } else {
-                    ftstSetAt = nil
-                    if generation == .m4 || generation == .m4Refusing, let t = modeTemplate {
-                        for i in 0..<fanCount { store[.fan(t, i)]?.bytes = [3] }   // the daemon reclaims every fan
-                    }
-                }
-            } else if let t = modeTemplate, let i = (0..<fanCount).first(where: { FourCC.fan(t, $0) == key }) {
-                let cur = entry.bytes[0]
-                if bytes[0] == 1 && cur == 3 {
-                    log.append(stamp + " -> 0x82")
-                    throw SMCError.firmware(SMCResultCode.badCommand.rawValue, key: key)   // kSMCBadCommand in System Mode
-                }
-                if bytes[0] == 0 && cur == 1 && refuseStoppedRelease && (number(.fan("F%dAc", i)) ?? 0) < 1 {
-                    log.append(stamp + " -> 0x82")
-                    throw SMCError.firmware(SMCResultCode.badCommand.rawValue, key: key)   // M4 Max: a stopped fan stays manual
-                }
-                if bytes[0] == 1 { directManualAt[i] = now() }
-                if bytes[0] == 0 && (generation == .m4 || generation == .m4Refusing) && ftstSetAt == nil {
-                    log.append(stamp)
-                    store[key]?.bytes = [3]
-                    return
-                }
-            } else if let i = (0..<fanCount).first(where: { FourCC.fan("F%dTg", $0) == key }), generation.isAppleSilicon,
-                      (number(.fan("F%dAc", i)) ?? 0) < 1, (SMCCodec.decode(bytes, as: entry.info).doubleValue ?? 0) >= 1 {
-                spinUpStartedAt[i] = now()
-            }
-            log.append(stamp)
-            store[key]?.bytes = bytes
+            let entry = try validatedWriteLocked(key, bytes)
+            let stamp = writeStampLocked(key, bytes)
+            if key == FanHardwareProfile.ftstKey { writeFtstLocked(key, bytes, stamp: stamp) }
+            else if let i = modeWriteIndexLocked(key) { try writeModeLocked(key, fan: i, current: entry.bytes[0], bytes: bytes, stamp: stamp) }
+            else { writeRegularLocked(key, bytes, info: entry.info, stamp: stamp) }
         }
+    }
+
+    private func validatedWriteLocked(_ key: FourCC, _ bytes: [UInt8]) throws -> (info: SMCKeyInfo, bytes: [UInt8]) {
+        guard let entry = store[key] else { throw SMCError.keyNotFound(key) }
+        guard entry.info.isWritable else { throw SMCError.notWritable(key) }
+        guard bytes.count == Int(entry.info.size) else {
+            throw SMCError.sizeMismatch(key: key, expected: Int(entry.info.size), actual: bytes.count)
+        }
+        return entry
+    }
+
+    private func writeStampLocked(_ key: FourCC, _ bytes: [UInt8]) -> String {
+        String(format: "t=%5.2f %@=%@", now().timeIntervalSince(epoch), key.description,
+               bytes.map { String(format: "%02x", $0) }.joined())
+    }
+
+    private func modeWriteIndexLocked(_ key: FourCC) -> Int? {
+        guard let template = modeTemplate else { return nil }
+        return (0..<fanCount).first { FourCC.fan(template, $0) == key }
+    }
+
+    private func writeFtstLocked(_ key: FourCC, _ bytes: [UInt8], stamp: String) {
+        if bytes[0] == 1 { ftstSetAt = now() } else { clearFtstLocked() }
+        commitWriteLocked(key, bytes, stamp: stamp)
+    }
+
+    private func clearFtstLocked() {
+        ftstSetAt = nil
+        guard generation == .m4 || generation == .m4Refusing, let template = modeTemplate else { return }
+        for i in 0..<fanCount { store[.fan(template, i)]?.bytes = [3] }   // the daemon reclaims every fan
+    }
+
+    private func writeModeLocked(_ key: FourCC, fan i: Int, current: UInt8, bytes: [UInt8], stamp: String) throws {
+        try validateModeWriteLocked(key, fan: i, current: current, bytes: bytes, stamp: stamp)
+        if bytes[0] == 1 { directManualAt[i] = now() }
+        if shouldDaemonReclaimLocked(bytes) {
+            commitWriteLocked(key, [3], stamp: stamp)
+            return
+        }
+        commitWriteLocked(key, bytes, stamp: stamp)
+    }
+
+    private func validateModeWriteLocked(_ key: FourCC, fan i: Int, current: UInt8, bytes: [UInt8], stamp: String) throws {
+        try validateManualModeWriteLocked(key, current: current, bytes: bytes, stamp: stamp)
+        try validateModeReleaseLocked(key, fan: i, current: current, bytes: bytes, stamp: stamp)
+    }
+
+    private func validateManualModeWriteLocked(_ key: FourCC, current: UInt8, bytes: [UInt8], stamp: String) throws {
+        guard bytes[0] == 1 && current == 3 else { return }
+        log.append(stamp + " -> 0x82")
+        // kSMCBadCommand in System Mode.
+        throw SMCError.firmware(SMCResultCode.badCommand.rawValue, key: key)
+    }
+
+    private func validateModeReleaseLocked(_ key: FourCC, fan i: Int, current: UInt8, bytes: [UInt8], stamp: String) throws {
+        guard bytes[0] == 0 && current == 1 && refuseStoppedRelease && (number(.fan("F%dAc", i)) ?? 0) < 1 else { return }
+        log.append(stamp + " -> 0x82")
+        // M4 Max: a stopped fan stays manual.
+        throw SMCError.firmware(SMCResultCode.badCommand.rawValue, key: key)
+    }
+
+    private func shouldDaemonReclaimLocked(_ bytes: [UInt8]) -> Bool {
+        bytes[0] == 0 && (generation == .m4 || generation == .m4Refusing) && ftstSetAt == nil
+    }
+
+    private func writeRegularLocked(_ key: FourCC, _ bytes: [UInt8], info: SMCKeyInfo, stamp: String) {
+        recordSpinUpLocked(key, bytes, info: info)
+        commitWriteLocked(key, bytes, stamp: stamp)
+    }
+
+    private func recordSpinUpLocked(_ key: FourCC, _ bytes: [UInt8], info: SMCKeyInfo) {
+        guard let i = (0..<fanCount).first(where: { FourCC.fan("F%dTg", $0) == key }), generation.isAppleSilicon,
+              (number(.fan("F%dAc", i)) ?? 0) < 1, (SMCCodec.decode(bytes, as: info).doubleValue ?? 0) >= 1 else { return }
+        spinUpStartedAt[i] = now()
+    }
+
+    private func commitWriteLocked(_ key: FourCC, _ bytes: [UInt8], stamp: String) {
+        log.append(stamp)
+        store[key]?.bytes = bytes
     }
 
     // MARK: Firmware / daemon model (evaluated lazily on every access, under the lock)
@@ -227,39 +275,53 @@ public final class FakeSMC: SMCReadWriting, @unchecked Sendable {
     private func evolveLocked() {
         let t = now()
         for i in 0..<fanCount {
-            if let tmpl = modeTemplate, var mode = store[.fan(tmpl, i)]?.bytes {
-                // m4: ~3.5 s after Ftst=1 thermalmonitord yields: mode 3 -> 0.
-                if generation == .m4, let at = ftstSetAt, t.timeIntervalSince(at) >= ftstYieldDelay, mode[0] == 3 { mode[0] = 0 }
-                // m1 variant: without Ftst, a direct manual write is reclaimed after 1 s.
-                if generation == .m1Reclaims, mode[0] == 1, ftstSetAt == nil, let at = directManualAt[i], t.timeIntervalSince(at) >= 1 {
-                    mode[0] = 0
-                }
-                store[.fan(tmpl, i)]?.bytes = mode
-            }
+            evolveModeLocked(i, at: t)
             updateActualLocked(i)
         }
     }
 
+    private func evolveModeLocked(_ i: Int, at t: Date) {
+        guard let template = modeTemplate, var mode = store[.fan(template, i)]?.bytes else { return }
+        // m4: ~3.5 s after Ftst=1 thermalmonitord yields: mode 3 -> 0.
+        if generation == .m4, let at = ftstSetAt, t.timeIntervalSince(at) >= ftstYieldDelay, mode[0] == 3 { mode[0] = 0 }
+        // m1 variant: without Ftst, a direct manual write is reclaimed after 1 s.
+        if generation == .m1Reclaims, mode[0] == 1, ftstSetAt == nil, let at = directManualAt[i], t.timeIntervalSince(at) >= 1 {
+            mode[0] = 0
+        }
+        store[.fan(template, i)]?.bytes = mode
+    }
+
     /// Fan physics, instantaneous: forced → target; Ftst=1 + mode 0 → held near Mn; otherwise macOS idle (off).
     private func updateActualLocked(_ i: Int) {
+        if generation == .intelPreT2 { updateIntelPreT2ActualLocked(i); return }
         let tg = number(.fan("F%dTg", i)) ?? 0
-        let actual: Double
-        if generation == .intelPreT2 {
-            let fs = store[FanHardwareProfile.forceBitsKey]?.bytes ?? [0, 0]
-            let mask = UInt16(fs[0]) << 8 | UInt16(fs[1])
-            actual = mask & (1 << UInt16(i)) != 0 ? tg : minRPM
-            store[.fan("F%dAc", i)]?.bytes = fpe2(actual)
-            return
-        }
-        let mode = modeTemplate.flatMap { store[.fan($0, i)]?.bytes.first } ?? 0
-        if mode == 1, tg >= 1, let at = spinUpStartedAt[i], now().timeIntervalSince(at) < spinUp { actual = 0 }
-        else if mode == 1 { actual = tg; if tg >= 1 { spinUpStartedAt[i] = nil } }
-        else if ftstSetAt != nil { actual = minRPM }
-        else { actual = generation == .intelT2 ? minRPM : 0 }
+        let actual = nonIntelActualLocked(i, target: tg)
         store[.fan("F%dAc", i)]?.bytes = SMCCodec.encodeFloat32LE(Float(actual))
-        if store[.fan("F%dDc", i)] != nil {
-            store[.fan("F%dDc", i)]?.bytes = SMCCodec.encodeFloat32LE(Float(actual / (maxRPM * 1.67)))
+        updateDutyLocked(i, actual: actual)
+    }
+
+    private func updateIntelPreT2ActualLocked(_ i: Int) {
+        let tg = number(.fan("F%dTg", i)) ?? 0
+        let fs = store[FanHardwareProfile.forceBitsKey]?.bytes ?? [0, 0]
+        let mask = UInt16(fs[0]) << 8 | UInt16(fs[1])
+        let actual = mask & (1 << UInt16(i)) != 0 ? tg : minRPM
+        store[.fan("F%dAc", i)]?.bytes = fpe2(actual)
+    }
+
+    private func nonIntelActualLocked(_ i: Int, target tg: Double) -> Double {
+        let mode = modeTemplate.flatMap { store[.fan($0, i)]?.bytes.first } ?? 0
+        if mode == 1, tg >= 1, let at = spinUpStartedAt[i], now().timeIntervalSince(at) < spinUp { return 0 }
+        if mode == 1 {
+            if tg >= 1 { spinUpStartedAt[i] = nil }
+            return tg
         }
+        if ftstSetAt != nil { return minRPM }
+        return generation == .intelT2 ? minRPM : 0
+    }
+
+    private func updateDutyLocked(_ i: Int, actual: Double) {
+        guard store[.fan("F%dDc", i)] != nil else { return }
+        store[.fan("F%dDc", i)]?.bytes = SMCCodec.encodeFloat32LE(Float(actual / (maxRPM * 1.67)))
     }
 
     private func number(_ key: FourCC) -> Double? {

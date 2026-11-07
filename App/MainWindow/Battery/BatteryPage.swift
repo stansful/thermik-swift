@@ -89,27 +89,51 @@ private struct BatteryContent: View {
     private func chargeCard(_ b: BatterySnapshot) -> some View {
         PageCard(title: String(localized: "Charge"), symbol: "battery.75percent") {
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(verbatim: b.chargePercent.map { WindowFormat.percent(Double($0)) } ?? "—").font(ThermikFont.value)
-                    Text(verbatim: BatteryText.state(b)).font(ThermikFont.caption).foregroundStyle(.secondary)
-                }
-                ProgressView(value: Double(b.chargePercent ?? 0), total: 100)
-                    .tint(b.isCharging ? Color(nsColor: .systemGreen) : .accentColor)
-                if let remaining = BatteryText.remaining(b, system.powerSource) {
-                    DetailRow(label: remaining.label, value: remaining.value)
-                }
-                if let a = b.adapter {
-                    DetailRow(label: String(localized: "Power adapter"),
-                              value: [a.name, a.watts.map { WindowFormat.watts(Double($0), decimals: 0) }].compactMap { $0 }.joined(separator: " · "))
-                    if let v = a.voltage_mV, let c = a.current_mA {
-                        DetailRow(label: String(localized: "Adapter output"), value: "\(WindowFormat.volts(millivolts: v, decimals: 1)) · \(WindowFormat.amps(milliamps: c))")
-                    }
-                }
-                if let low = system.powerSource?.lowPowerMode, low {
-                    Label { Text("Low Power Mode is on") } icon: { Image(systemName: "leaf") }
-                        .font(ThermikFont.caption).foregroundStyle(.secondary)
-                }
+                chargeSummary(b)
+                chargeProgress(b)
+                remainingRow(b)
+                adapterRows(b)
+                lowPowerMode()
             }
+        }
+    }
+
+    private func chargeSummary(_ b: BatterySnapshot) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(verbatim: b.chargePercent.map { WindowFormat.percent(Double($0)) } ?? "—").font(ThermikFont.value)
+            Text(verbatim: BatteryText.state(b)).font(ThermikFont.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func chargeProgress(_ b: BatterySnapshot) -> some View {
+        ProgressView(value: Double(b.chargePercent ?? 0), total: 100)
+            .tint(b.isCharging ? Color(nsColor: .systemGreen) : .accentColor)
+    }
+
+    @ViewBuilder private func remainingRow(_ b: BatterySnapshot) -> some View {
+        if let remaining = BatteryText.remaining(b, system.powerSource) {
+            DetailRow(label: remaining.label, value: remaining.value)
+        }
+    }
+
+    @ViewBuilder private func adapterRows(_ b: BatterySnapshot) -> some View {
+        if let a = b.adapter {
+            DetailRow(label: String(localized: "Power adapter"),
+                      value: [a.name, a.watts.map { WindowFormat.watts(Double($0), decimals: 0) }].compactMap { $0 }.joined(separator: " · "))
+            adapterOutput(a)
+        }
+    }
+
+    @ViewBuilder private func adapterOutput(_ a: PowerAdapterInfo) -> some View {
+        if let v = a.voltage_mV, let c = a.current_mA {
+            DetailRow(label: String(localized: "Adapter output"), value: "\(WindowFormat.volts(millivolts: v, decimals: 1)) · \(WindowFormat.amps(milliamps: c))")
+        }
+    }
+
+    @ViewBuilder private func lowPowerMode() -> some View {
+        if let low = system.powerSource?.lowPowerMode, low {
+            Label { Text("Low Power Mode is on") } icon: { Image(systemName: "leaf") }
+                .font(ThermikFont.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -119,56 +143,84 @@ private struct BatteryContent: View {
                 .buttonStyle(.link).font(.system(size: 11))
                 .popover(isPresented: $showsRaw, arrowEdge: .bottom) { rawDetails(b) }
         } content: {
-            VStack(alignment: .leading, spacing: 6) {
-                if let v = b.voltage_mV { DetailRow(label: String(localized: "Voltage"), value: WindowFormat.volts(millivolts: v)) }
-                if let a = b.amperage_mA { DetailRow(label: String(localized: "Current"), value: WindowFormat.amps(milliamps: a)) }
-                if let w = b.batteryPowerW { DetailRow(label: String(localized: "Battery power"), value: WindowFormat.watts(w)) }
-                if let mW = b.systemLoad_mW { DetailRow(label: String(localized: "Whole Mac"), value: WindowFormat.watts(Double(mW) / 1000)) }
-                if let mW = b.systemPowerIn_mW { DetailRow(label: String(localized: "Power input"), value: WindowFormat.watts(Double(mW) / 1000)) }
-            }
+            powerRows(b)
+        }
+    }
+
+    private func powerRows(_ b: BatterySnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let v = b.voltage_mV { DetailRow(label: String(localized: "Voltage"), value: WindowFormat.volts(millivolts: v)) }
+            if let a = b.amperage_mA { DetailRow(label: String(localized: "Current"), value: WindowFormat.amps(milliamps: a)) }
+            if let w = b.batteryPowerW { DetailRow(label: String(localized: "Battery power"), value: WindowFormat.watts(w)) }
+            if let mW = b.systemLoad_mW { DetailRow(label: String(localized: "Whole Mac"), value: WindowFormat.watts(Double(mW) / 1000)) }
+            if let mW = b.systemPowerIn_mW { DetailRow(label: String(localized: "Power input"), value: WindowFormat.watts(Double(mW) / 1000)) }
         }
     }
 
     @ViewBuilder private func cellsCard(_ b: BatterySnapshot) -> some View {
         if !b.cellVoltages_mV.isEmpty {
             PageCard(title: String(localized: "Cells"), symbol: "minus.plus.batteryblock") {
-                let lo = b.cellVoltages_mV.min() ?? 0, hi = b.cellVoltages_mV.max() ?? 0
                 HStack(spacing: 16) {
-                    ForEach(Array(b.cellVoltages_mV.enumerated()), id: \.offset) { i, mV in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(verbatim: String(localized: "Cell \(i + 1)")).font(.system(size: 10)).foregroundStyle(.tertiary)
-                            Text(verbatim: WindowFormat.volts(millivolts: mV, decimals: 3)).font(ThermikFont.valueSmall)
-                        }
-                    }
+                    cellVoltages(b)
                     Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("Imbalance").font(.system(size: 10)).foregroundStyle(.tertiary)
-                        Text(verbatim: String(localized: "\(hi - lo) mV")).font(ThermikFont.valueSmall)
-                    }
+                    imbalance(b)
                 }
             }
+        }
+    }
+
+    private func cellVoltages(_ b: BatterySnapshot) -> some View {
+        ForEach(Array(b.cellVoltages_mV.enumerated()), id: \.offset) { i, mV in
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: String(localized: "Cell \(i + 1)")).font(.system(size: 10)).foregroundStyle(.tertiary)
+                Text(verbatim: WindowFormat.volts(millivolts: mV, decimals: 3)).font(ThermikFont.valueSmall)
+            }
+        }
+    }
+
+    private func imbalance(_ b: BatterySnapshot) -> some View {
+        let lo = b.cellVoltages_mV.min() ?? 0, hi = b.cellVoltages_mV.max() ?? 0
+        return VStack(alignment: .trailing, spacing: 2) {
+            Text("Imbalance").font(.system(size: 10)).foregroundStyle(.tertiary)
+            Text(verbatim: String(localized: "\(hi - lo) mV")).font(ThermikFont.valueSmall)
         }
     }
 
     private func rawDetails(_ b: BatterySnapshot) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Raw battery values").font(.headline)
-            DetailRow(label: String(localized: "Raw health (AppleRawMaxCapacity)"), value: b.rawHealthPercent.map { WindowFormat.percent($0, decimals: 1) } ?? "—")
-            DetailRow(label: String(localized: "Design capacity"), value: b.designCapacity_mAh.map(WindowFormat.milliampHours) ?? "—")
-            DetailRow(label: String(localized: "Full-charge capacity"), value: b.nominalChargeCapacity_mAh.map(WindowFormat.milliampHours) ?? "—")
-            DetailRow(label: String(localized: "Raw maximum capacity"), value: b.rawMaxCapacity_mAh.map(WindowFormat.milliampHours) ?? "—")
-            DetailRow(label: String(localized: "Current capacity"), value: b.rawCurrentCapacity_mAh.map(WindowFormat.milliampHours) ?? "—")
-            DetailRow(label: "PermanentFailureStatus", value: b.permanentFailureStatus.map { "\($0)" } ?? "—", monospaced: true)
-            DetailRow(label: "NotChargingReason", value: b.notChargingReason.map { String(format: "0x%X", $0) } ?? "—", monospaced: true)
-            if let raw = system.appleBatteryHealth?.conditionRaw {
-                DetailRow(label: String(localized: "macOS condition"), value: raw, monospaced: true)
-            }
-            Text("The raw figure fluctuates by a few percent; Thermik's health value uses the full-charge capacity, which tracks macOS's Maximum capacity.")
-                .font(ThermikFont.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            rawCapacityDetails(b)
+            rawStatusDetails(b)
+            appleConditionRow()
+            rawHealthFootnote()
         }
         .padding(14)
         .frame(width: 380)
+    }
+
+    @ViewBuilder private func rawCapacityDetails(_ b: BatterySnapshot) -> some View {
+        DetailRow(label: String(localized: "Raw health (AppleRawMaxCapacity)"), value: b.rawHealthPercent.map { WindowFormat.percent($0, decimals: 1) } ?? "—")
+        DetailRow(label: String(localized: "Design capacity"), value: b.designCapacity_mAh.map(WindowFormat.milliampHours) ?? "—")
+        DetailRow(label: String(localized: "Full-charge capacity"), value: b.nominalChargeCapacity_mAh.map(WindowFormat.milliampHours) ?? "—")
+        DetailRow(label: String(localized: "Raw maximum capacity"), value: b.rawMaxCapacity_mAh.map(WindowFormat.milliampHours) ?? "—")
+        DetailRow(label: String(localized: "Current capacity"), value: b.rawCurrentCapacity_mAh.map(WindowFormat.milliampHours) ?? "—")
+    }
+
+    @ViewBuilder private func rawStatusDetails(_ b: BatterySnapshot) -> some View {
+        DetailRow(label: "PermanentFailureStatus", value: b.permanentFailureStatus.map { "\($0)" } ?? "—", monospaced: true)
+        DetailRow(label: "NotChargingReason", value: b.notChargingReason.map { String(format: "0x%X", $0) } ?? "—", monospaced: true)
+    }
+
+    @ViewBuilder private func appleConditionRow() -> some View {
+        if let raw = system.appleBatteryHealth?.conditionRaw {
+            DetailRow(label: String(localized: "macOS condition"), value: raw, monospaced: true)
+        }
+    }
+
+    private func rawHealthFootnote() -> some View {
+        Text("The raw figure fluctuates by a few percent; Thermik's health value uses the full-charge capacity, which tracks macOS's Maximum capacity.")
+            .font(ThermikFont.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

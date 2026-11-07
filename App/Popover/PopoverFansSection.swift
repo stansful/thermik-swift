@@ -233,32 +233,42 @@ struct PopoverFanStateLines: View {
 
     @ViewBuilder private func helperAction(_ a: HelperAvailability) -> some View {
         switch a {
-        case .connecting:
-            ProgressView().controlSize(.mini)
-        case .notInstalled:
-            Button("Install Helper…") { run { try await helper.install() } }.statusLineButton().disabled(busy || helper.isBusy)
-        case .requiresApproval:
-            Button("Open Login Items…") { helper.openLoginItems() }.statusLineButton()
-        case .needsUpgrade:
-            Button("Update Helper…") { run { try await helper.upgrade() } }.statusLineButton().disabled(busy || helper.isBusy)
-        case .unreachable:
-            Button("Retry") { run { await helper.refresh() } }.statusLineButton().disabled(busy || helper.isBusy)
+        case .connecting: ProgressView().controlSize(.mini)
+        case .notInstalled: installHelperButton()
+        case .requiresApproval: Button("Open Login Items…") { helper.openLoginItems() }.statusLineButton()
+        case .needsUpgrade: updateHelperButton()
+        case .unreachable: retryHelperButton()
         }
+    }
+
+    private func installHelperButton() -> some View {
+        Button("Install Helper…") { run { try await helper.install() } }.statusLineButton().disabled(busy || helper.isBusy)
+    }
+
+    private func updateHelperButton() -> some View {
+        Button("Update Helper…") { run { try await helper.upgrade() } }.statusLineButton().disabled(busy || helper.isBusy)
+    }
+
+    private func retryHelperButton() -> some View {
+        Button("Retry") { run { await helper.refresh() } }.statusLineButton().disabled(busy || helper.isBusy)
     }
 
     /// Helper operations may show the admin prompt; the popover closes when it loses key, the task keeps running.
     /// A failure lands in `helper.lastError` (shown above, also after the popover is reopened).
     private func run(_ op: @escaping @MainActor () async throws -> Void) {
         busy = true
-        let helper = self.helper
         Task { @MainActor in
-            do {
-                try await op()
-                await helper.refresh()
-            } catch {
-                log.error("helper action failed: \(error.localizedDescription)")
-            }
+            await perform(op)
             busy = false
+        }
+    }
+
+    private func perform(_ op: @escaping @MainActor () async throws -> Void) async {
+        do {
+            try await op()
+            await helper.refresh()
+        } catch {
+            log.error("helper action failed: \(error.localizedDescription)")
         }
     }
 }

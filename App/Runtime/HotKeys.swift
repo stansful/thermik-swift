@@ -92,7 +92,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable, Sendable {
     @ObservationIgnored private var isSuspended = false
     @ObservationIgnored private let log = Logger(subsystem: "app.thermik.Thermik", category: "hotkeys")
     /// 'THMK'
-    private static let signature: OSType = 0x5448_4D4B
+    private nonisolated static let signature: OSType = 0x5448_4D4B
 
     private init() {}
 
@@ -126,19 +126,21 @@ enum HotKeyAction: String, CaseIterable, Identifiable, Sendable {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         // `HotKeys.shared` is never deallocated, so an unretained context pointer is safe for the process lifetime.
         let context = Unmanaged.passUnretained(self).toOpaque()
-        let status = InstallEventHandler(GetApplicationEventTarget(), { _, event, userData -> OSStatus in
-            guard let event, let userData else { return OSStatus(eventNotHandledErr) }
-            var hotKeyID = EventHotKeyID()
-            let err = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
-                                        nil, MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
-            guard err == noErr, hotKeyID.signature == HotKeys.signature else { return OSStatus(eventNotHandledErr) }
-            // Carbon dispatches application-target events from the main event loop.
-            let handled = MainActor.assumeIsolated {
-                Unmanaged<HotKeys>.fromOpaque(userData).takeUnretainedValue().fire(hotKeyID.id)
-            }
-            return handled ? noErr : OSStatus(eventNotHandledErr)
+        let status = InstallEventHandler(GetApplicationEventTarget(), { _, event, userData in
+            MainActor.assumeIsolated { HotKeys.carbonEventHandler(event, userData: userData) }
         }, 1, &spec, context, &eventHandler)
         if status != noErr { log.error("InstallEventHandler failed: \(status, privacy: .public)") }
+    }
+
+    private static func carbonEventHandler(_ event: EventRef?, userData: UnsafeMutableRawPointer?) -> OSStatus {
+        guard let event, let userData else { return OSStatus(eventNotHandledErr) }
+        var hotKeyID = EventHotKeyID()
+        let err = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                                    nil, MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
+        guard err == noErr, hotKeyID.signature == signature else { return OSStatus(eventNotHandledErr) }
+        // Carbon dispatches application-target events from the main event loop.
+        let handled = Unmanaged<HotKeys>.fromOpaque(userData).takeUnretainedValue().fire(hotKeyID.id)
+        return handled ? noErr : OSStatus(eventNotHandledErr)
     }
 
     private func fire(_ id: UInt32) -> Bool {
@@ -149,24 +151,42 @@ enum HotKeyAction: String, CaseIterable, Identifiable, Sendable {
     }
 
     private func registerAll() {
+        unregisterAll()
+        let failed = registerConfiguredHotKeys()
+        if failed != conflicts { conflicts = failed }
+    }
+
+    private func unregisterAll() {
         for ref in refs.values { UnregisterEventHotKey(ref) }
         refs.removeAll()
+    }
+
+    private func registerConfiguredHotKeys() -> Set<HotKeyAction> {
         var failed: Set<HotKeyAction> = []
-        if !isSuspended, let settings {
-            for action in HotKeyAction.allCases {
-                guard let combo = settings.hotKeys[action.rawValue] else { continue }
-                var ref: EventHotKeyRef?
-                // Non-exclusive (kEventHotKeyNoOptions): never steal a combination another app also listens to.
-                let status = RegisterEventHotKey(combo.keyCode, combo.carbonModifiers,
-                                                 EventHotKeyID(signature: Self.signature, id: action.carbonID),
-                                                 GetApplicationEventTarget(), OptionBits(kEventHotKeyNoOptions), &ref)
-                if status == noErr, let ref { refs[action] = ref } else {
-                    failed.insert(action)
-                    log.error("RegisterEventHotKey \(action.rawValue, privacy: .public) failed: \(status, privacy: .public)")
-                }
-            }
+        guard !isSuspended, let settings else { return failed }
+        for action in HotKeyAction.allCases {
+            register(action, settings: settings, failed: &failed)
         }
-        if failed != conflicts { conflicts = failed }
+        return failed
+    }
+
+    private func register(_ action: HotKeyAction, settings: SettingsStore, failed: inout Set<HotKeyAction>) {
+        guard let combo = settings.hotKeys[action.rawValue] else { return }
+        var ref: EventHotKeyRef?
+        // Non-exclusive (kEventHotKeyNoOptions): never steal a combination another app also listens to.
+        let status = registerCarbonHotKey(action, combo: combo, ref: &ref)
+        if status == noErr, let ref {
+            refs[action] = ref
+        } else {
+            failed.insert(action)
+            log.error("RegisterEventHotKey \(action.rawValue, privacy: .public) failed: \(status, privacy: .public)")
+        }
+    }
+
+    private func registerCarbonHotKey(_ action: HotKeyAction, combo: HotKeyCombo, ref: inout EventHotKeyRef?) -> OSStatus {
+        RegisterEventHotKey(combo.keyCode, combo.carbonModifiers,
+                            EventHotKeyID(signature: Self.signature, id: action.carbonID),
+                            GetApplicationEventTarget(), OptionBits(kEventHotKeyNoOptions), &ref)
     }
 }
 
@@ -240,14 +260,21 @@ struct HotKeyRecorder: View {
         guard isRecording else { return false }
         let plain = event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty
         switch Int(event.keyCode) {
-        case kVK_Escape where plain:
-            stop()
-        case kVK_Delete where plain, kVK_ForwardDelete where plain:
-            onRecord?(nil); stop()
-        default:
-            guard let combo = HotKeyCombo(event: event) else { NSSound.beep(); return true }
-            onRecord?(combo); stop()
+        case kVK_Escape where plain: stop()
+        case kVK_Delete where plain, kVK_ForwardDelete where plain: clear()
+        default: record(event)
         }
         return true
+    }
+
+    private func clear() {
+        onRecord?(nil)
+        stop()
+    }
+
+    private func record(_ event: NSEvent) {
+        guard let combo = HotKeyCombo(event: event) else { NSSound.beep(); return }
+        onRecord?(combo)
+        stop()
     }
 }

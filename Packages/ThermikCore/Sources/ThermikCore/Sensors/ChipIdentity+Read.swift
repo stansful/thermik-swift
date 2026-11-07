@@ -13,15 +13,23 @@ extension ChipIdentity {
         let expert = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
         defer { if expert != 0 { IOObjectRelease(expert) } }
         let isAS = HostInfo.isAppleSilicon
-        let platform = registryString(expert, "platform-name")
-        // An Apple-Silicon Mac without platform-name would be a new layout, not Intel: heuristics, never intel.json.
-        let platformName = platform.map { $0.lowercased() } ?? (isAS ? "unknown" : "intel")
+        let platformName = readPlatformName(expert, isAppleSilicon: isAS)
         let target = registryString(expert, "target-type")
         let brand = sysctlString("machdep.cpu.brand_string") ?? (isAS ? "Apple Silicon" : "Intel")
-        var smcPlatform: String?
-        if let smc, case .string(let s)? = try? smc.value("RPlt"), !s.isEmpty { smcPlatform = s }
+        let smcPlatformValue = smcPlatform(from: smc)
         return ChipIdentity(platformName: platformName, targetType: target, modelIdentifier: HostInfo.modelIdentifier,
-                            chipName: brand, isAppleSilicon: isAS, smcPlatform: smcPlatform)
+                            chipName: brand, isAppleSilicon: isAS, smcPlatform: smcPlatformValue)
+    }
+
+    private static func readPlatformName(_ expert: io_registry_entry_t, isAppleSilicon: Bool) -> String {
+        let platform = registryString(expert, "platform-name")
+        // An Apple-Silicon Mac without platform-name would be a new layout, not Intel: heuristics, never intel.json.
+        return platform.map { $0.lowercased() } ?? (isAppleSilicon ? "unknown" : "intel")
+    }
+
+    private static func smcPlatform(from smc: SMCReading?) -> String? {
+        guard let smc, case .string(let s)? = try? smc.value("RPlt"), !s.isEmpty else { return nil }
+        return s
     }
 
     /// First NUL-terminated string of a Data (or String) registry property.

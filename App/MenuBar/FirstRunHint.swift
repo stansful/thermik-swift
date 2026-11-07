@@ -24,6 +24,14 @@ private let log = Logger(subsystem: "app.thermik.Thermik", category: "menubar")
 
     func show(relativeTo button: NSStatusBarButton) {
         close()
+        let p = makePopover()
+        p.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover = p
+        scheduleDismiss()
+        log.info("first-run hint shown")
+    }
+
+    private func makePopover() -> NSPopover {
         let p = NSPopover()
         p.behavior = .transient
         p.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -31,12 +39,13 @@ private let log = Logger(subsystem: "app.thermik.Thermik", category: "menubar")
         let host = NSHostingController(rootView: FirstRunHintView { [weak self] in self?.close() })
         host.sizingOptions = [.preferredContentSize]
         p.contentViewController = host
-        p.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        popover = p
+        return p
+    }
+
+    private func scheduleDismiss() {
         let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.close() } }
         dismissWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: work)
-        log.info("first-run hint shown")
     }
 
     func close() {

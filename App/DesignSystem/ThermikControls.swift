@@ -16,15 +16,20 @@ struct ThermikSwitchStyle: ToggleStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         if #available(macOS 26.0, *) {
-            LabeledContent {
-                ThermikSwitch(isOn: configuration.$isOn, size: inForm ? .mini : nil, label: configuration.label)
-            } label: {
-                configuration.label.accessibilityHidden(true)       // the switch carries it
-            }
+            modernBody(configuration)
         } else if inForm {
             Toggle(configuration)                                   // the form's own switch
         } else {
             Toggle(configuration).toggleStyle(.switch)
+        }
+    }
+
+    @available(macOS 26.0, *)
+    private func modernBody(_ configuration: Configuration) -> some View {
+        LabeledContent {
+            ThermikSwitch(isOn: configuration.$isOn, size: inForm ? .mini : nil, label: configuration.label)
+        } label: {
+            configuration.label.accessibilityHidden(true)           // the switch carries it
         }
     }
 }

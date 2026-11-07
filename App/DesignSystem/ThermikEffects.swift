@@ -134,17 +134,25 @@ private struct EffectLayer: NSViewRepresentable {
         /// The display link runs only while animating in a window; it retains the view until invalidated.
         private func syncLink() {
             if let fps, window != nil {
-                guard link == nil else { return }
-                let link = displayLink(target: self, selector: #selector(step))
-                link.preferredFrameRateRange = Self.rate(fps)
-                link.add(to: .main, forMode: .common)
-                self.link = link
-                idle = false
-                start = CACurrentMediaTime()
+                startLink(fps)
             } else {
-                link?.invalidate(); link = nil
-                time = 0
+                stopLink()
             }
+        }
+
+        private func startLink(_ fps: Double) {
+            guard link == nil else { return }
+            let link = displayLink(target: self, selector: #selector(step))
+            link.preferredFrameRateRange = Self.rate(fps)
+            link.add(to: .main, forMode: .common)
+            self.link = link
+            idle = false
+            start = CACurrentMediaTime()
+        }
+
+        private func stopLink() {
+            link?.invalidate(); link = nil
+            time = 0
         }
 
         private static func rate(_ fps: Double) -> CAFrameRateRange {
@@ -155,15 +163,18 @@ private struct EffectLayer: NSViewRepresentable {
             // Scrolled out of sight, the link keeps firing (views do not clip to their bounds, so test the overlap): it
             // slows to 4 fps and the animation clock stops, so the view resumes from the frame it still shows.
             let visible = visibleRect.intersects(bounds)
-            if visible == idle, let fps {
-                idle = !visible
-                link.preferredFrameRateRange = Self.rate(idle ? min(fps, 4) : fps)
-                if idle { idleSince = link.targetTimestamp } else { start += link.targetTimestamp - idleSince }
-            }
+            updateVisibility(link, visible: visible)
             guard visible else { return }
             // Seconds since the animation started, kept small so Float precision holds.
             time = Float((link.targetTimestamp - start).truncatingRemainder(dividingBy: 3600))
             redraw()
+        }
+
+        private func updateVisibility(_ link: CADisplayLink, visible: Bool) {
+            guard visible == idle, let fps else { return }
+            idle = !visible
+            link.preferredFrameRateRange = Self.rate(idle ? min(fps, 4) : fps)
+            if idle { idleSince = link.targetTimestamp } else { start += link.targetTimestamp - idleSince }
         }
 
         private func redraw() {
@@ -174,14 +185,18 @@ private struct EffectLayer: NSViewRepresentable {
             let space = tinted ? window?.colorSpace?.cgColorSpace : nil
             shownKey = time == 0 ? stillInputs : nil
             CATransaction.begin(); CATransaction.setDisableActions(true)
-            if image !== shown || space != shownSpace || tinted != shownTinted {
-                shown = image; shownSpace = space; shownTinted = tinted
-                let contents = space.flatMap { image?.copy(colorSpace: $0) } ?? image
-                mask.contents = tinted ? contents : nil
-                effect.contents = tinted ? nil : contents
-            }
+            updateContents(image, space: space)
             style()
             CATransaction.commit()
+        }
+
+        private func updateContents(_ image: CGImage?, space: CGColorSpace?) {
+            let tinted = tint != nil
+            guard image !== shown || space != shownSpace || tinted != shownTinted else { return }
+            shown = image; shownSpace = space; shownTinted = tinted
+            let contents = space.flatMap { image?.copy(colorSpace: $0) } ?? image
+            mask.contents = tinted ? contents : nil
+            effect.contents = tinted ? nil : contents
         }
 
         private func restyle() {
@@ -322,18 +337,32 @@ struct ThermalFieldView: View {
     /// view in between, e.g. while the pointer moves over the markers.
     private func field(size: CGSize) -> CGImage? {
         let w = Float(size.width.rounded()), h = Float(size.height.rounded()), scale = Float(environment.displayScale)
-        let points = sensors.map { s in
+        let points = fieldPoints(), stops = fieldStops()
+        let key = fieldKey(points: points, stops: stops, w: w, h: h, scale: scale)
+        updateField(points: points, stops: stops, key: key, w: w, h: h, scale: scale)
+        return memo.image
+    }
+
+    private func fieldPoints() -> [SIMD3<Float>] {
+        sensors.map { s in
             SIMD3(Float(s.position.x), Float(s.position.y), (Float(s.scale.normalized(s.celsius)) * 200).rounded() / 200)
         }
-        let stops = environment.thermikRamp.fieldStops.map { SIMD3(Float($0.r), Float($0.g), Float($0.b)) }
-        let key: [Float] = [Float(power), contours ? 1 : 0, w, h, scale]
+    }
+
+    private func fieldStops() -> [SIMD3<Float>] {
+        environment.thermikRamp.fieldStops.map { SIMD3(Float($0.r), Float($0.g), Float($0.b)) }
+    }
+
+    private func fieldKey(points: [SIMD3<Float>], stops: [SIMD3<Float>], w: Float, h: Float, scale: Float) -> [Float] {
+        [Float(power), contours ? 1 : 0, w, h, scale]
             + points.flatMap { [$0.x, $0.y, $0.z] } + stops.flatMap { [$0.x, $0.y, $0.z] }
-        if key != memo.key {
-            memo.key = key
-            memo.image = EffectFrames.thermalField(sensors: points, ramp: stops, power: Float(power), contours: contours,
-                                                   width: w, height: h, scale: scale)
-        }
-        return memo.image
+    }
+
+    private func updateField(points: [SIMD3<Float>], stops: [SIMD3<Float>], key: [Float], w: Float, h: Float, scale: Float) {
+        guard key != memo.key else { return }
+        memo.key = key
+        memo.image = EffectFrames.thermalField(sensors: points, ramp: stops, power: Float(power), contours: contours,
+                                               width: w, height: h, scale: scale)
     }
 }
 

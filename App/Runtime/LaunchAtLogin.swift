@@ -39,11 +39,19 @@ import ServiceManagement
         self.settings = settings
         refresh()
         reconcile()
+        observeRefreshNotifications()
+        observeSettings(settings)
+    }
+
+    private func observeRefreshNotifications() {
         for name in [NSApplication.didBecomeActiveNotification, NSWindow.didBecomeKeyNotification] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refreshInBackground() }
             })
         }
+    }
+
+    private func observeSettings(_ settings: SettingsStore) {
         observeContinuously({ [weak settings] in
             _ = settings?.launchAtLogin; _ = settings?.onboardingCompleted
         }) { [weak self] in
@@ -79,11 +87,15 @@ import ServiceManagement
         let generation = statusGeneration, intent = settings?.launchAtLogin
         Task { @MainActor [weak self] in
             let s = await Task.detached { SMAppService.mainApp.status }.value
-            // setEnabled ran, or the user flipped the toggle (apply() is about to register): this read is stale.
-            guard let self, generation == self.statusGeneration, intent == self.settings?.launchAtLogin else { return }
-            if s != self.status { self.status = s }
-            self.reconcile()
+            self?.applyBackgroundStatus(s, generation: generation, intent: intent)
         }
+    }
+
+    private func applyBackgroundStatus(_ s: SMAppService.Status, generation: Int, intent: Bool?) {
+        // setEnabled ran, or the user flipped the toggle (apply() is about to register): this read is stale.
+        guard generation == statusGeneration, intent == settings?.launchAtLogin else { return }
+        if s != status { status = s }
+        reconcile()
     }
 
     /// Registers or unregisters now. Returns false (and sets `lastError`) when ServiceManagement refuses.
@@ -91,13 +103,30 @@ import ServiceManagement
         refresh()
         let registered = status == .enabled || status == .requiresApproval
         guard on != registered else { return true }
+        return on ? register() : unregister()
+    }
+
+    private func register() -> Bool {
         do {
-            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+            try SMAppService.mainApp.register()
             lastError = nil
-            log.info("launch at login \(on ? "registered" : "unregistered", privacy: .public)")
+            log.info("launch at login registered")
         } catch {
             lastError = error.localizedDescription
-            log.error("launch at login \(on ? "register" : "unregister", privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            log.error("launch at login register failed: \(error.localizedDescription, privacy: .public)")
+        }
+        refresh()
+        return lastError == nil
+    }
+
+    private func unregister() -> Bool {
+        do {
+            try SMAppService.mainApp.unregister()
+            lastError = nil
+            log.info("launch at login unregistered")
+        } catch {
+            lastError = error.localizedDescription
+            log.error("launch at login unregister failed: \(error.localizedDescription, privacy: .public)")
         }
         refresh()
         return lastError == nil

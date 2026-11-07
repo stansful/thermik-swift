@@ -45,18 +45,31 @@ public struct RecoveryMarkerStore: Sendable {
         let data = try Self.encoder.encode(marker)
         let temp = "\(path).\(getpid()).tmp"
         unlink(temp)
+        let fd = try Self.openTemporaryFile(temp)
+        try Self.writeAndSync(data, fd: fd, temp: temp)
+        try Self.replace(temp, at: path)
+    }
+
+    private static func openTemporaryFile(_ temp: String) throws -> Int32 {
         let fd = open(temp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
-        guard fd >= 0 else { throw Self.posixError("open \(temp)") }
+        guard fd >= 0 else { throw posixError("open \(temp)") }
+        return fd
+    }
+
+    private static func writeAndSync(_ data: Data, fd: Int32, temp: String) throws {
         var ok = data.withUnsafeBytes { buf in Darwin.write(fd, buf.baseAddress, buf.count) == buf.count }
         ok = ok && fchmod(fd, 0o644) == 0 && fsync(fd) == 0
         let closed = close(fd) == 0
         guard ok, closed else {
-            let error = Self.posixError("write \(temp)")
+            let error = posixError("write \(temp)")
             unlink(temp)
             throw error
         }
+    }
+
+    private static func replace(_ temp: String, at path: String) throws {
         guard rename(temp, path) == 0 else {
-            let error = Self.posixError("rename \(temp)")
+            let error = posixError("rename \(temp)")
             unlink(temp)
             throw error
         }

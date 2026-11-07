@@ -38,19 +38,31 @@ import ThermikCore
     }
 
     func consume(_ tick: Tick) {
-        if let inv = sensors.inventory {
-            // Re-load after a re-discovery (wake with a reopened SMC) so groups and visibility stay current.
-            let signature = "\(inv.sensors.count)|\(inv.smcKeyCount)|\(inv.catalogStatus)|\(inv.fanProfile.fans.count)"
-            if signature != inventorySignature { engine.load(inventory: inv); inventorySignature = signature }
-        }
+        loadInventoryIfNeeded()
         // The cadence scales how long a sensor may go unread before its stuck / range timers restart (30 s, 60 s ticks).
         engine.nominalInterval = sensors.nominalInterval
         engine.observe(frame: tick.sensors, commands: fans.lastCommands, profile: fans.profile)
+        updateStalledFans()
+        if shouldEvaluate(at: tick.date) { evaluate(now: tick.date) }
+    }
+
+    private func loadInventoryIfNeeded() {
+        guard let inventory = sensors.inventory else { return }
+        // Re-load after a re-discovery (wake with a reopened SMC) so groups and visibility stay current.
+        let signature = "\(inventory.sensors.count)|\(inventory.smcKeyCount)|\(inventory.catalogStatus)|\(inventory.fanProfile.fans.count)"
+        guard signature != inventorySignature else { return }
+        engine.load(inventory: inventory)
+        inventorySignature = signature
+    }
+
+    private func updateStalledFans() {
         let stalled = engine.stalledFans
         if stalled != stalledFans { stalledFans = stalled }
-        if lastEvaluation.map({ tick.date.timeIntervalSince($0) >= Self.evaluationInterval || tick.date < $0 }) ?? true {
-            evaluate(now: tick.date)
-        }
+    }
+
+    private func shouldEvaluate(at date: Date) -> Bool {
+        guard let lastEvaluation else { return true }
+        return date.timeIntervalSince(lastEvaluation) >= Self.evaluationInterval || date < lastEvaluation
     }
 
     /// Re-evaluate everything now (cheap; slow data comes from SystemStore).
@@ -86,18 +98,24 @@ import ThermikCore
     private func evaluate(now: Date) {
         lastEvaluation = now
         engine.foreignControllerName = foreignControllerName(now: now)
+        var fresh = engine.items(context: diagnosticsContext(), now: now)
+        preserveUpdateDates(in: &fresh)
+        if fresh != items { items = fresh }
+    }
+
+    private func diagnosticsContext() -> DiagnosticsContext {
         let slow = SlowSystemData(appleBatteryHealth: system.appleBatteryHealth, nvme: system.nvme.isEmpty ? nil : system.nvme,
                                   boot: system.boot, shutdownVerdict: system.shutdownVerdict)
-        let context = DiagnosticsContext(slow: slow, battery: system.battery, helper: helperHealth(), inventory: sensors.inventory,
-                                         pressure: system.pressure, pressureEventsToday: system.pressureEventsToday)
-        var fresh = engine.items(context: context, now: now)
-        for i in fresh.indices {
-            if let old = items.first(where: { $0.id == fresh[i].id }), old.status == fresh[i].status,
-               old.finding == fresh[i].finding, old.details == fresh[i].details {
-                fresh[i].updated = old.updated
-            }
+        return DiagnosticsContext(slow: slow, battery: system.battery, helper: helperHealth(), inventory: sensors.inventory,
+                                  pressure: system.pressure, pressureEventsToday: system.pressureEventsToday)
+    }
+
+    private func preserveUpdateDates(in fresh: inout [DiagnosticItem]) {
+        for index in fresh.indices {
+            guard let old = items.first(where: { $0.id == fresh[index].id }), old.status == fresh[index].status,
+                  old.finding == fresh[index].finding, old.details == fresh[index].details else { continue }
+            fresh[index].updated = old.updated
         }
-        if fresh != items { items = fresh }
     }
 
     /// Thermik's helper as the Diagnostics page should show it.

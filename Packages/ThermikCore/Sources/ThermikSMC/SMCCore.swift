@@ -316,18 +316,27 @@ public final class SMCConnection: SMCReading, @unchecked Sendable {
         if conn == 0 { try reopenIfDueLocked(input.key) }
         var (kr, outBlock) = sendLocked(input)
         if Self.isLinkError(kr) {
-            closeLocked()
-            try reopenIfDueLocked(input.key)
-            (kr, outBlock) = sendLocked(input)
-            if Self.isLinkError(kr) {                 // a fresh client fails the same way: down until the backoff passes
-                closeLocked()
-                armBackoffLocked(.ioKit(kr, key: input.key))
-                failedCalls += 1
-            }
+            (kr, outBlock) = try retryAfterLinkFailure(input)
         }
         if kr == kIOReturnNotPrivileged { throw SMCError.notPrivileged(key: input.key) }
         guard kr == kIOReturnSuccess else { throw SMCError.ioKit(kr, key: input.key) }
         return outBlock
+    }
+
+    private func retryAfterLinkFailure(_ input: SMCParamBlock) throws -> (kern_return_t, SMCParamBlock) {
+        closeLocked()
+        try reopenIfDueLocked(input.key)
+        let (kr, outBlock) = sendLocked(input)
+        if Self.isLinkError(kr) { // a fresh client fails the same way: down until the backoff passes
+            handleRepeatedLinkFailure(kr, key: input.key)
+        }
+        return (kr, outBlock)
+    }
+
+    private func handleRepeatedLinkFailure(_ kr: kern_return_t, key: FourCC) {
+        closeLocked()
+        armBackoffLocked(.ioKit(kr, key: key))
+        failedCalls += 1
     }
 
     private func sendLocked(_ input: SMCParamBlock) -> (kern_return_t, SMCParamBlock) {
@@ -345,16 +354,20 @@ public final class SMCConnection: SMCReading, @unchecked Sendable {
     private func keyInfoLocked(_ key: FourCC) throws -> SMCKeyInfo {
         if let cached = infoCache[key] { return cached }
         if missing.contains(key) { throw SMCError.keyNotFound(key) }
-        var b = SMCParamBlock()
-        b.key = key
-        b.command = SMCCommand.keyInfo.rawValue
-        let o = try callLocked(b)
-        if o.result == SMCResultCode.notFound.rawValue { missing.insert(key); throw SMCError.keyNotFound(key) }
-        guard o.result == 0 else { throw SMCError.firmware(o.result, key: key) }
-        let info = SMCKeyInfo(size: o.dataSize, type: SMCDataType(FourCC(rawValue: o.dataType)),
-                              attributes: SMCKeyAttributes(rawValue: o.attributes))
+        let output = try callLocked(keyInfoBlock(key))
+        if output.result == SMCResultCode.notFound.rawValue { missing.insert(key); throw SMCError.keyNotFound(key) }
+        guard output.result == 0 else { throw SMCError.firmware(output.result, key: key) }
+        let info = SMCKeyInfo(size: output.dataSize, type: SMCDataType(FourCC(rawValue: output.dataType)),
+                              attributes: SMCKeyAttributes(rawValue: output.attributes))
         infoCache[key] = info
         return info
+    }
+
+    private func keyInfoBlock(_ key: FourCC) -> SMCParamBlock {
+        var block = SMCParamBlock()
+        block.key = key
+        block.command = SMCCommand.keyInfo.rawValue
+        return block
     }
 
     public func keyInfo(_ key: FourCC) throws -> SMCKeyInfo {
@@ -368,14 +381,18 @@ public final class SMCConnection: SMCReading, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         let info = try keyInfoLocked(key)
         guard info.size <= 32 else { throw SMCError.tooLarge(key: key, size: info.size) }
-        var b = SMCParamBlock()
-        b.key = key
-        b.dataSize = info.size
-        b.command = SMCCommand.readKey.rawValue
-        let o = try callLocked(b)
-        if o.result == SMCResultCode.notFound.rawValue { infoCache[key] = nil; throw SMCError.keyNotFound(key) }
-        guard o.result == 0 else { throw SMCError.firmware(o.result, key: key) }
-        return (info, o.payload(count: Int(info.size)))
+        let output = try callLocked(readBlock(key, size: info.size))
+        if output.result == SMCResultCode.notFound.rawValue { infoCache[key] = nil; throw SMCError.keyNotFound(key) }
+        guard output.result == 0 else { throw SMCError.firmware(output.result, key: key) }
+        return (info, output.payload(count: Int(info.size)))
+    }
+
+    private func readBlock(_ key: FourCC, size: UInt32) -> SMCParamBlock {
+        var block = SMCParamBlock()
+        block.key = key
+        block.dataSize = size
+        block.command = SMCCommand.readKey.rawValue
+        return block
     }
 
     /// `#KEY` is ui32 with attribute 0x80 → big-endian (3512 on M4 Max).

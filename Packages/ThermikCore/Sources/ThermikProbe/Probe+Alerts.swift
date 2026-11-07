@@ -12,12 +12,7 @@ extension Probe {
             return
         }
         var replay = AlertReplay()
-        replay.ramp()
-        replay.spike()
-        replay.oscillation()
-        replay.cooldown()
-        replay.oneShots()
-        replay.nonTemperature()
+        replay.runAll()
         print("\n\(replay.passed) passed, \(replay.failed) failed")
         if replay.failed > 0 { exit(1) }
     }
@@ -50,6 +45,15 @@ private struct AlertReplay {
         var modeChange: FanModeChange? = nil
     }
 
+    mutating func runAll() {
+        ramp()
+        spike()
+        oscillation()
+        cooldown()
+        oneShots()
+        nonTemperature()
+    }
+
     /// Runs `seconds` 1 Hz evaluations of `rules` and prints every event; returns them.
     mutating func run(_ title: String, seconds: Int, rules: [AlertRule] = AlertReplay.replayRules,
                       _ sample: (Int) -> Sample) -> [AlertEvent] {
@@ -57,23 +61,32 @@ private struct AlertReplay {
         var engine = AlertEngine()
         var all: [AlertEvent] = []
         for t in 0..<seconds {
-            let s = sample(t)
-            var values: [SensorID: Double] = [Self.tg0f: 55]
-            if let hot = s.hot { values[Self.tp01] = hot }
-            let inputs = AlertInputs(date: Self.t0.addingTimeInterval(Double(t)), sensorValues: values,
-                                     sensorGroups: [Self.tp01: .cpu, Self.tg0f: .gpu],
-                                     aggregates: AggregateValues(values: [.cpuHottest: s.hot ?? 0], sources: [.cpuHottest: Self.tp01]),
-                                     stalledFans: s.stalled, fanModeChange: s.modeChange, pressure: s.pressure,
-                                     abnormalShutdown: s.shutdown, batteryNeedsService: s.battery)
-            for e in engine.evaluate(rules: rules, inputs: inputs) {
-                all.append(e)
-                let value = e.value.map { String(format: "  value=%.1f °C", $0) } ?? ""
-                let sensor = e.sensorID.map { "  sensor=\($0)" } ?? ""
-                print("  \(iso.string(from: e.date))  t=+\(offset(e))s  \(e.kind == .raised ? "RAISED " : "CLEARED")  \(e.subject)\(value)\(sensor)")
-            }
+            all.append(contentsOf: evaluate(&engine, rules: rules, sample: sample(t), t: t))
         }
         if all.isEmpty { print("  (no events)") }
         return all
+    }
+
+    private mutating func evaluate(_ engine: inout AlertEngine, rules: [AlertRule], sample: Sample, t: Int) -> [AlertEvent] {
+        let events = engine.evaluate(rules: rules, inputs: Self.inputs(sample, t: t))
+        for event in events { printEvent(event) }
+        return events
+    }
+
+    private static func inputs(_ sample: Sample, t: Int) -> AlertInputs {
+        var values: [SensorID: Double] = [tg0f: 55]
+        if let hot = sample.hot { values[tp01] = hot }
+        return AlertInputs(date: t0.addingTimeInterval(Double(t)), sensorValues: values,
+                           sensorGroups: [tp01: .cpu, tg0f: .gpu],
+                           aggregates: AggregateValues(values: [.cpuHottest: sample.hot ?? 0], sources: [.cpuHottest: tp01]),
+                           stalledFans: sample.stalled, fanModeChange: sample.modeChange, pressure: sample.pressure,
+                           abnormalShutdown: sample.shutdown, batteryNeedsService: sample.battery)
+    }
+
+    private func printEvent(_ event: AlertEvent) {
+        let value = event.value.map { String(format: "  value=%.1f °C", $0) } ?? ""
+        let sensor = event.sensorID.map { "  sensor=\($0)" } ?? ""
+        print("  \(iso.string(from: event.date))  t=+\(offset(event))s  \(event.kind == .raised ? "RAISED " : "CLEARED")  \(event.subject)\(value)\(sensor)")
     }
 
     func offset(_ e: AlertEvent) -> Int { Int(e.date.timeIntervalSince(Self.t0).rounded()) }
@@ -91,20 +104,25 @@ private struct AlertReplay {
 
     /// 60 °C, ramp +1 °C/s to 105 °C (first sample above 100 °C at t = 61 s), hold, ramp down, 60 °C.
     mutating func ramp() {
-        func v(_ t: Int) -> Double {
-            switch t {
-            case ..<30: return 60
-            case 30..<65: return 70 + Double(t - 30)
-            case 65..<95: return 105
-            case 95..<130: return 105 - Double(t - 95)
-            default: return 60
-            }
-        }
         let all = run("ramp to 105 °C and back (smc:Tp01); rule: any sensor > 100 °C for 10 s, hysteresis 5 °C", seconds: 200) {
-            Sample(hot: v($0))
+            Sample(hot: Self.rampValue($0))
         }
-        let firstAbove = (0..<200).first { v($0) > 100 } ?? -1
-        let firstBelow = (firstAbove..<200).first { v($0) < 95 } ?? -1
+        checkRamp(all)
+    }
+
+    private static func rampValue(_ t: Int) -> Double {
+        switch t {
+        case ..<30: return 60
+        case 30..<65: return 70 + Double(t - 30)
+        case 65..<95: return 105
+        case 95..<130: return 105 - Double(t - 95)
+        default: return 60
+        }
+    }
+
+    private mutating func checkRamp(_ all: [AlertEvent]) {
+        let firstAbove = (0..<200).first { Self.rampValue($0) > 100 } ?? -1
+        let firstBelow = (firstAbove..<200).first { Self.rampValue($0) < 95 } ?? -1
         let raised = events(all, Self.anyRule, .raised)
         let cleared = events(all, Self.anyRule, .cleared)
         check(raised.count == 1 && raised.first.map(offset) == firstAbove + 10,
@@ -134,8 +152,10 @@ private struct AlertReplay {
         let all = run("cooldown: 20 s at 103 °C / 20 s at 90 °C for 15 min", seconds: 900) {
             Sample(hot: $0 % 40 < 20 ? 103 : 90)
         }
-        let raised = events(all, Self.anyRule, .raised).map(offset)
-        let cleared = events(all, Self.anyRule, .cleared).map(offset)
+        checkCooldown(raised: events(all, Self.anyRule, .raised).map(offset), cleared: events(all, Self.anyRule, .cleared).map(offset))
+    }
+
+    private mutating func checkCooldown(raised: [Int], cleared: [Int]) {
         check(raised.first == 10, "first raise after 10 s above (t=+\(raised.first ?? -1)s)")
         check(cleared.first == 20, "clears at the first sample below 95 °C (t=+\(cleared.first ?? -1)s)")
         let second = raised.dropFirst().first ?? -1
@@ -146,6 +166,11 @@ private struct AlertReplay {
 
     /// abnormalShutdown is one-shot even when the store keeps passing the verdict; fanModeChanged fires per change.
     mutating func oneShots() {
+        abnormalShutdown()
+        fanModeChanges()
+    }
+
+    private mutating func abnormalShutdown() {
         let shutdownRule = AlertRule.defaultRules[2].id
         let all = run("one-shot abnormalShutdown (verdict passed on every evaluation)", seconds: 30) { _ in
             Sample(hot: 60, shutdown: .kernelPanic)
@@ -153,7 +178,9 @@ private struct AlertReplay {
         let raised = events(all, shutdownRule, .raised)
         check(raised.count == 1 && raised.first.map(offset) == 0, "abnormalShutdown raises once, on the first evaluation")
         check(events(all, shutdownRule, .cleared).isEmpty, "one-shot subjects never emit .cleared")
+    }
 
+    private mutating func fanModeChanges() {
         var rules = Self.replayRules
         rules[4].enabled = true                                         // fanModeChanged (off by default)
         let change = FanModeChange(from: .system, to: .max, reason: .user)
@@ -166,11 +193,15 @@ private struct AlertReplay {
 
     /// Thermal pressure heavy 10 s rule, battery service, stalled fan.
     mutating func nonTemperature() {
-        let pressureRule = AlertRule.defaultRules[6].id, batteryRule = AlertRule.defaultRules[3].id
-        let stallRule = AlertRule.defaultRules[5].id
         let all = run("thermal pressure heavy t=10…34 s; battery service t=0…19 s; fan 1 stalled t=40…99 s", seconds: 120) { t in
             Sample(hot: 60, pressure: (10..<35).contains(t) ? .heavy : .nominal, battery: t < 20, stalled: (40..<100).contains(t) ? [1] : [])
         }
+        checkNonTemperature(all)
+    }
+
+    private mutating func checkNonTemperature(_ all: [AlertEvent]) {
+        let pressureRule = AlertRule.defaultRules[6].id, batteryRule = AlertRule.defaultRules[3].id
+        let stallRule = AlertRule.defaultRules[5].id
         check(events(all, pressureRule, .raised).map(offset) == [20], "thermalPressure(heavy) raises after 10 s at ≥ heavy")
         check(events(all, pressureRule, .cleared).map(offset) == [35], "…and clears when the pressure drops")
         check(events(all, batteryRule, .raised).map(offset) == [0] && events(all, batteryRule, .cleared).map(offset) == [20],

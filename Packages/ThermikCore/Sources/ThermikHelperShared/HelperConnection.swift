@@ -65,24 +65,35 @@ public final class HelperConnection: FanHelperClient, @unchecked Sendable {   //
         lock.lock(); defer { lock.unlock() }
         if let connection { return connection }
         let c = factory()
-        let id = ObjectIdentifier(c)
+        configure(c)
+        c.activate()
+        connection = c
+        return c
+    }
+
+    private func configure(_ c: NSXPCConnection) {
         c.remoteObjectInterface = HelperWire.makeInterface()
         if let helperRequirement { c.setCodeSigningRequirement(helperRequirement) }   // macOS 13+; at most once
+        installHandlers(on: c)
+    }
+
+    private func installHandlers(on c: NSXPCConnection) {
+        let id = ObjectIdentifier(c)
         c.interruptionHandler = { [weak self] in
             clientLog.notice("helper connection interrupted")
             self?.onDisconnect?(false)
         }
         c.invalidationHandler = { [weak self] in
             clientLog.notice("helper connection invalidated")
-            guard let self else { return }
-            self.lock.withLock {
-                if let cur = self.connection, ObjectIdentifier(cur) == id { self.connection = nil }
-            }
-            self.onDisconnect?(true)
+            self?.connectionInvalidated(id)
         }
-        c.activate()
-        connection = c
-        return c
+    }
+
+    private func connectionInvalidated(_ id: ObjectIdentifier) {
+        lock.withLock {
+            if let current = connection, ObjectIdentifier(current) == id { connection = nil }
+        }
+        onDisconnect?(true)
     }
 
     private static func timeoutError() -> NSError {
@@ -93,26 +104,41 @@ public final class HelperConnection: FanHelperClient, @unchecked Sendable {   //
     /// Bridges one NSXPC call to async/await. Exactly one resume, whichever of reply / error handler / timeout wins.
     private func call<T: Sendable>(_ body: (any ThermikHelperXPC, @escaping @Sendable (Result<T, any Error>) -> Void) -> Void) async throws -> T {
         let connection = current()
-        let seconds = timeoutSeconds
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, any Error>) in
             let once = OnceFlag()
             // Cancelled as soon as the call completes, so nothing waits out the full timeout.
-            let timer = Task {
-                try await Task.sleep(for: .seconds(seconds))
-                if once.claim() { cont.resume(throwing: Self.timeoutError()) }
-            }
+            let timer = Self.makeTimeout(seconds: timeoutSeconds, once: once, cont: cont)
             let finish: @Sendable (Result<T, any Error>) -> Void = { result in
-                guard once.claim() else { return }
-                timer.cancel()
-                cont.resume(with: result)
+                Self.completeOnce(result, once: once, timer: timer, cont: cont)
             }
-            let proxy = connection.remoteObjectProxyWithErrorHandler { error in finish(.failure(error)) }
-            guard let helper = proxy as? any ThermikHelperXPC else {
-                finish(.failure(NSError.thermikHelper(.internalError, "bad XPC proxy")))
-                return
-            }
-            body(helper, finish)
+            Self.invokeProxy(body, on: connection, finish: finish)
         }
+    }
+
+    private static func makeTimeout<T>(seconds: Double, once: OnceFlag,
+                                       cont: CheckedContinuation<T, any Error>) -> Task<Void, any Error> {
+        Task {
+            try await Task.sleep(for: .seconds(seconds))
+            if once.claim() { cont.resume(throwing: timeoutError()) }
+        }
+    }
+
+    private static func completeOnce<T>(_ result: sending Result<T, any Error>, once: OnceFlag, timer: Task<Void, any Error>,
+                                        cont: CheckedContinuation<T, any Error>) {
+        guard once.claim() else { return }
+        timer.cancel()
+        cont.resume(with: result)
+    }
+
+    private static func invokeProxy<T>(_ body: (any ThermikHelperXPC, @escaping @Sendable (Result<T, any Error>) -> Void) -> Void,
+                                       on connection: NSXPCConnection,
+                                       finish: @escaping @Sendable (Result<T, any Error>) -> Void) {
+        let proxy = connection.remoteObjectProxyWithErrorHandler { error in finish(.failure(error)) }
+        guard let helper = proxy as? any ThermikHelperXPC else {
+            finish(.failure(NSError.thermikHelper(.internalError, "bad XPC proxy")))
+            return
+        }
+        body(helper, finish)
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {

@@ -105,6 +105,16 @@ struct AlertNotification: Sendable {
 
     func post(_ n: AlertNotification) async {
         guard let center else { return }
+        let content = makeContent(for: n)
+        let request = UNNotificationRequest(identifier: n.id, content: content, trigger: nil)
+        do {
+            try await center.add(request)
+        } catch {
+            log.error("notification not delivered: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func makeContent(for n: AlertNotification) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = n.title
         content.body = n.body
@@ -112,15 +122,15 @@ struct AlertNotification: Sendable {
         content.categoryIdentifier = n.offerFanActions ? Self.fanCategory : Self.infoCategory
         content.interruptionLevel = .active
         content.sound = n.soundName.map { UNNotificationSound(named: UNNotificationSoundName($0)) } ?? .default
-        if let route = n.route, let data = try? JSONEncoder().encode(route), let json = String(data: data, encoding: .utf8) {
-            content.userInfo = [Self.routeKey: json]
-        }
-        let request = UNNotificationRequest(identifier: n.id, content: content, trigger: nil)
-        do {
-            try await center.add(request)
-        } catch {
-            log.error("notification not delivered: \(error.localizedDescription, privacy: .public)")
-        }
+        addRoute(to: content, route: n.route)
+        return content
+    }
+
+    private func addRoute(to content: UNMutableNotificationContent, route: Route?) {
+        guard let route,
+              let data = try? JSONEncoder().encode(route),
+              let json = String(data: data, encoding: .utf8) else { return }
+        content.userInfo = [Self.routeKey: json]
     }
 
     // MARK: Responses

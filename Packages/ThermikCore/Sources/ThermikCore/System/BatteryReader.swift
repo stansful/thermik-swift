@@ -24,78 +24,18 @@ final class BatteryReader {
     /// Root keys are fetched one by one (`IORegistryEntryCreateCFProperty`, ~5 µs each) instead of copying the whole
     /// 51-property node with its large nested dictionaries (~300 µs on M4 Max / macOS 27).
     func read() -> BatterySnapshot? {
+        guard let current = readCurrent() else { return nil }
+        let context = ReadContext(service: service, pack: pack, banks: banks)
+        return context.snapshot(current: IOKitHelpers.signedInt(current))
+    }
+
+    /// A missing current reading can mean the driver re-registered: look the nodes up again once.
+    private func readCurrent() -> NSNumber? {
         guard resolve() else { return nil }
-        var current = IOKitHelpers.property(service, "CurrentCapacity", as: NSNumber.self)
-        if current == nil {                                 // driver re-registered (rare): look the nodes up again
-            releaseHandles()
-            guard resolve() else { return nil }
-            current = IOKitHelpers.property(service, "CurrentCapacity", as: NSNumber.self)
-            guard current != nil else { return nil }
-        }
-        var rootCache: [String: Any?] = [:]
-        func root(_ k: String) -> Any? {
-            if let cached = rootCache[k] { return cached }
-            let v: Any? = IOKitHelpers.property(service, k, as: AnyObject.self)
-            rootCache[k] = .some(v)
-            return v
-        }
-        var rootDataCache: NSDictionary??
-        func rootData(_ k: String) -> Any? {
-            if rootDataCache == nil { rootDataCache = .some(root("BatteryData") as? NSDictionary) }
-            return rootDataCache??[k]
-        }
-        let packData: NSDictionary? = pack == 0 ? nil : IOKitHelpers.property(pack, "BatteryData", as: NSDictionary.self)
-        let cells: [Int] = banks.compactMap { bank in
-            IOKitHelpers.property(bank, "BatteryData", as: NSDictionary.self).flatMap { IOKitHelpers.signedInt($0["CellVoltage"]) }
-        }
-
-        func int(_ keys: String...) -> Int? {
-            for k in keys {
-                if let v = IOKitHelpers.signedInt(packData?[k]) ?? IOKitHelpers.signedInt(root(k)) ?? IOKitHelpers.signedInt(rootData(k)) {
-                    return v
-                }
-            }
-            return nil
-        }
-        func bool(_ k: String) -> Bool { (root(k) as? NSNumber)?.boolValue ?? false }
-        func minutes(_ k: String) -> Int? { int(k).flatMap { $0 == 65535 || $0 < 0 ? nil : $0 } }   // 65535 = calculating
-
-        let external = bool("ExternalConnected")
-        var adapter: PowerAdapterInfo?
-        if external, let ad = root("AdapterDetails") as? NSDictionary, ad.count > 0 {
-            adapter = PowerAdapterInfo(name: ad["Name"] as? String,
-                                       watts: IOKitHelpers.signedInt(ad["Watts"]),
-                                       voltage_mV: IOKitHelpers.signedInt(ad["AdapterVoltage"]),
-                                       current_mA: IOKitHelpers.signedInt(ad["Current"]),
-                                       isWireless: (ad["IsWireless"] as? NSNumber)?.boolValue ?? false)
-        }
-        let telemetry = root("PowerTelemetryData") as? NSDictionary
-        let charger = root("ChargerData") as? NSDictionary
-
-        return BatterySnapshot(
-            cycleCount: int("CycleCount"),
-            designCycleCount: int("DesignCycleCount9C"),           // IOPS' DesignCycleCount (300) is a legacy value
-            designCapacity_mAh: int("DesignCapacity"),
-            rawMaxCapacity_mAh: int("AppleRawMaxCapacity", "FullChargeCapacity"),
-            nominalChargeCapacity_mAh: int("NominalChargeCapacity"),
-            rawCurrentCapacity_mAh: int("AppleRawCurrentCapacity", "RemainingCapacity"),
-            chargePercent: Self.chargePercent(current: IOKitHelpers.signedInt(current),
-                                              max: IOKitHelpers.signedInt(root("MaxCapacity"))),
-            temperatureC: int("Temperature", "VirtualTemperature").map { Double($0) / 100 },   // centi-°C
-            voltage_mV: int("Voltage", "AppleRawBatteryVoltage"),
-            amperage_mA: int("InstantAmperage", "Amperage"),
-            isCharging: bool("IsCharging"),
-            externalConnected: external,
-            fullyCharged: bool("FullyCharged"),
-            minutesToEmpty: minutes("AvgTimeToEmpty"),
-            minutesToFull: minutes("AvgTimeToFull"),
-            permanentFailureStatus: int("PermanentFailureStatus"),
-            notChargingReason: IOKitHelpers.signedInt(charger?["NotChargingReason"]),
-            cellVoltages_mV: cells,
-            adapter: adapter,
-            systemPowerIn_mW: IOKitHelpers.signedInt(telemetry?["SystemPowerIn"]),
-            systemLoad_mW: IOKitHelpers.signedInt(telemetry?["SystemLoad"]),
-            batteryPower_mW: IOKitHelpers.signedInt(telemetry?["BatteryPower"]))
+        if let current = IOKitHelpers.property(service, "CurrentCapacity", as: NSNumber.self) { return current }
+        releaseHandles()
+        guard resolve() else { return nil }
+        return IOKitHelpers.property(service, "CurrentCapacity", as: NSNumber.self)
     }
 
     /// Apple Silicon reports `CurrentCapacity` / `MaxCapacity` in percent (Max = 100); Intel reports both in mAh.
@@ -103,6 +43,81 @@ final class BatteryReader {
         guard let current else { return nil }
         guard let max, max > 100 else { return min(Swift.max(current, 0), 100) }
         return Int((Double(current) / Double(max) * 100).rounded())
+    }
+
+    private final class ReadContext {
+        let service: io_service_t
+        let packData: NSDictionary?
+        let cells: [Int]
+        var rootCache: [String: Any?] = [:]
+        var rootDataCache: NSDictionary??
+
+        init(service: io_service_t, pack: io_registry_entry_t, banks: [io_registry_entry_t]) {
+            self.service = service
+            packData = pack == 0 ? nil : IOKitHelpers.property(pack, "BatteryData", as: NSDictionary.self)
+            cells = banks.compactMap { bank in
+                IOKitHelpers.property(bank, "BatteryData", as: NSDictionary.self).flatMap { IOKitHelpers.signedInt($0["CellVoltage"]) }
+            }
+        }
+
+        func snapshot(current: Int?) -> BatterySnapshot {
+            let external = bool("ExternalConnected")
+            let adapter = adapter(external: external)
+            let telemetry = root("PowerTelemetryData") as? NSDictionary
+            let charger = root("ChargerData") as? NSDictionary
+            return makeSnapshot(current: current, external: external, adapter: adapter, telemetry: telemetry, charger: charger)
+        }
+
+        func makeSnapshot(current: Int?, external: Bool, adapter: PowerAdapterInfo?,
+                          telemetry: NSDictionary?, charger: NSDictionary?) -> BatterySnapshot {
+            BatterySnapshot(
+                cycleCount: int("CycleCount"), designCycleCount: int("DesignCycleCount9C"), designCapacity_mAh: int("DesignCapacity"),
+                rawMaxCapacity_mAh: int("AppleRawMaxCapacity", "FullChargeCapacity"), nominalChargeCapacity_mAh: int("NominalChargeCapacity"),
+                rawCurrentCapacity_mAh: int("AppleRawCurrentCapacity", "RemainingCapacity"), chargePercent: percent(current: current),
+                temperatureC: int("Temperature", "VirtualTemperature").map { Double($0) / 100 }, voltage_mV: int("Voltage", "AppleRawBatteryVoltage"), // centi-°C
+                amperage_mA: int("InstantAmperage", "Amperage"), isCharging: bool("IsCharging"), externalConnected: external, fullyCharged: bool("FullyCharged"),
+                minutesToEmpty: minutes("AvgTimeToEmpty"), minutesToFull: minutes("AvgTimeToFull"),
+                permanentFailureStatus: int("PermanentFailureStatus"), notChargingReason: IOKitHelpers.signedInt(charger?["NotChargingReason"]),
+                cellVoltages_mV: cells, adapter: adapter, systemPowerIn_mW: IOKitHelpers.signedInt(telemetry?["SystemPowerIn"]),
+                systemLoad_mW: IOKitHelpers.signedInt(telemetry?["SystemLoad"]), batteryPower_mW: IOKitHelpers.signedInt(telemetry?["BatteryPower"]))
+        }
+
+        /// IOPS' DesignCycleCount (300) is a legacy value; DesignCycleCount9C is used by the snapshot above.
+        func percent(current: Int?) -> Int? {
+            BatteryReader.chargePercent(current: current, max: IOKitHelpers.signedInt(root("MaxCapacity")))
+        }
+
+        func root(_ key: String) -> Any? {
+            if let cached = rootCache[key] { return cached }
+            let value: Any? = IOKitHelpers.property(service, key, as: AnyObject.self)
+            rootCache[key] = .some(value)
+            return value
+        }
+
+        func rootData(_ key: String) -> Any? {
+            if rootDataCache == nil { rootDataCache = .some(root("BatteryData") as? NSDictionary) }
+            return rootDataCache??[key]
+        }
+
+        func int(_ keys: String...) -> Int? {
+            for key in keys {
+                let value = IOKitHelpers.signedInt(packData?[key]) ?? IOKitHelpers.signedInt(root(key)) ?? IOKitHelpers.signedInt(rootData(key))
+                if let value { return value }
+            }
+            return nil
+        }
+
+        func bool(_ key: String) -> Bool { (root(key) as? NSNumber)?.boolValue ?? false }
+        func minutes(_ key: String) -> Int? { int(key).flatMap { $0 == 65535 || $0 < 0 ? nil : $0 } } // 65535 = calculating
+
+        func adapter(external: Bool) -> PowerAdapterInfo? {
+            guard external, let details = root("AdapterDetails") as? NSDictionary, details.count > 0 else { return nil }
+            return PowerAdapterInfo(name: details["Name"] as? String,
+                                    watts: IOKitHelpers.signedInt(details["Watts"]),
+                                    voltage_mV: IOKitHelpers.signedInt(details["AdapterVoltage"]),
+                                    current_mA: IOKitHelpers.signedInt(details["Current"]),
+                                    isWireless: (details["IsWireless"] as? NSNumber)?.boolValue ?? false)
+        }
     }
 
     // MARK: Registry handles
@@ -120,17 +135,19 @@ final class BatteryReader {
     /// AppleSmartBattery › AppleSmartBatteryPack › AppleSmartBatteryBank ×N (› AppleSmartBatteryCell). Retains the
     /// pack and bank entries; releases everything else.
     private func walk(_ entry: io_registry_entry_t) {
-        for child in IOKitHelpers.children(entry) {
-            switch IOKitHelpers.className(child) {
-            case "AppleSmartBatteryPack":
-                if pack == 0 { pack = child; walk(child); continue }
-            case "AppleSmartBatteryBank":
-                banks.append(child); continue                 // cells below a bank carry no voltage
-            default:
-                break
-            }
-            IOObjectRelease(child)
+        for child in IOKitHelpers.children(entry) { visit(child) }
+    }
+
+    private func visit(_ child: io_registry_entry_t) {
+        switch IOKitHelpers.className(child) {
+        case "AppleSmartBatteryPack":
+            if pack == 0 { pack = child; walk(child); return }
+        case "AppleSmartBatteryBank":
+            banks.append(child); return                           // cells below a bank carry no voltage
+        default:
+            break
         }
+        IOObjectRelease(child)
     }
 
     private func releaseHandles() {

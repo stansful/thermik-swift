@@ -151,27 +151,39 @@ public struct FanCurve: Codable, Sendable, Hashable {
 public enum FanPresets {
     public static func curve(_ id: FanPresetID) -> FanCurve {
         switch id {
-        case .quiet:
-            return FanCurve(input: .aggregate(.cpuAverage),
-                            points: [CurvePoint(72, 0), CurvePoint(82, 25), CurvePoint(90, 55), CurvePoint(97, 100)],
-                            hysteresisC: 4, releaseBelowFirstPoint: true, smoothing: Smoothing(riseTau: 3, fallTau: 15),
-                            slew: Slew(up: 100.0 / 6, down: 100.0 / 60, hold: 30), presetID: .quiet)
-        case .balanced:
-            return FanCurve(input: .aggregate(.socHottest),
-                            points: [CurvePoint(70, 0), CurvePoint(80, 30), CurvePoint(88, 65), CurvePoint(95, 100)],
-                            hysteresisC: 3, releaseBelowFirstPoint: true, smoothing: Smoothing(riseTau: 2, fallTau: 12),
-                            slew: Slew(up: 25, down: 2, hold: 30), presetID: .balanced)
-        case .cool:
-            return FanCurve(input: .aggregate(.socHottest),
-                            points: [CurvePoint(58, 10), CurvePoint(68, 35), CurvePoint(78, 70), CurvePoint(88, 100)],
-                            hysteresisC: 3, releaseBelowFirstPoint: false, smoothing: Smoothing(riseTau: 1.5, fallTau: 10),
-                            slew: Slew(up: 100.0 / 3, down: 100.0 / 40, hold: 20), presetID: .cool)
-        case .performance:
-            return FanCurve(input: .aggregate(.safetyTop4),
-                            points: [CurvePoint(55, 25), CurvePoint(70, 50), CurvePoint(82, 80), CurvePoint(92, 100)],
-                            hysteresisC: 2, releaseBelowFirstPoint: false, smoothing: Smoothing(riseTau: 1, fallTau: 8),
-                            slew: Slew(up: 50, down: 100.0 / 30, hold: 20), presetID: .performance)
+        case .quiet: return quietCurve()
+        case .balanced: return balancedCurve()
+        case .cool: return coolCurve()
+        case .performance: return performanceCurve()
         }
+    }
+
+    private static func quietCurve() -> FanCurve {
+        FanCurve(input: .aggregate(.cpuAverage),
+                 points: [CurvePoint(72, 0), CurvePoint(82, 25), CurvePoint(90, 55), CurvePoint(97, 100)],
+                 hysteresisC: 4, releaseBelowFirstPoint: true, smoothing: Smoothing(riseTau: 3, fallTau: 15),
+                 slew: Slew(up: 100.0 / 6, down: 100.0 / 60, hold: 30), presetID: .quiet)
+    }
+
+    private static func balancedCurve() -> FanCurve {
+        FanCurve(input: .aggregate(.socHottest),
+                 points: [CurvePoint(70, 0), CurvePoint(80, 30), CurvePoint(88, 65), CurvePoint(95, 100)],
+                 hysteresisC: 3, releaseBelowFirstPoint: true, smoothing: Smoothing(riseTau: 2, fallTau: 12),
+                 slew: Slew(up: 25, down: 2, hold: 30), presetID: .balanced)
+    }
+
+    private static func coolCurve() -> FanCurve {
+        FanCurve(input: .aggregate(.socHottest),
+                 points: [CurvePoint(58, 10), CurvePoint(68, 35), CurvePoint(78, 70), CurvePoint(88, 100)],
+                 hysteresisC: 3, releaseBelowFirstPoint: false, smoothing: Smoothing(riseTau: 1.5, fallTau: 10),
+                 slew: Slew(up: 100.0 / 3, down: 100.0 / 40, hold: 20), presetID: .cool)
+    }
+
+    private static func performanceCurve() -> FanCurve {
+        FanCurve(input: .aggregate(.safetyTop4),
+                 points: [CurvePoint(55, 25), CurvePoint(70, 50), CurvePoint(82, 80), CurvePoint(92, 100)],
+                 hysteresisC: 2, releaseBelowFirstPoint: false, smoothing: Smoothing(riseTau: 1, fallTau: 8),
+                 slew: Slew(up: 50, down: 100.0 / 30, hold: 20), presetID: .performance)
     }
 }
 

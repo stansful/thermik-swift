@@ -28,19 +28,27 @@ public enum LegacyUninstall {
         return { [service] in
             try removeInstalledFiles()
             lifecycleLog.notice("legacy helper files removed; booting out")
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + bootoutDelay) {
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-                p.arguments = ["bootout", "system/\(ThermikHelper.label)"]
-                do { try p.run() } catch {
-                    lifecycleLog.error("launchctl bootout failed to start: \(error.localizedDescription, privacy: .public)")
-                }
+            scheduleBootout()
+            scheduleForcedExit(service: service)
+        }
+    }
+
+    private static func scheduleBootout() {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + bootoutDelay) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            p.arguments = ["bootout", "system/\(ThermikHelper.label)"]
+            do { try p.run() } catch {
+                lifecycleLog.error("launchctl bootout failed to start: \(error.localizedDescription, privacy: .public)")
             }
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + forcedExitDelay) {
-                service.shutdown(reason: "uninstall")
-                lifecycleLog.notice("uninstalled; exiting")
-                exit(0)
-            }
+        }
+    }
+
+    private static func scheduleForcedExit(service: HelperService) {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + forcedExitDelay) {
+            service.shutdown(reason: "uninstall")
+            lifecycleLog.notice("uninstalled; exiting")
+            exit(0)
         }
     }
 

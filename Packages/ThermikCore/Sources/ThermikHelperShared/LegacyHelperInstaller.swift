@@ -57,26 +57,35 @@ public enum LegacyHelperInstaller {
         let helper = appBundle.appending(path: "Contents/MacOS/\(ThermikHelper.helperExecutableName)")
         guard FileManager.default.isExecutableFile(atPath: helper.path) else { throw InstallError.missingHelper(helper.path) }
         guard let appExecutable = Bundle(url: appBundle)?.executableURL else { throw InstallError.unsignedApp }
-
-        let clientHashes = CodeIdentity.cdhashes(ofCodeAt: appExecutable)
-        guard !clientHashes.isEmpty, clientHashes.allSatisfy(CodeIdentity.isValidCDHash) else { throw InstallError.unsignedApp }
-        guard let helperIdentity = CodeIdentity.ofCode(at: helper) else { throw InstallError.unsignedApp }
-        guard helperIdentity.identifier == ThermikHelper.helperSigningIdentifier else {
-            throw InstallError.failed(-2, "helper is signed as \(helperIdentity.identifier ?? "nil"), expected \(ThermikHelper.helperSigningIdentifier)")
-        }
-
-        let identifierClause = "identifier \"\(ThermikHelper.helperSigningIdentifier)\""
-        let requirement: String
-        if let team = helperIdentity.teamID, !team.isEmpty {
-            requirement = "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\" and \(identifierClause)"
-        } else {
-            // Ad-hoc: pin the exact bundled helper (every slice) — an identifier alone is spoofable (HELP §1).
-            let hashes = CodeIdentity.cdhashes(ofCodeAt: helper)
-            guard !hashes.isEmpty, hashes.allSatisfy(CodeIdentity.isValidCDHash) else { throw InstallError.unsignedApp }
-            requirement = "(" + hashes.map { "cdhash H\"\($0)\"" }.joined(separator: " or ") + ") and \(identifierClause)"
-        }
+        let clientHashes = try validCDHashes(ofCodeAt: appExecutable)
+        let identity = try helperIdentity(at: helper)
+        let requirement = try requirement(forHelperAt: helper, identity: identity)
         return Plan(helperSource: helper.path, helperRequirement: requirement, clientCDHashes: clientHashes,
                     helperIcon: appIcon(in: appBundle).map(iconResourceFork))
+    }
+
+    private static func validCDHashes(ofCodeAt url: URL) throws -> [String] {
+        let hashes = CodeIdentity.cdhashes(ofCodeAt: url)
+        guard !hashes.isEmpty, hashes.allSatisfy(CodeIdentity.isValidCDHash) else { throw InstallError.unsignedApp }
+        return hashes
+    }
+
+    private static func helperIdentity(at helper: URL) throws -> CodeIdentity {
+        guard let identity = CodeIdentity.ofCode(at: helper) else { throw InstallError.unsignedApp }
+        guard identity.identifier == ThermikHelper.helperSigningIdentifier else {
+            throw InstallError.failed(-2, "helper is signed as \(identity.identifier ?? "nil"), expected \(ThermikHelper.helperSigningIdentifier)")
+        }
+        return identity
+    }
+
+    private static func requirement(forHelperAt helper: URL, identity: CodeIdentity) throws -> String {
+        let identifierClause = "identifier \"\(ThermikHelper.helperSigningIdentifier)\""
+        if let team = identity.teamID, !team.isEmpty {
+            return "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\" and \(identifierClause)"
+        }
+        // Ad-hoc: pin the exact bundled helper (every slice) — an identifier alone is spoofable (HELP §1).
+        let hashes = try validCDHashes(ofCodeAt: helper)
+        return "(" + hashes.map { "cdhash H\"\($0)\"" }.joined(separator: " or ") + ") and \(identifierClause)"
     }
 
     // MARK: Helper icon
@@ -123,19 +132,28 @@ public enum LegacyHelperInstaller {
     /// LaunchDaemon plist of the legacy install. Same keys as Resources/LaunchDaemons/app.thermik.helper.plist,
     /// except `Program` (absolute, root-owned path) instead of the SMAppService-only `BundleProgram`.
     public static func launchdPlist() throws -> Data {
-        let plist: [String: Any] = [
+        let plist = launchdPlistValues()
+        return try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+    }
+
+    private static func launchdPlistValues() -> [String: Any] {
+        var plist = launchdServicePlistValues()
+        // Relaunch after a crash (recovery marker, I7), not after a clean idle exit (I13).
+        // Implies RunAtLoad: the helper runs once per boot and recovers stranded manual state.
+        plist["KeepAlive"] = ["SuccessfulExit": false]
+        plist["ProcessType"] = "Adaptive"
+        return plist
+    }
+
+    private static func launchdServicePlistValues() -> [String: Any] {
+        [
             "Label": ThermikHelper.label,
             "Program": ThermikHelper.Legacy.helperPath,
             "ProgramArguments": [ThermikHelper.Legacy.helperPath],
             "MachServices": [ThermikHelper.machServiceName: true],
             // Only honoured when the helper's Team ID matches the app's; harmless otherwise (HELP §2.2).
             "AssociatedBundleIdentifiers": [ThermikHelper.appBundleIdentifier],
-            // Relaunch after a crash (recovery marker, I7), not after a clean idle exit (I13).
-            // Implies RunAtLoad: the helper runs once per boot and recovers stranded manual state.
-            "KeepAlive": ["SuccessfulExit": false],
-            "ProcessType": "Adaptive",
         ]
-        return try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
     }
 
     /// Trust file content: `{cdhashes: [<40 hex digits>, …]}` (XML plist).
@@ -169,26 +187,46 @@ public enum LegacyHelperInstaller {
 
     /// The root script for `plan`. Pure string generation (never executed here); throws `failed` for a malformed plan.
     public static func installScript(_ plan: Plan) throws -> String {
+        try validateInstallPlan(plan)
+        let payloads = try installPayloads(plan)
+        return [
+            installPreamble(),
+            installVariables(plan),
+            installCopy(),
+            installVerifiedCopy(plan),
+            installFiles(payloads),
+            installBootstrap(),
+        ].joined(separator: "\n")
+    }
+
+    private static func validateInstallPlan(_ plan: Plan) throws {
         guard !plan.clientCDHashes.isEmpty, plan.clientCDHashes.allSatisfy(CodeIdentity.isValidCDHash) else {
             throw InstallError.failed(-3, "plan has no valid client cdhash")
         }
         guard plan.helperSource.hasPrefix("/"), !plan.helperRequirement.isEmpty else {
             throw InstallError.failed(-3, "plan has no helper source or requirement")
         }
-        let L = ThermikHelper.Legacy.self
+    }
+
+    private static func installPayloads(_ plan: Plan) throws -> (plist: String, trust: String) {
         let plist = try launchdPlist().base64EncodedString()
         let trust = try trustFile(plan.clientCDHashes.map { $0.lowercased() }).base64EncodedString()
-        // Never fatal: a helper without an icon works the same. ":" keeps the line when there is no icon.
-        let icon = plan.helperIcon.map {
-            "/bin/echo \($0.base64EncodedString()) | /usr/bin/base64 -D > \"$T/..namedfork/rsrc\""
-                + " && /usr/bin/xattr -wx com.apple.FinderInfo \(customIconFinderInfo) \"$T\" || true"
-        } ?? ":"
+        return (plist, trust)
+    }
+
+    private static func installPreamble() -> String {
         return """
         set -eu
         umask 022
         PATH=/usr/bin:/bin:/usr/sbin:/sbin
         export PATH
         [ "$(/usr/bin/id -u)" -eq 0 ] || { echo "must run as root" >&2; exit 1; }
+        """
+    }
+
+    private static func installVariables(_ plan: Plan) -> String {
+        let L = ThermikHelper.Legacy.self
+        return """
         LABEL=\(sq(ThermikHelper.label))
         SRC=\(sq(plan.helperSource))
         DST=\(sq(L.helperPath))
@@ -196,6 +234,11 @@ public enum LegacyHelperInstaller {
         SUPPORT=\(sq(L.supportDirectory))
         TRUST=\(sq(L.trustFilePath))
         [ -f "$SRC" ] || { echo "helper not found: $SRC" >&2; exit 2; }
+        """
+    }
+
+    private static func installCopy() -> String {
+        return """
         /bin/launchctl bootout "system/$LABEL" 2>/dev/null || true
         /usr/bin/install -d -m 0755 -o root -g wheel /Library/PrivilegedHelperTools "$SUPPORT"
         T="$(/usr/bin/mktemp /Library/PrivilegedHelperTools/.thermik-helper.XXXXXX)"
@@ -204,19 +247,41 @@ public enum LegacyHelperInstaller {
         if /usr/bin/xattr -p com.apple.quarantine "$T" >/dev/null 2>&1; then
             /usr/bin/xattr -d com.apple.quarantine "$T"
         fi
+        """
+    }
+
+    private static func installVerifiedCopy(_ plan: Plan) -> String {
+        return """
         /usr/sbin/chown root:wheel "$T"
         /bin/chmod 0755 "$T"
         /usr/bin/codesign --verify --strict -R \(sq("=" + plan.helperRequirement)) "$T"
-        \(icon)
+        \(iconCommand(plan.helperIcon))
         /bin/mv -f "$T" "$DST"
-        /bin/echo \(plist) | /usr/bin/base64 -D > "$SUPPORT/.plist.new"
-        /bin/echo \(trust) | /usr/bin/base64 -D > "$SUPPORT/.trust.new"
+        """
+    }
+
+    /// Never fatal: a helper without an icon works the same. ":" keeps the line when there is no icon.
+    private static func iconCommand(_ icon: Data?) -> String {
+        guard let icon else { return ":" }
+        return "/bin/echo \(icon.base64EncodedString()) | /usr/bin/base64 -D > \"$T/..namedfork/rsrc\""
+            + " && /usr/bin/xattr -wx com.apple.FinderInfo \(customIconFinderInfo) \"$T\" || true"
+    }
+
+    private static func installFiles(_ payloads: (plist: String, trust: String)) -> String {
+        return """
+        /bin/echo \(payloads.plist) | /usr/bin/base64 -D > "$SUPPORT/.plist.new"
+        /bin/echo \(payloads.trust) | /usr/bin/base64 -D > "$SUPPORT/.trust.new"
         /usr/sbin/chown root:wheel "$SUPPORT/.plist.new" "$SUPPORT/.trust.new"
         /bin/chmod 0644 "$SUPPORT/.plist.new" "$SUPPORT/.trust.new"
         /bin/mv -f "$SUPPORT/.trust.new" "$TRUST"
         /bin/mv -f "$SUPPORT/.plist.new" "$PLIST"
-        /bin/rm -f \(sq(L.previousHelperPath))
-        /bin/rm -f \(sq(L.brokenHelperPath))
+        /bin/rm -f \(sq(ThermikHelper.Legacy.previousHelperPath))
+        /bin/rm -f \(sq(ThermikHelper.Legacy.brokenHelperPath))
+        """
+    }
+
+    private static func installBootstrap() -> String {
+        return """
         /bin/launchctl enable "system/$LABEL" 2>/dev/null || true
         n=0
         until /bin/launchctl bootstrap system "$PLIST"; do
@@ -247,17 +312,23 @@ public enum LegacyHelperInstaller {
     /// app first (LSUIElement). Throws `cancelled` (-128) or `failed(code, message)`.
     @MainActor
     public static func runAsAdministrator(_ script: String, prompt: String) throws {
-        let b64 = Data(script.utf8).base64EncodedString()
-        let escapedPrompt = prompt.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        let source = "do shell script \"/bin/echo \(b64) | /usr/bin/base64 -D | /bin/sh\" with prompt \"\(escapedPrompt)\" with administrator privileges"
+        let source = appleScriptSource(script, prompt: prompt)
         guard let apple = NSAppleScript(source: source) else { throw InstallError.failed(-1, "cannot build the AppleScript") }
         var error: NSDictionary?
         apple.executeAndReturnError(&error)
-        if let error {
-            let code = error[NSAppleScript.errorNumber] as? Int ?? -1
-            if code == userCancelledError { throw InstallError.cancelled }
-            throw InstallError.failed(code, error[NSAppleScript.errorMessage] as? String ?? "unknown error")
-        }
+        if let error { throw installError(from: error) }
+    }
+
+    private static func appleScriptSource(_ script: String, prompt: String) -> String {
+        let b64 = Data(script.utf8).base64EncodedString()
+        let escapedPrompt = prompt.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        return "do shell script \"/bin/echo \(b64) | /usr/bin/base64 -D | /bin/sh\" with prompt \"\(escapedPrompt)\" with administrator privileges"
+    }
+
+    private static func installError(from error: NSDictionary) -> InstallError {
+        let code = error[NSAppleScript.errorNumber] as? Int ?? -1
+        if code == userCancelledError { return .cancelled }
+        return .failed(code, error[NSAppleScript.errorMessage] as? String ?? "unknown error")
     }
 
     /// Installs (or re-installs / upgrades) the helper bundled in the running app.

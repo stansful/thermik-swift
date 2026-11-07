@@ -180,23 +180,64 @@ import ThermikCore
     /// FanStore.resetToSystem() before this). Relaunch is recommended afterwards (`AppDelegate.relaunch()`).
     /// The keys are REMOVED, not rewritten with today's defaults.
     func resetToDefaults() {
-        for k in Key.all { defaults.removeObject(forKey: k) }
-        for k in Self.viewOwnedKeys { defaults.removeObject(forKey: k) }
-        defaults.removeObject(forKey: "AppleLanguages")
+        clearPersistedSettings()
         let fresh = SettingsStore(defaults: defaults)
         isRestoring = true
         defer { isRestoring = false }
-        launchAtLogin = fresh.launchAtLogin; updateInterval = fresh.updateInterval
-        automaticallyCheckForUpdates = fresh.automaticallyCheckForUpdates; lastUpdateCheck = fresh.lastUpdateCheck
-        showDockIconWhileWindowOpen = fresh.showDockIconWhileWindowOpen; temperatureUnit = fresh.temperatureUnit
-        language = fresh.language; hotKeys = fresh.hotKeys; allowFanControlFromLinks = fresh.allowFanControlFromLinks
-        animatedEffects = fresh.animatedEffects; colorBlindScale = fresh.colorBlindScale
-        popoverDensity = fresh.popoverDensity; colorScales = fresh.colorScales; menuBar = fresh.menuBar; menuBarHintShown = fresh.menuBarHintShown
-        sensorOverrides = fresh.sensorOverrides; showHiddenSensors = fresh.showHiddenSensors; showRawKeys = fresh.showRawKeys
-        driveTemperatures = fresh.driveTemperatures; hottestExcludedGroups = fresh.hottestExcludedGroups
-        fans = fresh.fans; alertsEnabled = fresh.alertsEnabled
-        alertRules = fresh.alertRules; alertSoundName = fresh.alertSoundName; alertsSnoozedUntil = fresh.alertsSnoozedUntil
-        log = fresh.log; onboardingCompleted = fresh.onboardingCompleted; helperWanted = fresh.helperWanted
+        restoreGeneralSettings(from: fresh)
+        restoreAppearanceSettings(from: fresh)
+        restoreSensorSettings(from: fresh)
+        restoreFanAndAlertSettings(from: fresh)
+        restoreLoggingAndHelperSettings(from: fresh)
+    }
+
+    private func clearPersistedSettings() {
+        for key in Key.all { defaults.removeObject(forKey: key) }
+        for key in Self.viewOwnedKeys { defaults.removeObject(forKey: key) }
+        defaults.removeObject(forKey: "AppleLanguages")
+    }
+
+    private func restoreGeneralSettings(from fresh: SettingsStore) {
+        launchAtLogin = fresh.launchAtLogin
+        updateInterval = fresh.updateInterval
+        automaticallyCheckForUpdates = fresh.automaticallyCheckForUpdates
+        lastUpdateCheck = fresh.lastUpdateCheck
+        showDockIconWhileWindowOpen = fresh.showDockIconWhileWindowOpen
+        temperatureUnit = fresh.temperatureUnit
+        language = fresh.language
+        hotKeys = fresh.hotKeys
+        allowFanControlFromLinks = fresh.allowFanControlFromLinks
+    }
+
+    private func restoreAppearanceSettings(from fresh: SettingsStore) {
+        animatedEffects = fresh.animatedEffects
+        colorBlindScale = fresh.colorBlindScale
+        popoverDensity = fresh.popoverDensity
+        colorScales = fresh.colorScales
+        menuBar = fresh.menuBar
+        menuBarHintShown = fresh.menuBarHintShown
+    }
+
+    private func restoreSensorSettings(from fresh: SettingsStore) {
+        sensorOverrides = fresh.sensorOverrides
+        showHiddenSensors = fresh.showHiddenSensors
+        showRawKeys = fresh.showRawKeys
+        driveTemperatures = fresh.driveTemperatures
+        hottestExcludedGroups = fresh.hottestExcludedGroups
+    }
+
+    private func restoreFanAndAlertSettings(from fresh: SettingsStore) {
+        fans = fresh.fans
+        alertsEnabled = fresh.alertsEnabled
+        alertRules = fresh.alertRules
+        alertSoundName = fresh.alertSoundName
+        alertsSnoozedUntil = fresh.alertsSnoozedUntil
+    }
+
+    private func restoreLoggingAndHelperSettings(from fresh: SettingsStore) {
+        log = fresh.log
+        onboardingCompleted = fresh.onboardingCompleted
+        helperWanted = fresh.helperWanted
         suppressHelperPrompt = fresh.suppressHelperPrompt
     }
 

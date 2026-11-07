@@ -30,19 +30,27 @@ struct ThermikGlass<S: Shape>: ViewModifier {
     @Environment(\.colorSchemeContrast) private var contrast
     func body(content: Content) -> some View {
         if reduceTransparency {
-            content
-                .background(Color(nsColor: .windowBackgroundColor), in: shape)
-                .background(tint.map { AnyShapeStyle($0.opacity(0.22)) } ?? AnyShapeStyle(.clear), in: shape)
-                .overlay(shape.stroke(.separator, lineWidth: contrast == .increased ? 1 : 0.5))
+            reducedTransparency(content)
         } else if #available(macOS 26.0, *) {
             content.glassEffect(glass, in: shape)
         } else {
-            content
-                .background(.regularMaterial, in: shape)
-                .background(tint.map { AnyShapeStyle($0.opacity(0.18)) } ?? AnyShapeStyle(.clear), in: shape)
-                .overlay(shape.stroke(.white.opacity(contrast == .increased ? 0.35 : 0.10), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+            material(content)
         }
+    }
+
+    private func reducedTransparency(_ content: Content) -> some View {
+        content
+            .background(Color(nsColor: .windowBackgroundColor), in: shape)
+            .background(tint.map { AnyShapeStyle($0.opacity(0.22)) } ?? AnyShapeStyle(.clear), in: shape)
+            .overlay(shape.stroke(.separator, lineWidth: contrast == .increased ? 1 : 0.5))
+    }
+
+    private func material(_ content: Content) -> some View {
+        content
+            .background(.regularMaterial, in: shape)
+            .background(tint.map { AnyShapeStyle($0.opacity(0.18)) } ?? AnyShapeStyle(.clear), in: shape)
+            .overlay(shape.stroke(.white.opacity(contrast == .increased ? 0.35 : 0.10), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
     }
     @available(macOS 26.0, *)
     private var glass: Glass {
@@ -363,12 +371,15 @@ private struct SparklinePath: Shape {
             let p = CGPoint(x: rect.minX + CGFloat(i) * dx, y: rect.minY + rect.height * (1 - CGFloat((Double(v) - lo) / span)))
             i == 0 ? path.move(to: p) : path.addLine(to: p)
         }
-        if closed {
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-            path.closeSubpath()
-        }
+        closeIfNeeded(&path, in: rect)
         return path
+    }
+
+    private func closeIfNeeded(_ path: inout Path, in rect: CGRect) {
+        guard closed else { return }
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
     }
 }
 
@@ -461,43 +472,75 @@ struct ModeSwitcher: View {
 
     @available(macOS 26.0, *)
     private func glassPills(symbolsForOthers: Bool) -> some View {
+        glassPillContainer { m in
+            glassPill(for: m, help: symbolsForOthers && m != mode ? Text(m.title) : Text(verbatim: "")) {
+                if symbolsForOthers && m != mode {
+                    Image(systemName: m.symbol)
+                } else {
+                    modeTitle(m)
+                }
+            }
+        }
+    }
+
+    @available(macOS 26.0, *)
+    private func glassPillContainer<Content: View>(@ViewBuilder content: @escaping (FanMode) -> Content) -> some View {
         GlassEffectContainer(spacing: 4) {
             ModePillsLayout(spacing: 2) {
-                ForEach(FanMode.allCases) { m in
-                    let symbolOnly = symbolsForOthers && m != mode
-                    Button { withAnimation(ThermikMotion.unlessReduced(ThermikMotion.modeMorph, reduceMotion)) { mode = m } } label: {
-                        HStack(spacing: 4) {
-                            if busy == m { ProgressView().controlSize(.mini) }
-                            if symbolOnly {
-                                Image(systemName: m.symbol)
-                            } else {
-                                // The semibold (selected) width is reserved, so selecting a pill never re-flows the row.
-                                Text(m.title).fontWeight(.semibold).hidden()
-                                    .overlay { Text(m.title).fontWeight(mode == m ? .semibold : .regular) }
-                            }
-                        }
-                        .lineLimit(1).minimumScaleFactor(0.8)
-                        .font(.system(size: 11))
-                        .padding(.horizontal, compact ? 8 : 10).padding(.vertical, 5)
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .background {
-                        if mode == m {
-                            Capsule().fill(.clear)
-                                .glassEffect(.regular.tint(.accentColor.opacity(0.35)).interactive(), in: Capsule())
-                                .glassEffectID("sel", in: ns)
-                        }
-                    }
-                    .help(symbolOnly ? Text(m.title) : Text(verbatim: ""))
-                    .accessibilityLabel(Text(m.title))
-                    .accessibilityAddTraits(mode == m ? .isSelected : [])
-                }
+                ForEach(FanMode.allCases, content: content)
             }
             .padding(3)
             .glassEffect(.regular, in: Capsule())
         }
+    }
+
+    @available(macOS 26.0, *)
+    private func glassPill<Content: View>(for m: FanMode, help: Text,
+                                          @ViewBuilder content: () -> Content) -> some View {
+        let button = Button { select(m) } label: {
+            glassPillLabel(for: m, content: content)
+        }
+        .buttonStyle(.plain)
+        .background { selectionBackground(for: m) }
+        return pillAccessibility(button, for: m, help: help)
+    }
+
+    private func glassPillLabel<Content: View>(for m: FanMode,
+                                               @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 4) {
+            if busy == m { ProgressView().controlSize(.mini) }
+            content()
+        }
+        .lineLimit(1).minimumScaleFactor(0.8)
+        .font(.system(size: 11))
+        .padding(.horizontal, compact ? 8 : 10).padding(.vertical, 5)
+        .frame(maxWidth: .infinity)
+        .contentShape(Capsule())
+    }
+
+    private func modeTitle(_ m: FanMode) -> some View {
+        // The semibold (selected) width is reserved, so selecting a pill never re-flows the row.
+        Text(m.title).fontWeight(.semibold).hidden()
+            .overlay { Text(m.title).fontWeight(mode == m ? .semibold : .regular) }
+    }
+
+    @available(macOS 26.0, *)
+    @ViewBuilder private func selectionBackground(for m: FanMode) -> some View {
+        if mode == m {
+            Capsule().fill(.clear)
+                .glassEffect(.regular.tint(.accentColor.opacity(0.35)).interactive(), in: Capsule())
+                .glassEffectID("sel", in: ns)
+        }
+    }
+
+    private func pillAccessibility<V: View>(_ view: V, for m: FanMode, help: Text) -> some View {
+        view.help(help)
+            .accessibilityLabel(Text(m.title))
+            .accessibilityAddTraits(mode == m ? .isSelected : [])
+    }
+
+    private func select(_ m: FanMode) {
+        withAnimation(ThermikMotion.unlessReduced(ThermikMotion.modeMorph, reduceMotion)) { mode = m }
     }
 }
 
@@ -525,18 +568,22 @@ private struct FittedSegmentedControl: NSViewRepresentable {
     func updateNSView(_ c: NSSegmentedControl, context: Context) {
         context.coordinator.mode = $mode
         for (i, m) in FanMode.allCases.enumerated() {
-            if symbolsForOthers && m != mode {
-                c.setLabel("", forSegment: i)
-                c.setImage(NSImage(systemSymbolName: m.symbol, accessibilityDescription: m.title), forSegment: i)
-                c.setToolTip(m.title, forSegment: i)
-            } else {
-                c.setImage(nil, forSegment: i)
-                c.setLabel(m.title, forSegment: i)
-                c.setToolTip(nil, forSegment: i)
-            }
+            updateSegment(c, index: i, mode: m)
         }
         c.selectedSegment = FanMode.allCases.firstIndex(of: mode) ?? -1
         c.isEnabled = context.environment.isEnabled
+    }
+
+    private func updateSegment(_ c: NSSegmentedControl, index: Int, mode m: FanMode) {
+        if symbolsForOthers && m != mode {
+            c.setLabel("", forSegment: index)
+            c.setImage(NSImage(systemSymbolName: m.symbol, accessibilityDescription: m.title), forSegment: index)
+            c.setToolTip(m.title, forSegment: index)
+        } else {
+            c.setImage(nil, forSegment: index)
+            c.setLabel(m.title, forSegment: index)
+            c.setToolTip(nil, forSegment: index)
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSegmentedControl, context: Context) -> CGSize? {
@@ -572,24 +619,26 @@ private struct ModePillsLayout: Layout {
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard !subviews.isEmpty else { return }
-        let n = CGFloat(subviews.count)
-        let ideal = subviews.map { $0.sizeThatFits(.unspecified).width }
-        let available = max(bounds.width - spacing * (n - 1), 0)
-        let total = ideal.reduce(0, +)
-        let widths: [CGFloat]
-        if (ideal.max() ?? 0) * n <= available {
-            widths = Array(repeating: available / n, count: subviews.count)
-        } else if total <= available {
-            widths = ideal.map { $0 + (available - total) / n }
-        } else {
-            widths = ideal.map { total > 0 ? $0 * available / total : 0 }
-        }
+        let widths = widths(in: bounds, subviews: subviews)
         var x = bounds.minX
         for (i, s) in subviews.enumerated() {
             s.place(at: CGPoint(x: x, y: bounds.midY), anchor: .leading,
                     proposal: ProposedViewSize(width: widths[i], height: bounds.height))
             x += widths[i] + spacing
         }
+    }
+
+    private func widths(in bounds: CGRect, subviews: Subviews) -> [CGFloat] {
+        let n = CGFloat(subviews.count)
+        let ideal = subviews.map { $0.sizeThatFits(.unspecified).width }
+        let available = max(bounds.width - spacing * (n - 1), 0)
+        let total = ideal.reduce(0, +)
+        if (ideal.max() ?? 0) * n <= available {
+            return Array(repeating: available / n, count: subviews.count)
+        } else if total <= available {
+            return ideal.map { $0 + (available - total) / n }
+        }
+        return ideal.map { total > 0 ? $0 * available / total : 0 }
     }
 }
 
@@ -698,19 +747,27 @@ struct CASpinningSymbol: NSViewRepresentable {
             guard let config else { return }
             let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
             spin.contentsScale = scale
+            guard let img = configuredImage(config) else { spin.contents = nil; return }
+            let cg = rasterize(img, scale: scale)
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            spin.contents = cg
+            CATransaction.commit()
+        }
+
+        private func configuredImage(_ config: (symbol: String, pointSize: CGFloat, color: NSColor)) -> NSImage? {
             let cfg = NSImage.SymbolConfiguration(pointSize: config.pointSize, weight: .regular)
                 .applying(.init(paletteColors: [config.color]))
-            guard let img = NSImage(systemSymbolName: config.symbol, accessibilityDescription: nil)?.withSymbolConfiguration(cfg)
-            else { spin.contents = nil; return }
+            return NSImage(systemSymbolName: config.symbol, accessibilityDescription: nil)?.withSymbolConfiguration(cfg)
+        }
+
+        private func rasterize(_ img: NSImage, scale: CGFloat) -> CGImage? {
             var cg: CGImage?
             effectiveAppearance.performAsCurrentDrawingAppearance {
                 var rect = NSRect(origin: .zero, size: img.size)
                 cg = img.cgImage(forProposedRect: &rect, context: nil,
                                  hints: [.ctm: AffineTransform(scale: scale)])
             }
-            CATransaction.begin(); CATransaction.setDisableActions(true)
-            spin.contents = cg
-            CATransaction.commit()
+            return cg
         }
 
         func apply(revPerSec: Double) {
@@ -718,18 +775,26 @@ struct CASpinningSymbol: NSViewRepresentable {
             let speed = reduceMotion ? 0 : max(revPerSec, 0)
             guard speed != appliedSpeed else { return }
             appliedSpeed = speed
-            if speed <= 0 {
-                spin.removeAnimation(forKey: "spin")
-                spin.speed = 1; spin.timeOffset = 0; spin.beginTime = 0
-                return
-            }
-            if spin.animation(forKey: "spin") == nil {
-                let a = CABasicAnimation(keyPath: "transform.rotation.z")
-                a.fromValue = 0; a.toValue = -2 * Double.pi            // clockwise in a non-flipped layer
-                a.duration = 1; a.repeatCount = .infinity
-                a.isRemovedOnCompletion = false
-                spin.add(a, forKey: "spin")
-            }
+            guard speed > 0 else { stopSpinning(); return }
+            addSpinAnimationIfNeeded()
+            updateSpeed(speed)
+        }
+
+        private func stopSpinning() {
+            spin.removeAnimation(forKey: "spin")
+            spin.speed = 1; spin.timeOffset = 0; spin.beginTime = 0
+        }
+
+        private func addSpinAnimationIfNeeded() {
+            guard spin.animation(forKey: "spin") == nil else { return }
+            let a = CABasicAnimation(keyPath: "transform.rotation.z")
+            a.fromValue = 0; a.toValue = -2 * Double.pi                // clockwise in a non-flipped layer
+            a.duration = 1; a.repeatCount = .infinity
+            a.isRemovedOnCompletion = false
+            spin.add(a, forKey: "spin")
+        }
+
+        private func updateSpeed(_ speed: Double) {
             // Change speed without restarting (keeps phase continuous): re-base timeOffset/beginTime.
             let now = CACurrentMediaTime()
             spin.timeOffset = spin.convertTime(now, from: nil)

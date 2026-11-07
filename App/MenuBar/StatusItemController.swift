@@ -112,14 +112,19 @@ final class StatusItemController: NSObject {
         let content = renderer.content(for: s, style: style, options: options)
         let scales = MenuBarLabelRenderer.screenScales
         let tooltip = s.accessibilityText ?? "Thermik"
-        guard content != lastContent || scales != lastScales else {
-            if item.button?.toolTip != tooltip { item.button?.toolTip = tooltip }
-            return
-        }
+        guard content != lastContent || scales != lastScales else { updateTooltip(tooltip); return }
         lastContent = content
         lastScales = scales
         let img = renderer.image(for: s, style: style, options: options, scales: scales)
-        item.button?.image = img
+        updateButton(image: img, tooltip: tooltip)
+    }
+
+    private func updateTooltip(_ tooltip: String) {
+        if item.button?.toolTip != tooltip { item.button?.toolTip = tooltip }
+    }
+
+    private func updateButton(image: NSImage, tooltip: String) {
+        item.button?.image = image
         item.button?.toolTip = tooltip
         item.button?.setAccessibilityLabel(tooltip)
     }
@@ -137,30 +142,50 @@ final class StatusItemController: NSObject {
 
     @objc private func clicked(_ sender: NSStatusBarButton) {
         let event = NSApp.currentEvent
-        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
-            // 27+: a secondary click on the item while our menu is open dismisses it, and its mouse-up arrives while
-            // the menu's session is still ending; a new menu now would be closed by that ending session at once.
-            if sessionActive, !panelState.isOpen { return }
-            showContextMenu(); return
-        }
+        if isSecondaryClick(event) { handleSecondaryClick(); return }
         if event?.modifierFlags.contains(.option) == true, let alt = onAlternateClick { close(); alt(); return }
         debugLog?("clicked; session=\(sessionActive)")
         if #available(macOS 27.0, *) {
-            // On 27+ the menu-bar system may start an expanded-interface session for this click (delegate opens the
-            // panel). If it did not (or just ended one), fall back to a manual toggle on the next runloop turn.
-            DispatchQueue.main.async { [self] in
-                guard !sessionActive, Date().timeIntervalSince(lastSessionEnd) > 0.3 else { return }
-                toggle()
-            }
+            scheduleManualToggle()
             return
         }
         toggle()
+    }
+
+    private func isSecondaryClick(_ event: NSEvent?) -> Bool {
+        event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true
+    }
+
+    private func handleSecondaryClick() {
+        // 27+: a secondary click on the item while our menu is open dismisses it, and its mouse-up arrives while
+        // the menu's session is still ending; a new menu now would be closed by that ending session at once.
+        if sessionActive, !panelState.isOpen { return }
+        showContextMenu()
+    }
+
+    @available(macOS 27.0, *)
+    private func scheduleManualToggle() {
+        // On 27+ the menu-bar system may start an expanded-interface session for this click (delegate opens the
+        // panel). If it did not (or just ended one), fall back to a manual toggle on the next runloop turn.
+        DispatchQueue.main.async { [self] in
+            guard !sessionActive, Date().timeIntervalSince(lastSessionEnd) > 0.3 else { return }
+            toggle()
+        }
     }
 
     func toggle() { panelState.isOpen ? close() : open() }
 
     func open() {
         guard !panelState.isOpen else { panel.makeKeyAndOrderFront(nil); return }
+        preparePanelForOpening()
+        presentPreparedPanel()
+        scheduleReveal(after: 0.12)               // fallback if no size report arrives (size unchanged)
+        installMonitors()
+        onOpen?()
+        log.debug("popover opened")
+    }
+
+    private func preparePanelForOpening() {
         let screen = anchorScreen
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         panelState.set(maxHeight: min(ThermikMetrics.popoverMaxHeight, max(visible.height - 16, 200)))
@@ -171,13 +196,12 @@ final class StatusItemController: NSObject {
         panel.alphaValue = 0
         openedAt = Date()
         panel.place(size: panel.lastContentSize)
+    }
+
+    private func presentPreparedPanel() {
         panelState.set(open: true)
         panel.makeKeyAndOrderFront(nil)
         item.button?.highlight(true)
-        scheduleReveal(after: 0.12)               // fallback if no size report arrives (size unchanged)
-        installMonitors()
-        onOpen?()
-        log.debug("popover opened")
     }
 
     func close() {
@@ -203,22 +227,25 @@ final class StatusItemController: NSObject {
     private func scheduleReveal(after delay: TimeInterval) {
         revealWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.panelState.isOpen else { return }
-                self.revealWork = nil
-                if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-                    self.panel.alphaValue = 1
-                } else {
-                    let panel = self.panel
-                    NSAnimationContext.runAnimationGroup { ctx in
-                        ctx.duration = 0.12
-                        panel.animator().alphaValue = 1
-                    }
-                }
-            }
+            MainActor.assumeIsolated { self?.revealPanel() }
         }
         revealWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func revealPanel() {
+        guard panelState.isOpen else { return }
+        revealWork = nil
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { panel.alphaValue = 1; return }
+        animateReveal()
+    }
+
+    private func animateReveal() {
+        let panel = self.panel
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.12
+            panel.animator().alphaValue = 1
+        }
     }
 
     /// Screen of the status item; the main screen when the item is hidden (hotkey / programmatic open).
@@ -238,22 +265,33 @@ final class StatusItemController: NSObject {
 
     private func installMonitors() {
         removeMonitors()
+        installGlobalMonitor()
+        installLocalMonitor()
+    }
+
+    private func installGlobalMonitor() {
         // Clicks in other apps.
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
             MainActor.assumeIsolated { self?.close() }
         }
+    }
+
+    private func installLocalMonitor() {
         // Clicks in our other windows (main window, settings) — the status item button itself toggles via clicked().
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                // Menus (context menus opened from the panel) live at or above the pop-up menu level: ignore them.
-                if let w = event.window, w !== self.panel, w !== self.item.button?.window, !(w is StatusPanel),
-                   w.level.rawValue < NSWindow.Level.popUpMenu.rawValue {
-                    self.close()
-                }
-            }
+            MainActor.assumeIsolated { self?.closeForLocalEvent(event) }
             return event
         }
+    }
+
+    private func closeForLocalEvent(_ event: NSEvent) {
+        // Menus (context menus opened from the panel) live at or above the pop-up menu level: ignore them.
+        guard let w = event.window,
+              w !== panel,
+              w !== item.button?.window,
+              !(w is StatusPanel),
+              w.level.rawValue < NSWindow.Level.popUpMenu.rawValue else { return }
+        close()
     }
 
     private func removeMonitors() {
@@ -268,11 +306,13 @@ final class StatusItemController: NSObject {
         // (window-server ordering on the very first show) is ignored.
         guard panelState.isOpen, Date().timeIntervalSince(openedAt) > 0.25 else { return }
         DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.panelState.isOpen, NSApp.keyWindow !== self.panel else { return }
-                self.close()
-            }
+            MainActor.assumeIsolated { self?.closeIfPanelStillResigned() }
         }
+    }
+
+    private func closeIfPanelStillResigned() {
+        guard panelState.isOpen, NSApp.keyWindow !== panel else { return }
+        close()
     }
 
     private func showContextMenu() {
@@ -290,17 +330,21 @@ final class StatusItemController: NSObject {
 extension StatusItemController: NSStatusItemExpandedInterfaceDelegate {
     nonisolated func statusItem(_ statusItem: NSStatusItem, didBegin session: NSStatusItemExpandedInterfaceSession) {
         MainActor.assumeIsolated {
-            debugLog?("didBegin session; menu=\(showingMenu)")
-            // The session of our own right-click menu (showContextMenu): leave it to the menu. NSApp.currentEvent is
-            // no help here: it is whatever event came last (often the right mouse-up, sometimes a stale key-down).
-            if showingMenu { return }
-            // A secondary click must still show the context menu, not the panel.
-            if let e = NSApp.currentEvent, e.type == .rightMouseDown || e.type == .rightMouseUp || e.modifierFlags.contains(.control) {
-                item.expandedInterfaceSession?.cancel()
-                return
-            }
-            open()
+            beginExpandedInterfaceSession()
         }
+    }
+
+    private func beginExpandedInterfaceSession() {
+        debugLog?("didBegin session; menu=\(showingMenu)")
+        // The session of our own right-click menu (showContextMenu): leave it to the menu. NSApp.currentEvent is
+        // no help here: it is whatever event came last (often the right mouse-up, sometimes a stale key-down).
+        if showingMenu { return }
+        // A secondary click must still show the context menu, not the panel.
+        if let e = NSApp.currentEvent, e.type == .rightMouseDown || e.type == .rightMouseUp || e.modifierFlags.contains(.control) {
+            item.expandedInterfaceSession?.cancel()
+            return
+        }
+        open()
     }
     nonisolated func statusItemDidEndExpandedInterfaceSession(_ statusItem: NSStatusItem, animated: Bool) {
         MainActor.assumeIsolated {

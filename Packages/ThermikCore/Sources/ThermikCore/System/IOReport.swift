@@ -40,25 +40,45 @@ struct IOReportAPI: @unchecked Sendable {
     static let shared: IOReportAPI? = load()
 
     private static func load() -> IOReportAPI? {
-        guard let h = dlopen("/usr/lib/libIOReport.dylib", RTLD_NOW | RTLD_LOCAL) else { return nil }
-        func f<T>(_ n: String, _: T.Type) -> T? { dlsym(h, n).map { unsafeBitCast($0, to: T.self) } }
-        guard let copy = f("IOReportCopyChannelsInGroup", CopyChannelsInGroup.self),
-              let merge = f("IOReportMergeChannels", MergeChannels.self),
-              let sub = f("IOReportCreateSubscription", CreateSubscription.self),
-              let samples = f("IOReportCreateSamples", CreateSamples.self),
-              let delta = f("IOReportCreateSamplesDelta", CreateSamplesDelta.self),
-              let group = f("IOReportChannelGetGroup", ChannelString.self),
-              let subGroup = f("IOReportChannelGetSubGroup", ChannelString.self),
-              let name = f("IOReportChannelGetChannelName", ChannelString.self),
-              let unit = f("IOReportChannelGetUnitLabel", ChannelString.self),
-              let simple = f("IOReportSimpleGetIntegerValue", SimpleGetInteger.self),
-              let count = f("IOReportStateGetCount", ChannelInt32.self),
-              let stateName = f("IOReportStateGetNameForIndex", StateName.self),
-              let residency = f("IOReportStateGetResidency", StateResidency.self) else { return nil }
-        return IOReportAPI(copyChannelsInGroup: copy, copyAllChannels: f("IOReportCopyAllChannels", CopyAllChannels.self),
-                           mergeChannels: merge, createSubscription: sub, createSamples: samples,
-                           createSamplesDelta: delta, group: group, subGroup: subGroup, name: name, unit: unit,
-                           simpleInteger: simple, stateCount: count, stateName: stateName, stateResidency: residency)
+        guard let handle = dlopen("/usr/lib/libIOReport.dylib", RTLD_NOW | RTLD_LOCAL) else { return nil }
+        guard let core = coreSymbols(handle), let channels = channelSymbols(handle), let states = stateSymbols(handle) else { return nil }
+        return IOReportAPI(copyChannelsInGroup: core.copy, copyAllChannels: symbol(handle, "IOReportCopyAllChannels", CopyAllChannels.self),
+                           mergeChannels: core.merge, createSubscription: core.sub, createSamples: core.samples,
+                           createSamplesDelta: core.delta, group: channels.group, subGroup: channels.subGroup,
+                           name: channels.name, unit: channels.unit, simpleInteger: channels.simple,
+                           stateCount: states.count, stateName: states.name, stateResidency: states.residency)
+    }
+
+    private static func symbol<T>(_ handle: UnsafeMutableRawPointer, _ name: String, _: T.Type) -> T? {
+        dlsym(handle, name).map { unsafeBitCast($0, to: T.self) }
+    }
+
+    private static func coreSymbols(_ handle: UnsafeMutableRawPointer) ->
+        (copy: CopyChannelsInGroup, merge: MergeChannels, sub: CreateSubscription, samples: CreateSamples, delta: CreateSamplesDelta)? {
+        guard let copy = symbol(handle, "IOReportCopyChannelsInGroup", CopyChannelsInGroup.self),
+              let merge = symbol(handle, "IOReportMergeChannels", MergeChannels.self),
+              let sub = symbol(handle, "IOReportCreateSubscription", CreateSubscription.self),
+              let samples = symbol(handle, "IOReportCreateSamples", CreateSamples.self),
+              let delta = symbol(handle, "IOReportCreateSamplesDelta", CreateSamplesDelta.self) else { return nil }
+        return (copy, merge, sub, samples, delta)
+    }
+
+    private static func channelSymbols(_ handle: UnsafeMutableRawPointer) ->
+        (group: ChannelString, subGroup: ChannelString, name: ChannelString, unit: ChannelString, simple: SimpleGetInteger)? {
+        guard let group = symbol(handle, "IOReportChannelGetGroup", ChannelString.self),
+              let subGroup = symbol(handle, "IOReportChannelGetSubGroup", ChannelString.self),
+              let name = symbol(handle, "IOReportChannelGetChannelName", ChannelString.self),
+              let unit = symbol(handle, "IOReportChannelGetUnitLabel", ChannelString.self),
+              let simple = symbol(handle, "IOReportSimpleGetIntegerValue", SimpleGetInteger.self) else { return nil }
+        return (group, subGroup, name, unit, simple)
+    }
+
+    private static func stateSymbols(_ handle: UnsafeMutableRawPointer) ->
+        (count: ChannelInt32, name: StateName, residency: StateResidency)? {
+        guard let count = symbol(handle, "IOReportStateGetCount", ChannelInt32.self),
+              let name = symbol(handle, "IOReportStateGetNameForIndex", StateName.self),
+              let residency = symbol(handle, "IOReportStateGetResidency", StateResidency.self) else { return nil }
+        return (count, name, residency)
     }
 }
 
@@ -135,38 +155,50 @@ final class IOReportSubscription {
     /// `IOReportCopyChannelsInGroup` call per group: each of those costs the same ~55 ms because the library walks every
     /// reporting driver either way (measured: 8 group copies = 435 ms, the single listing + filter = 62 ms).
     convenience init?(api: IOReportAPI, groups: [String], keep: (_ group: String, _ subGroup: String, _ name: String) -> Bool) {
-        var listing: CFDictionary? = api.copyAllChannels?(0, 0)?.takeRetainedValue()
-        if listing == nil {                                       // fallback: merge the groups one by one
-            var merged: CFMutableDictionary?
-            for g in groups {
-                guard let ch = api.copyChannelsInGroup(g as CFString, nil, 0, 0, 0)?.takeRetainedValue() else { continue }
-                if let m = merged { api.mergeChannels(m, ch, nil) } else { merged = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, ch) }
-            }
-            listing = merged
-        }
+        guard let listing = Self.channelListing(api: api, groups: groups) else { return nil }
         let wanted = Set(groups)
-        guard let listing, let selected = Self.filter(listing, api: api, keep: { ch in
-            let g = ch.group
-            return wanted.contains(g) && keep(g, ch.subGroup, ch.name)
+        guard let selected = Self.filter(listing, api: api, keep: { channel in
+            let group = channel.group
+            return wanted.contains(group) && keep(group, channel.subGroup, channel.name)
         }) else { return nil }
         self.init(api: api, channels: selected)
+    }
+
+    private static func channelListing(api: IOReportAPI, groups: [String]) -> CFDictionary? {
+        if let all = api.copyAllChannels?(0, 0)?.takeRetainedValue() { return all }
+        return mergedChannels(api: api, groups: groups)       // fallback: merge the groups one by one
+    }
+
+    private static func mergedChannels(api: IOReportAPI, groups: [String]) -> CFDictionary? {
+        var merged: CFMutableDictionary?
+        for group in groups {
+            guard let channels = api.copyChannelsInGroup(group as CFString, nil, 0, 0, 0)?.takeRetainedValue() else { continue }
+            if let merged { api.mergeChannels(merged, channels, nil) }
+            else { merged = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, channels) }
+        }
+        return merged
     }
 
     /// A copy of a channel list holding only the channels that pass `keep` (the original CF channel objects, not
     /// bridged copies). nil when nothing is left.
     private static func filter(_ channels: CFDictionary, api: IOReportAPI, keep: (IOReportChannel) -> Bool) -> CFDictionary? {
         guard let source = IOReportChannel.channelArray(channels),
-              let copy = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, channels),
-              let kept = withUnsafePointer(to: kCFTypeArrayCallBacks, { CFArrayCreateMutable(kCFAllocatorDefault, 0, $0) })
-        else { return nil }
-        for i in 0..<CFArrayGetCount(source) {
-            guard let raw = CFArrayGetValueAtIndex(source, i) else { continue }
-            if keep(IOReportChannel(dict: unsafeBitCast(raw, to: CFDictionary.self), api: api)) { CFArrayAppendValue(kept, raw) }
-        }
-        guard CFArrayGetCount(kept) > 0 else { return nil }
+              let copy = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, channels) else { return nil }
+        guard let kept = keptChannels(source, api: api, keep: keep), CFArrayGetCount(kept) > 0 else { return nil }
         CFDictionarySetValue(copy, Unmanaged.passUnretained(IOReportChannel.channelsKey).toOpaque(),
                              Unmanaged.passUnretained(kept).toOpaque())
         return copy
+    }
+
+    private static func keptChannels(_ source: CFArray, api: IOReportAPI,
+                                     keep: (IOReportChannel) -> Bool) -> CFMutableArray? {
+        guard let kept = withUnsafePointer(to: kCFTypeArrayCallBacks, { CFArrayCreateMutable(kCFAllocatorDefault, 0, $0) }) else { return nil }
+        for index in 0..<CFArrayGetCount(source) {
+            guard let raw = CFArrayGetValueAtIndex(source, index) else { continue }
+            let channel = IOReportChannel(dict: unsafeBitCast(raw, to: CFDictionary.self), api: api)
+            if keep(channel) { CFArrayAppendValue(kept, raw) }
+        }
+        return kept
     }
 
     var channelCount: Int { IOReportChannel.channelArray(subscribed).map(CFArrayGetCount) ?? 0 }
@@ -186,31 +218,58 @@ struct DVFSTables: Sendable {
     /// by shape: `*-sram` tables without an OFF entry are CPU tables (E = lowest max, P = highest max), tables that start
     /// with 0 Hz are GPU tables.
     static func load() -> DVFSTables {
-        var cpuTables: [String: [Double]] = [:], gpuTables: [String: [Double]] = [:]
-        var it: io_iterator_t = 0
-        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceNameMatching("pmgr"), &it) == KERN_SUCCESS else { return .init() }
-        defer { IOObjectRelease(it) }
-        while case let e = IOIteratorNext(it), e != 0 {
-            defer { IOObjectRelease(e) }
-            for (k, v) in IOKitHelpers.properties(e) where k.hasPrefix("voltage-states") {
-                guard let data = v as? Data, data.count >= 16 else { continue }
-                let raw: [UInt32] = data.withUnsafeBytes { b in
-                    (0..<(b.count / 8)).map { b.loadUnaligned(fromByteOffset: $0 * 8, as: UInt32.self) }
-                }
-                let mhz = raw.map { $0 >= 100_000_000 ? Double($0) / 1e6 : Double($0) / 1e3 }
-                if raw.first == 0, !k.hasSuffix("-sram") {
-                    gpuTables[k] = Array(mhz.dropFirst())                    // drop the OFF (0 Hz) entry
-                } else if k.hasSuffix("-sram"), !raw.contains(where: { $0 <= 1 }) {
-                    cpuTables[k] = mhz
-                }
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceNameMatching("pmgr"), &iterator) == KERN_SUCCESS else { return .init() }
+        defer { IOObjectRelease(iterator) }
+        var collector = Collector()
+        collector.collect(iterator: iterator)
+        return collector.tables()
+    }
+
+    private struct Collector {
+        var cpuTables: [String: [Double]] = [:]
+        var gpuTables: [String: [Double]] = [:]
+
+        mutating func collect(iterator: io_iterator_t) {
+            while case let entry = IOIteratorNext(iterator), entry != 0 {
+                defer { IOObjectRelease(entry) }
+                collect(entry: entry)
             }
         }
-        var t = DVFSTables()
-        let byMax = cpuTables.values.filter { ($0.max() ?? 0) > 500 }.sorted { ($0.max() ?? 0) < ($1.max() ?? 0) }
-        t.eCPU = byMax.first ?? []
-        t.pCPU = byMax.last ?? []
-        t.gpu = gpuTables["voltage-states9"] ?? gpuTables.values.max { $0.count < $1.count } ?? []
-        return t
+
+        mutating func collect(entry: io_registry_entry_t) {
+            for (key, value) in IOKitHelpers.properties(entry) where key.hasPrefix("voltage-states") {
+                guard let data = value as? Data, let table = Self.table(data) else { continue }
+                add(key: key, table: table)
+            }
+        }
+
+        static func table(_ data: Data) -> (raw: [UInt32], mhz: [Double])? {
+            guard data.count >= 16 else { return nil }
+            let raw: [UInt32] = data.withUnsafeBytes { bytes in
+                (0..<(bytes.count / 8)).map { bytes.loadUnaligned(fromByteOffset: $0 * 8, as: UInt32.self) }
+            }
+            let mhz = raw.map { $0 >= 100_000_000 ? Double($0) / 1e6 : Double($0) / 1e3 }
+            return (raw, mhz)
+        }
+
+        mutating func add(key: String, table: (raw: [UInt32], mhz: [Double])) {
+            if table.raw.first == 0, !key.hasSuffix("-sram") {
+                gpuTables[key] = Array(table.mhz.dropFirst())                // drop the OFF (0 Hz) entry
+                return
+            }
+            guard key.hasSuffix("-sram"), !table.raw.contains(where: { $0 <= 1 }) else { return }
+            cpuTables[key] = table.mhz
+        }
+
+        func tables() -> DVFSTables {
+            var result = DVFSTables()
+            let byMax = cpuTables.values.filter { ($0.max() ?? 0) > 500 }.sorted { ($0.max() ?? 0) < ($1.max() ?? 0) }
+            result.eCPU = byMax.first ?? []
+            result.pCPU = byMax.last ?? []
+            result.gpu = gpuTables["voltage-states9"] ?? gpuTables.values.max { $0.count < $1.count } ?? []
+            return result
+        }
     }
 }
 
@@ -244,22 +303,40 @@ final class SoCSampler {
     private var zeroWhileBusy = 0
     private(set) var energyModelFrozen = false
 
+    private struct SampleWindow {
+        var main: CFDictionary
+        var delta: CFDictionary
+        var clpc: CFDictionary?
+        var previousCLPC: CFDictionary?
+        var interval: Double
+    }
+
+    private struct ChannelReadings {
+        var clusters: [DomainFrequency] = []
+        var cores: [DomainFrequency] = []
+        var gpu: DomainFrequency?
+        var energy: [String: Double] = [:]
+    }
+
     /// ≈ 60–70 ms on M4 Max (one channel listing + subscription), off the main thread.
     init?() {
+        let groups = ["Energy Model", "CPU Stats", "GPU Stats", "ANS2"]
         guard let api = IOReportAPI.shared,
-              let s = IOReportSubscription(api: api, groups: ["Energy Model", "CPU Stats", "GPU Stats", "ANS2"], keep: { g, sg, name in
-                  switch g {
-                  case "Energy Model": return Self.energyChannels.contains(name)
-                  case "CPU Stats": return sg == "CPU Core Performance States"
-                      || (sg == "CPU Complex Performance States" && Self.isCluster(name))
-                  case "GPU Stats": return sg == "GPU Performance States" && name == "GPUPH"
-                  // Only the SSD-controller temperatures: the whole ANS2 group has ~420 channels (PCIe link statistics).
-                  case "ANS2": return sg.hasPrefix("MSP") && name.hasPrefix("Temperature")
-                  default: return false
-                  }
-              }) else { return nil }
+              let subscription = IOReportSubscription(api: api, groups: groups, keep: Self.keepChannel) else { return nil }
         self.api = api
-        main = s
+        main = subscription
+    }
+
+    private static func keepChannel(_ group: String, _ subGroup: String, _ name: String) -> Bool {
+        switch group {
+        case "Energy Model": return energyChannels.contains(name)
+        case "CPU Stats": return subGroup == "CPU Core Performance States"
+            || (subGroup == "CPU Complex Performance States" && isCluster(name))
+        case "GPU Stats": return subGroup == "GPU Performance States" && name == "GPUPH"
+        // Only SSD-controller temperatures: the whole ANS2 group has ~420 channels (PCIe link statistics).
+        case "ANS2": return subGroup.hasPrefix("MSP") && name.hasPrefix("Temperature")
+        default: return false
+        }
     }
 
     /// CPU clusters in "CPU Complex Performance States": ECPU, PCPU, PCPU1 (Ultra: ECPU1, PCPU2, …). ECPM / PCPM… are
@@ -275,101 +352,143 @@ final class SoCSampler {
 
     /// nil on the first call (needs two samples), after `reset()`, or if sampling failed.
     func sample() -> SoCMetrics? {
-        let useCLPC = UserDefaults.standard.bool(forKey: Self.clpcDefaultsKey)
-        if useCLPC, case .notCreated = clpc { clpc = CLPCEnergy.subscription(api: api).map { .live($0) } ?? .unavailable }
-        if !useCLPC, case .live = clpc { clpc = .notCreated }          // flag switched off: drop the subscription
-
-        guard let m = main.sample() else { return nil }
-        let clpcSub: IOReportSubscription? = { if useCLPC, case .live(let s) = clpc { return s }; return nil }()
-        let c = clpcSub?.sample()
-        let now = DispatchTime.now().uptimeNanoseconds
-        defer { last = (m, c, now) }
-        guard let last, let d = main.delta(from: last.main, to: m) else { return nil }
-        let dt = Double(now &- last.at) / 1e9
-        guard dt > 0.05 else { return nil }
-
-        var clusters: [DomainFrequency] = [], cores: [DomainFrequency] = [], gpu: DomainFrequency?
-        var energy: [String: Double] = [:]
-        for ch in IOReportChannel.all(in: d, api: api) {
-            switch (ch.group, ch.subGroup) {
-            case ("Energy Model", _):
-                energy[ch.name] = ch.joules / dt
-            case ("CPU Stats", "CPU Complex Performance States"):
-                let name = ch.name
-                guard Self.isCluster(name) else { continue }
-                clusters.append(frequency(ch, name: name, table: name.hasPrefix("E") ? tables.eCPU : tables.pCPU))
-            case ("CPU Stats", "CPU Core Performance States"):
-                let name = ch.name
-                cores.append(frequency(ch, name: name, table: name.hasPrefix("E") ? tables.eCPU : tables.pCPU))
-            case ("GPU Stats", "GPU Performance States"):
-                gpu = frequency(ch, name: ch.name, table: tables.gpu)
-            default:
-                continue
-            }
-        }
-        // The SSD-controller temperature is an instantaneous value: read the raw sample (the delta is garbage).
-        let ssd = IOReportChannel.all(in: m, api: api)
-            .filter { $0.group == "ANS2" && $0.name.hasPrefix("Temperature") }
-            .map(\.integer).filter { (1...150).contains($0) }.max().map(Double.init)
-
-        var clpcWatts: [String: Double]?
-        if let clpcSub, let a = last.clpc, let c, let cd = clpcSub.delta(from: a, to: c) {
-            var w: [String: Double] = [:]
-            for ch in IOReportChannel.all(in: cd, api: api) { w[ch.name] = ch.joules / dt }
-            clpcWatts = w
-        }
-        return SoCMetrics(interval: dt, clusters: clusters, cores: cores, gpu: gpu,
-                          power: power(energy: energy, clusters: clusters, clpc: clpcWatts),
+        let clpcSubscription = synchronizedCLPC()
+        guard let window = sampleWindow(clpcSubscription) else { return nil }
+        let readings = readChannels(window)
+        let ssd = ssdTemperature(in: window.main)
+        let clpcWatts = clpcWatts(window, subscription: clpcSubscription)
+        return SoCMetrics(interval: window.interval, clusters: readings.clusters, cores: readings.cores, gpu: readings.gpu,
+                          power: power(energy: readings.energy, clusters: readings.clusters, clpc: clpcWatts),
                           ssdControllerTempC: ssd)
     }
 
+    private func synchronizedCLPC() -> IOReportSubscription? {
+        let enabled = UserDefaults.standard.bool(forKey: Self.clpcDefaultsKey)
+        if enabled, case .notCreated = clpc { clpc = CLPCEnergy.subscription(api: api).map { .live($0) } ?? .unavailable }
+        if !enabled, case .live = clpc { clpc = .notCreated }           // flag switched off: drop the subscription
+        guard enabled, case .live(let subscription) = clpc else { return nil }
+        return subscription
+    }
+
+    private func sampleWindow(_ clpcSubscription: IOReportSubscription?) -> SampleWindow? {
+        guard let mainSample = main.sample() else { return nil }
+        let clpcSample = clpcSubscription?.sample()
+        let now = DispatchTime.now().uptimeNanoseconds
+        defer { last = (mainSample, clpcSample, now) }
+        guard let last, let delta = main.delta(from: last.main, to: mainSample) else { return nil }
+        let interval = Double(now &- last.at) / 1e9
+        guard interval > 0.05 else { return nil }
+        return SampleWindow(main: mainSample, delta: delta, clpc: clpcSample, previousCLPC: last.clpc, interval: interval)
+    }
+
+    private func readChannels(_ window: SampleWindow) -> ChannelReadings {
+        var readings = ChannelReadings()
+        for channel in IOReportChannel.all(in: window.delta, api: api) { consume(channel, into: &readings, interval: window.interval) }
+        return readings
+    }
+
+    private func consume(_ channel: IOReportChannel, into readings: inout ChannelReadings, interval: Double) {
+        if channel.group == "Energy Model" { readings.energy[channel.name] = channel.joules / interval; return }
+        if channel.group == "CPU Stats", channel.subGroup == "CPU Complex Performance States" {
+            appendCluster(channel, into: &readings); return
+        }
+        if channel.group == "CPU Stats", channel.subGroup == "CPU Core Performance States" {
+            appendCore(channel, into: &readings); return
+        }
+        if channel.group == "GPU Stats", channel.subGroup == "GPU Performance States" {
+            readings.gpu = frequency(channel, name: channel.name, table: tables.gpu)
+        }
+    }
+
+    private func appendCluster(_ channel: IOReportChannel, into readings: inout ChannelReadings) {
+        let name = channel.name
+        guard Self.isCluster(name) else { return }
+        readings.clusters.append(frequency(channel, name: name, table: name.hasPrefix("E") ? tables.eCPU : tables.pCPU))
+    }
+
+    private func appendCore(_ channel: IOReportChannel, into readings: inout ChannelReadings) {
+        let name = channel.name
+        readings.cores.append(frequency(channel, name: name, table: name.hasPrefix("E") ? tables.eCPU : tables.pCPU))
+    }
+
+    /// The SSD-controller temperature is instantaneous: read the raw sample (the delta is garbage).
+    private func ssdTemperature(in sample: CFDictionary) -> Double? {
+        IOReportChannel.all(in: sample, api: api)
+            .filter { $0.group == "ANS2" && $0.name.hasPrefix("Temperature") }
+            .map(\.integer).filter { (1...150).contains($0) }.max().map(Double.init)
+    }
+
+    private func clpcWatts(_ window: SampleWindow, subscription: IOReportSubscription?) -> [String: Double]? {
+        guard let subscription, let previous = window.previousCLPC, let current = window.clpc,
+              let delta = subscription.delta(from: previous, to: current) else { return nil }
+        var watts: [String: Double] = [:]
+        for channel in IOReportChannel.all(in: delta, api: api) { watts[channel.name] = channel.joules / window.interval }
+        return watts
+    }
+
     private func power(energy em: [String: Double], clusters: [DomainFrequency], clpc: [String: Double]?) -> SoCPower {
-        func sane(_ w: Double?) -> Double? { w.flatMap { $0 >= 0 && $0 < Self.saneWatts ? $0 : nil } }
         let gpuW = sane(em["GPU Energy"])                                  // AGX driver counter: works on macOS 27 too
         let busy = clusters.contains { $0.activePercent > 1 }
         let cpuRaw = em["CPU Energy"]
-        if let cpuRaw, cpuRaw > 0 {
-            zeroWhileBusy = 0; energyModelFrozen = false
-        } else if busy || cpuRaw == nil {
-            zeroWhileBusy += 1
-            if zeroWhileBusy >= 2 { energyModelFrozen = true }
-        }
-        // A zero CPU delta while the CPU is busy is never real: treat it as "no reading" even before the freeze is confirmed.
+        updateEnergyModelFreeze(cpuRaw: cpuRaw, busy: busy)
+        // A zero CPU delta while busy is never real, even before the freeze is confirmed.
         let energyModelLive = !energyModelFrozen && cpuRaw != nil && !(cpuRaw == 0 && busy)
-
-        if energyModelLive {
-            return SoCPower(cpuW: sane(cpuRaw), gpuW: gpuW, aneW: sane(em["ANE"]), dramW: sane(em["DRAM"]), source: .energyModel)
-        }
-        if let clpc, let cpu = sane(clpc["CPU Energy"]), cpu > 0 {
-            return SoCPower(cpuW: cpu, gpuW: gpuW ?? sane(clpc["GPU Energy"]), aneW: sane(clpc["ANE"]), dramW: nil, source: .clpc)
-        }
+        if energyModelLive { return energyModelPower(energy: em, cpuRaw: cpuRaw, gpuW: gpuW) }
+        if let fallback = clpcPower(clpc, gpuW: gpuW) { return fallback }
         return SoCPower(cpuW: nil, gpuW: gpuW, aneW: nil, dramW: nil, source: gpuW == nil ? .unavailable : .energyModel)
+    }
+
+    private func updateEnergyModelFreeze(cpuRaw: Double?, busy: Bool) {
+        if let cpuRaw, cpuRaw > 0 { zeroWhileBusy = 0; energyModelFrozen = false; return }
+        guard busy || cpuRaw == nil else { return }
+        zeroWhileBusy += 1
+        if zeroWhileBusy >= 2 { energyModelFrozen = true }
+    }
+
+    private func energyModelPower(energy: [String: Double], cpuRaw: Double?, gpuW: Double?) -> SoCPower {
+        SoCPower(cpuW: sane(cpuRaw), gpuW: gpuW, aneW: sane(energy["ANE"]), dramW: sane(energy["DRAM"]), source: .energyModel)
+    }
+
+    private func clpcPower(_ clpc: [String: Double]?, gpuW: Double?) -> SoCPower? {
+        guard let clpc, let cpu = sane(clpc["CPU Energy"]), cpu > 0 else { return nil }
+        return SoCPower(cpuW: cpu, gpuW: gpuW ?? sane(clpc["GPU Energy"]), aneW: sane(clpc["ANE"]), dramW: nil, source: .clpc)
+    }
+
+    private func sane(_ watts: Double?) -> Double? {
+        watts.flatMap { $0 >= 0 && $0 < Self.saneWatts ? $0 : nil }
     }
 
     /// Residency-weighted average over the *active* states (after IDLE / DOWN / OFF). On M4 this is the REQUESTED DVFS
     /// state, not a measured clock (macmon #78): the UI labels it "≈". 0 MHz when the domain was never active.
     /// `table[i]` is the MHz of the i-th ACTIVE state (the DVFS tables have no idle entries).
-    private func frequency(_ ch: IOReportChannel, name: String, table: [Double]) -> DomainFrequency {
-        let count = ch.stateCount
-        let first: Int
-        if let cached = firstActiveState[name], cached <= count {
-            first = cached
-        } else {
-            let inactive: Set<String> = ["IDLE", "DOWN", "OFF"]
-            first = (0..<count).first { !inactive.contains(ch.stateName($0)) } ?? count
-            firstActiveState[name] = first
-        }
-        var total = 0.0, activeTicks = 0.0, weighted = 0.0
-        for i in 0..<count {
-            let ticks = Double(ch.residency(i))
+    private func frequency(_ channel: IOReportChannel, name: String, table: [Double]) -> DomainFrequency {
+        let count = channel.stateCount
+        let first = firstActiveState(channel, name: name, count: count)
+        let residency = residency(channel, count: count, first: first, table: table)
+        return DomainFrequency(name: name, mhz: residency.active > 0 ? residency.weighted / residency.active : 0,
+                               activePercent: residency.total > 0 ? residency.active / residency.total * 100 : 0)
+    }
+
+    private func firstActiveState(_ channel: IOReportChannel, name: String, count: Int) -> Int {
+        if let cached = firstActiveState[name], cached <= count { return cached }
+        let inactive: Set<String> = ["IDLE", "DOWN", "OFF"]
+        let first = (0..<count).first { !inactive.contains(channel.stateName($0)) } ?? count
+        firstActiveState[name] = first
+        return first
+    }
+
+    private func residency(_ channel: IOReportChannel, count: Int, first: Int,
+                           table: [Double]) -> (total: Double, active: Double, weighted: Double) {
+        var total = 0.0, active = 0.0, weighted = 0.0
+        for index in 0..<count {
+            let ticks = Double(channel.residency(index))
             total += ticks
-            guard i >= first else { continue }
-            activeTicks += ticks
-            let k = i - first
-            if k < table.count { weighted += ticks * table[k] }
+            guard index >= first else { continue }
+            active += ticks
+            let tableIndex = index - first
+            if tableIndex < table.count { weighted += ticks * table[tableIndex] }
         }
-        return DomainFrequency(name: name, mhz: activeTicks > 0 ? weighted / activeTicks : 0,
-                               activePercent: total > 0 ? activeTicks / total * 100 : 0)
+        return (total, active, weighted)
     }
 }
 
@@ -409,22 +528,32 @@ enum CLPCEnergy {
 
     static func subscription(api: IOReportAPI) -> IOReportSubscription? {
         guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 27 else { return nil }
-        let svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleCLPC"))
-        guard svc != 0 else { return nil }
-        defer { IOObjectRelease(svc) }
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleCLPC"))
+        guard service != 0 else { return nil }
+        defer { IOObjectRelease(service) }
         var entryID: UInt64 = 0
-        guard IORegistryEntryGetRegistryEntryID(svc, &entryID) == KERN_SUCCESS,
-              let bundle: String = IOKitHelpers.property(svc, "CFBundleIdentifier"), let k = keys[bundle] else { return nil }
+        guard IORegistryEntryGetRegistryEntryID(service, &entryID) == KERN_SUCCESS,
+              let bundle: String = IOKitHelpers.property(service, "CFBundleIdentifier"), let key = keys[bundle] else { return nil }
+        let description = channelDescription(entryID: entryID, key: key)
+        return IOReportSubscription(api: api, channels: description as CFDictionary)
+    }
+
+    private static func channelDescription(entryID: UInt64, key: (cpu: UInt64, gpu: UInt64, ane: UInt64)) -> NSDictionary {
         let nJ: UInt64 = (3 << 56) | (118 << 32)                    // IOReport unit encoding for nanojoules
         let simple: UInt64 = 1 | (2 << 16) | (1 << 32)              // simple integer, power category, 1 element
-        func channel(_ name: String, _ index: UInt64, _ key: UInt64) -> NSDictionary {
-            ["DriverID": NSNumber(value: entryID), "DriverName": "AppleCLPC", "ChannelName": name,
-             "IOReportGroupName": "CLPC", "IOReportSubGroupName": "Energy Counters",
-             "IOReportChannelInfo": ["IOReportChannelUnit": NSNumber(value: nJ)],
-             "LegendChannel": [NSNumber(value: (index << 32) | key), NSNumber(value: simple), name]]
-        }
-        let desc: NSDictionary = ["IOReportChannels": [channel("CPU Energy", 16, k.cpu), channel("GPU Energy", 25, k.gpu),
-                                                       channel("ANE", 24, k.ane)]]
-        return IOReportSubscription(api: api, channels: desc as CFDictionary)
+        let channels = [
+            channel("CPU Energy", 16, key.cpu, entryID: entryID, unit: nJ, simple: simple),
+            channel("GPU Energy", 25, key.gpu, entryID: entryID, unit: nJ, simple: simple),
+            channel("ANE", 24, key.ane, entryID: entryID, unit: nJ, simple: simple),
+        ]
+        return ["IOReportChannels": channels]
+    }
+
+    private static func channel(_ name: String, _ index: UInt64, _ key: UInt64,
+                                entryID: UInt64, unit: UInt64, simple: UInt64) -> NSDictionary {
+        ["DriverID": NSNumber(value: entryID), "DriverName": "AppleCLPC", "ChannelName": name,
+         "IOReportGroupName": "CLPC", "IOReportSubGroupName": "Energy Counters",
+         "IOReportChannelInfo": ["IOReportChannelUnit": NSNumber(value: unit)],
+         "LegendChannel": [NSNumber(value: (index << 32) | key), NSNumber(value: simple), name]]
     }
 }

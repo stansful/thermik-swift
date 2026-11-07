@@ -29,38 +29,52 @@ final class TopProcessSampler {
         let current = snapshot()
         defer { previous = current; previousAt = now }
         guard let previousAt, now > previousAt, limit > 0 else { return [] }
-        let wallNs = Double(now - previousAt)
-        var out: [(pid: pid_t, percent: Double)] = []
-        for (pid, e) in current {
-            // A different start time means the pid was reused: no meaningful delta.
-            guard let p = previous[pid], p.startAbs == e.startAbs, e.cpuNs >= p.cpuNs else { continue }
-            let percent = (e.cpuNs - p.cpuNs) / wallNs * 100
-            if percent >= 0.1 { out.append((pid, percent)) }
-        }
+        var out = cpuDeltas(current: current, wallNs: Double(now - previousAt))
         out.sort { $0.percent > $1.percent }
         return out.prefix(limit).map { ProcessCPU(pid: $0.pid, name: Self.name($0.pid), cpuPercent: $0.percent) }
+    }
+
+    private func cpuDeltas(current: [pid_t: Entry], wallNs: Double) -> [(pid: pid_t, percent: Double)] {
+        var out: [(pid: pid_t, percent: Double)] = []
+        for (pid, entry) in current {
+            // A different start time means the pid was reused: no meaningful delta.
+            guard let previous = previous[pid], previous.startAbs == entry.startAbs, entry.cpuNs >= previous.cpuNs else { continue }
+            let percent = (entry.cpuNs - previous.cpuNs) / wallNs * 100
+            if percent >= 0.1 { out.append((pid, percent)) }
+        }
+        return out
     }
 
     func reset() { previous = [:]; previousAt = nil }
 
     private func snapshot() -> [pid_t: Entry] {
-        let capacity = Int(proc_listallpids(nil, 0)) + 64            // the list can grow between the two calls
-        guard capacity > 64 else { return [:] }
-        var pids = [pid_t](repeating: 0, count: capacity)
-        let count = Int(pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) })
-        guard count > 0 else { return [:] }
+        let pids = processIDs()
         var out: [pid_t: Entry] = [:]
-        out.reserveCapacity(count)
+        out.reserveCapacity(pids.count)
         var info = rusage_info_v4()
-        for pid in pids.prefix(min(count, capacity)) where pid > 0 {
-            let rc = withUnsafeMutablePointer(to: &info) {
-                $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
-            }
-            guard rc == 0 else { continue }                            // EPERM for other users' processes
-            let ticks = info.ri_user_time &+ info.ri_system_time
-            out[pid] = Entry(startAbs: info.ri_proc_start_abstime, cpuNs: Double(ticks) * nsPerTick)
+        for pid in pids {
+            guard let entry = entry(pid: pid, info: &info) else { continue }
+            out[pid] = entry
         }
         return out
+    }
+
+    private func processIDs() -> [pid_t] {
+        let capacity = Int(proc_listallpids(nil, 0)) + 64            // the list can grow between the two calls
+        guard capacity > 64 else { return [] }
+        var pids = [pid_t](repeating: 0, count: capacity)
+        let count = Int(pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) })
+        guard count > 0 else { return [] }
+        return Array(pids.prefix(min(count, capacity)).filter { $0 > 0 })
+    }
+
+    private func entry(pid: pid_t, info: inout rusage_info_v4) -> Entry? {
+        let rc = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
+        }
+        guard rc == 0 else { return nil }                            // EPERM for other users' processes
+        let ticks = info.ri_user_time &+ info.ri_system_time
+        return Entry(startAbs: info.ri_proc_start_abstime, cpuNs: Double(ticks) * nsPerTick)
     }
 
     /// `proc_name` (≤ 32 bytes, so long helper names are cut); when it looks truncated, the executable's file name

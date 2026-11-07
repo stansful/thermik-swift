@@ -157,51 +157,75 @@ import ThermikSMC
     func load(profile: FanHardwareProfile, names: [String]?) {
         let profileChanged = profile != self.profile
         self.profile = profile
-        fans = profile.fans.map { fan in
+        fans = makeFans(profile: profile, names: names)
+        if profileChanged || engine == nil { engine = profile.fans.isEmpty ? nil : FanControlEngine(profile: profile) }
+        restoreInitialModeIfNeeded()
+        refreshStatus()
+    }
+
+    private func makeFans(profile: FanHardwareProfile, names: [String]?) -> [LiveFan] {
+        profile.fans.map { fan in
             let databaseName = names?.indices.contains(fan.index) == true ? names?[fan.index] : nil
             return LiveFan(descriptor: fan, displayName: Self.displayName(dbName: databaseName, descriptor: fan))
         }
-        if profileChanged || engine == nil { engine = profile.fans.isEmpty ? nil : FanControlEngine(profile: profile) }
-        if !loaded {
-            loaded = true
-            // §2.3.5 launch step 8: System unless the user asked to restore the last mode.
-            if config.restoreModeOnLaunch, config.mode != .system, hasFans {
-                mode = config.mode
-                events.record(.fanModeChanged(FanModeChange(from: .system, to: mode, reason: .launch)))
-                if mode == .max { armMaxRevert(from: Date()) } else { maxRevertDeadline = nil }
-                router.requestTick()
-            } else if settings.fans.mode != .system {
-                settings.fans.mode = .system
-            }
+    }
+
+    private func restoreInitialModeIfNeeded() {
+        guard !loaded else { return }
+        loaded = true
+        // §2.3.5 launch step 8: System unless the user asked to restore the last mode.
+        restoreLaunchMode()
+    }
+
+    private func restoreLaunchMode() {
+        if config.restoreModeOnLaunch, config.mode != .system, hasFans {
+            restoreMode(config.mode)
+        } else if settings.fans.mode != .system {
+            settings.fans.mode = .system
         }
-        refreshStatus()
+    }
+
+    private func restoreMode(_ newMode: FanMode) {
+        mode = newMode
+        events.record(.fanModeChanged(FanModeChange(from: .system, to: newMode, reason: .launch)))
+        updateMaxRevertDeadline()
+        router.requestTick()
     }
 
     // MARK: Tick
 
     func consume(_ tick: Tick) {
         let now = tick.date
-        if let state = tick.sensors.fans {
-            for snap in state.fans { fans.first { $0.id == snap.index }?.update(snap) }
-        }
+        updateFans(from: tick.sensors.fans)
         guard hasFans else { refreshStatus(); return }
-        // Sampling resumed long after willSleep without a didWake (missed notification): leave the hold.
-        if inWakeHold, wakeTask == nil, let since = sleepStartedAt, Date().timeIntervalSince(since) > 30 {
-            logger.notice("no didWake after willSleep; resuming fan control")
-            inWakeHold = false
-            sleepStartedAt = nil
-            coordinator.systemDidWake()
-            engine?.resetState()
-        }
+        recoverFromMissedWake()
         if let state = tick.sensors.fans, !helper.isDemo { updateForeignController(state, now: now) }
-        // "Return to Auto after" changed while in Max (Settings › Fans writes the setting directly): re-arm.
-        if mode == .max, config.maxAutoRevertMinutes != revertMinutesInEffect { armMaxRevert(from: now) }
-        if mode == .max, let deadline = maxRevertDeadline, now >= deadline {
-            changeMode(.system, reason: .maxAutoRevert)
-        }
+        updateMaxAutoRevert(at: now)
         runEngine(now: now)
         updateSafetyEvent()
         refreshStatus()
+    }
+
+    private func updateFans(from state: FanControlState?) {
+        guard let state else { return }
+        for snapshot in state.fans { fans.first { $0.id == snapshot.index }?.update(snapshot) }
+    }
+
+    private func recoverFromMissedWake() {
+        // Sampling resumed long after willSleep without a didWake (missed notification): leave the hold.
+        guard inWakeHold, wakeTask == nil, let since = sleepStartedAt, Date().timeIntervalSince(since) > 30 else { return }
+        logger.notice("no didWake after willSleep; resuming fan control")
+        inWakeHold = false
+        sleepStartedAt = nil
+        coordinator.systemDidWake()
+        engine?.resetState()
+    }
+
+    private func updateMaxAutoRevert(at now: Date) {
+        // "Return to Auto after" changed while in Max (Settings › Fans writes the setting directly): re-arm.
+        if mode == .max, config.maxAutoRevertMinutes != revertMinutesInEffect { armMaxRevert(from: now) }
+        guard mode == .max, let deadline = maxRevertDeadline, now >= deadline else { return }
+        changeMode(.system, reason: .maxAutoRevert)
     }
 
     /// The curve that is (or would be) in use for the current power source.
@@ -213,35 +237,57 @@ import ThermikSMC
         Dictionary(uniqueKeysWithValues: profile.fans.map { ($0.index, FanCommand.system) })
     }
 
+    private var fanTestCommands: [Int: FanCommand] {
+        Dictionary(uniqueKeysWithValues: profile.fans.map { ($0.index, FanCommand.rpm($0.maxRPM)) })
+    }
+
     private func runEngine(now: Date) {
         guard let engine else { return }
         let curve = activeCurve
         // Auto (System) is macOS's alone: Thermik's engine — curve, guard, safety latch — runs only in its own modes.
-        let wantsControl = mode != .system || isTestingFans
-        guard canControl, wantsControl, !inWakeHold else {
-            setLastCommands(systemCommands)
-            setCurveInput(sensors.value(curve.input))
-            // Helper ready but nothing to do: make sure nothing is held (no-op when already released).
-            if canControl, !inWakeHold, !wantsControl { coordinator.apply(systemCommands, now: now) }
-            return
-        }
+        guard canControl, !inWakeHold else { useSystemCommands(for: curve); return }
+        guard mode != .system || isTestingFans else { releaseToSystem(curve, now: now); return }
+        runControlledEngine(engine, curve: curve, now: now)
+    }
+
+    private func useSystemCommands(for curve: FanCurve) {
+        setLastCommands(systemCommands)
+        setCurveInput(sensors.value(curve.input))
+    }
+
+    private func releaseToSystem(_ curve: FanCurve, now: Date) {
+        useSystemCommands(for: curve)
+        // Helper ready but nothing to do: make sure nothing is held (no-op when already released).
+        coordinator.apply(systemCommands, now: now)
+    }
+
+    private func runControlledEngine(_ engine: FanControlEngine, curve: FanCurve, now: Date) {
         let plan = FanPlanBuilder.plan(config: config, power: system.powerSourceKind, profile: profile)
+        let readings = temperatureReadings(for: plan)
+        var commands = engine.tick(now: now, temperatures: readings.temperatures, gated: readings.gated,
+                                   safetyTempC: sensors.aggregates[.safetyTop4],
+                                   rawHottestC: sensors.rawAggregates[.rawHottestDie], pressure: system.pressure, plan: plan)
+        if isTestingFans { commands = fanTestCommands }
+        setLastCommands(commands)
+        updateControlledCurveInput(engine, curve: curve)
+        coordinator.apply(commands, now: now, safety: engine.safetyLatched || engine.thermalGuardActive)
+    }
+
+    private func temperatureReadings(for plan: FanPlan) -> (temperatures: [TemperatureSource: Double], gated: Set<TemperatureSource>) {
         var temperatures: [TemperatureSource: Double] = [:]
         var gated: Set<TemperatureSource> = []
         for source in plan.referencedSources {
-            if let v = sensors.value(source) { temperatures[source] = v }
+            if let value = sensors.value(source) { temperatures[source] = value }
             // A P-cluster die past its 30 s hold reads nothing while the cluster is idle: not a lost sensor.
             else if case .sensor(let id) = source, sensors.sensor(id)?.state == .gated { gated.insert(source) }
         }
-        var commands = engine.tick(now: now, temperatures: temperatures, gated: gated,
-                                   safetyTempC: sensors.aggregates[.safetyTop4],
-                                   rawHottestC: sensors.rawAggregates[.rawHottestDie], pressure: system.pressure, plan: plan)
-        if isTestingFans {
-            commands = Dictionary(uniqueKeysWithValues: profile.fans.map { ($0.index, FanCommand.rpm($0.maxRPM)) })
-        }
-        setLastCommands(commands)
-        setCurveInput(mode == .curve ? (engine.smoothedTemperature(curve.input) ?? sensors.value(curve.input)) : sensors.value(curve.input))
-        coordinator.apply(commands, now: now, safety: engine.safetyLatched || engine.thermalGuardActive)
+        return (temperatures, gated)
+    }
+
+    private func updateControlledCurveInput(_ engine: FanControlEngine, curve: FanCurve) {
+        let value = mode == .curve ? engine.smoothedTemperature(curve.input) ?? sensors.value(curve.input)
+                                   : sensors.value(curve.input)
+        setCurveInput(value)
     }
 
     private func setLastCommands(_ c: [Int: FanCommand]) { if lastCommands != c { lastCommands = c } }
@@ -260,29 +306,36 @@ import ThermikSMC
     /// coordinator, never from a cached helper snapshot: Thermik holds the fans or did within one lease (the helper
     /// reverts when it runs out, I3), or released them moments ago. While engaged: `detectForeignWriter`.
     private func updateForeignController(_ state: FanControlState, now: Date) {
-        if coordinator.isOverriding {
-            detectForeignWriter(state, now: now)
-            return
-        }
+        guard !coordinator.isOverriding else { detectForeignWriter(state, now: now); return }
         foreignTargetMismatches = 0
-        let ours = coordinator.helperMayHoldFans(now: now)
+        let ours = ownForcing(at: now)
+        if state.anyManual && (foreignControlActive || !ours) { observeUnownedForcing(state, now: now); return }
+        clearForeignControllerIfNeeded(state, now: now)
+    }
+
+    private func ownForcing(at now: Date) -> Bool {
+        coordinator.helperMayHoldFans(now: now)
             || (coordinator.lastReleaseAt.map { now.timeIntervalSince($0) < Self.releaseGraceSeconds } ?? false)
-        if state.anyManual && (foreignControlActive || !ours) {
-            // Once detected, any forcing keeps the state (Thermik itself is on Auto then and holds nothing).
-            lastForeignSeenAt = now
-            foreignSightings = foreignSightings.filter { now.timeIntervalSince($0) <= Self.foreignConfirmWindow } + [now]
-            if !foreignControlActive, foreignSightings.count >= 2 {
-                confirmForeignControl(evidence: state.forcingSignals.joined(separator: ", "))
-            } else if foreignControlActive {
-                refreshForeignName(now: now)
-            }
-        } else if foreignControlActive, !state.anyManual, let last = lastForeignSeenAt,
-                  now.timeIntervalSince(last) >= Self.foreignClearSeconds {
-            foreignControlActive = false
-            foreignControllerName = nil
-            foreignSightings.removeAll()
-            logger.notice("foreign fan controller gone")
+    }
+
+    private func observeUnownedForcing(_ state: FanControlState, now: Date) {
+        // Once detected, any forcing keeps the state (Thermik itself is on Auto then and holds nothing).
+        lastForeignSeenAt = now
+        foreignSightings = foreignSightings.filter { now.timeIntervalSince($0) <= Self.foreignConfirmWindow } + [now]
+        if !foreignControlActive, foreignSightings.count >= 2 {
+            confirmForeignControl(evidence: state.forcingSignals.joined(separator: ", "))
+        } else if foreignControlActive {
+            refreshForeignName(now: now)
         }
+    }
+
+    private func clearForeignControllerIfNeeded(_ state: FanControlState, now: Date) {
+        guard foreignControlActive, !state.anyManual, let last = lastForeignSeenAt,
+              now.timeIntervalSince(last) >= Self.foreignClearSeconds else { return }
+        foreignControlActive = false
+        foreignControllerName = nil
+        foreignSightings.removeAll()
+        logger.notice("foreign fan controller gone")
     }
 
     /// Thermik holds the fans, so `anyManual` is its own forcing and the helper's I10 check ran only at take-over.
@@ -294,30 +347,45 @@ import ThermikSMC
             foreignTargetMismatches = 0
             return
         }
-        var evidence: [String] = []
-        for snap in state.fans {
-            guard let fan = profile.fan(snap.index), snap.timestamp.timeIntervalSince(sentAt) >= Self.foreignTargetSettle else { continue }
-            let forcedBit = state.forceBits.map { $0 & (1 << UInt16(snap.index)) != 0 }
-            let forced = snap.mode == .manual || (snap.mode == nil && forcedBit == true)
-            guard forced else { continue }
-            // A stop request is the helper's to keep: stopped while the die is cool, at the minimum while it is hot.
-            if coordinator.lastSent[snap.index] == .rpm(0),
-               snap.targetRPM < Self.foreignTargetToleranceRPM || abs(snap.targetRPM - fan.minRPM) <= Self.foreignTargetToleranceRPM {
-                continue
-            }
-            if let applied = coordinator.appliedRPM[snap.index] {
-                let tolerance = Self.foreignTargetToleranceRPM
-                if abs(snap.targetRPM - applied) > tolerance, abs(snap.targetRPM - fan.maxRPM) > tolerance {
-                    evidence.append("fan \(snap.index) target \(Int(snap.targetRPM)) rpm, Thermik wrote \(Int(applied))")
-                }
-            } else if coordinator.lastSent[snap.index] == .system {
-                evidence.append("fan \(snap.index) forced, released by Thermik")
-            }
-        }
+        let evidence = foreignEvidence(state, sentAt: sentAt)
         foreignTargetMismatches = evidence.isEmpty ? 0 : foreignTargetMismatches + 1
         guard foreignTargetMismatches >= Self.foreignTargetTicks else { return }
         foreignTargetMismatches = 0
         engageForeignControl(now: now, evidence: "while Thermik held the fans: " + evidence.joined(separator: "; "))
+    }
+
+    private func foreignEvidence(_ state: FanControlState, sentAt: Date) -> [String] {
+        var evidence: [String] = []
+        for snapshot in state.fans {
+            guard let fan = profile.fan(snapshot.index), snapshot.timestamp.timeIntervalSince(sentAt) >= Self.foreignTargetSettle else { continue }
+            guard isForced(snapshot, state: state) else { continue }
+            if isExpectedStop(snapshot, fan: fan) { continue }
+            appendForeignEvidence(for: snapshot, fan: fan, to: &evidence)
+        }
+        return evidence
+    }
+
+    private func isForced(_ snapshot: FanSnapshot, state: FanControlState) -> Bool {
+        let forcedBit = state.forceBits.map { $0 & (1 << UInt16(snapshot.index)) != 0 }
+        return snapshot.mode == .manual || (snapshot.mode == nil && forcedBit == true)
+    }
+
+    private func isExpectedStop(_ snapshot: FanSnapshot, fan: FanDescriptor) -> Bool {
+        // A stop request is the helper's to keep: stopped while the die is cool, at the minimum while it is hot.
+        guard coordinator.lastSent[snapshot.index] == .rpm(0) else { return false }
+        return snapshot.targetRPM < Self.foreignTargetToleranceRPM
+            || abs(snapshot.targetRPM - fan.minRPM) <= Self.foreignTargetToleranceRPM
+    }
+
+    private func appendForeignEvidence(for snapshot: FanSnapshot, fan: FanDescriptor, to evidence: inout [String]) {
+        if let applied = coordinator.appliedRPM[snapshot.index] {
+            let tolerance = Self.foreignTargetToleranceRPM
+            if abs(snapshot.targetRPM - applied) > tolerance, abs(snapshot.targetRPM - fan.maxRPM) > tolerance {
+                evidence.append("fan \(snapshot.index) target \(Int(snapshot.targetRPM)) rpm, Thermik wrote \(Int(applied))")
+            }
+        } else if coordinator.lastSent[snapshot.index] == .system {
+            evidence.append("fan \(snapshot.index) forced, released by Thermik")
+        }
     }
 
     /// Asks the helper first: it may still be handing back fans Thermik let go of (a restore it retries while its
@@ -327,17 +395,18 @@ import ThermikSMC
         guard helper.isReady else { engageForeignControl(now: Date(), evidence: evidence); return }
         guard !foreignCheckInFlight else { return }
         foreignCheckInFlight = true
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.helper.fetchState()
-            self.foreignCheckInFlight = false
-            if self.helper.lastHelperState?.isControlling == true {
-                self.foreignSightings.removeAll()
-                self.logger.notice("fans forced while the helper still holds them (restore pending): not another app")
-                return
-            }
-            self.engageForeignControl(now: Date(), evidence: evidence)
+        Task { @MainActor [weak self] in await self?.verifyForeignControl(evidence: evidence) }
+    }
+
+    private func verifyForeignControl(evidence: String) async {
+        await helper.fetchState()
+        foreignCheckInFlight = false
+        guard helper.lastHelperState?.isControlling != true else {
+            foreignSightings.removeAll()
+            logger.notice("fans forced while the helper still holds them (restore pending): not another app")
+            return
         }
+        engageForeignControl(now: Date(), evidence: evidence)
     }
 
     private func engageForeignControl(now: Date, evidence: String) {
@@ -383,21 +452,26 @@ import ThermikSMC
     }
 
     private func refreshStatus() {
-        let s: FanControlStatus
-        if !hasFans { s = .fanless }
-        else if !profile.isComplete && !profile.isControllable {
-            // Discovery could not read every fan on all-or-nothing hardware (runs once per launch).
-            s = .error(String(localized: "Not every fan could be read, so Thermik does not control the fans. Quit and reopen Thermik to try again."))
-        }
-        else if foreignControlActive { s = .foreignController(name: foreignControllerName) }
-        else if !helper.isReady { s = .monitoringOnly(helper.availability ?? .connecting) }
-        else if engineSafetyActive || helperSafetyActive { s = .safetyOverride(temperatureC: safetyTemperature) }
-        else if let message = errorMessage { s = .error(message) }
-        else if coordinator.isEngaging { s = .engaging }
-        else if coordinator.isOverriding { s = .active }
-        else { s = .system }
-        if status != s { status = s }
+        let current = currentStatus()
+        if status != current { status = current }
         if isOverriding != coordinator.isOverriding { isOverriding = coordinator.isOverriding }
+    }
+
+    private func currentStatus() -> FanControlStatus {
+        if !hasFans { return .fanless }
+        if !profile.isComplete && !profile.isControllable { return incompleteProfileStatus() }
+        if foreignControlActive { return .foreignController(name: foreignControllerName) }
+        if !helper.isReady { return .monitoringOnly(helper.availability ?? .connecting) }
+        if engineSafetyActive || helperSafetyActive { return .safetyOverride(temperatureC: safetyTemperature) }
+        if let message = errorMessage { return .error(message) }
+        if coordinator.isEngaging { return .engaging }
+        if coordinator.isOverriding { return .active }
+        return .system
+    }
+
+    private func incompleteProfileStatus() -> FanControlStatus {
+        // Discovery could not read every fan on all-or-nothing hardware (runs once per launch).
+        .error(String(localized: "Not every fan could be read, so Thermik does not control the fans. Quit and reopen Thermik to try again."))
     }
 
     private func updateSafetyEvent() {
@@ -420,41 +494,57 @@ import ThermikSMC
     }
 
     private func commandFailed(_ failure: FanCommandFailure) {
-        let now = Date()
-        switch failure {
-        case .unlockTimeout(let detail):
-            unlockFailures += 1
-            events.record(.error(String(localized: "Fan control error: \(detail)")))
-            if unlockFailures > Self.maxUnlockRetries {
-                giveUp(String(localized: "macOS did not hand over fan control. The fans are back on Auto."))
-            } else {
-                errorMessage = String(localized: "macOS did not hand over fan control yet. Retrying in 30 s.")
-                coordinator.backOff(until: now.addingTimeInterval(Self.unlockRetryDelay))
-            }
-        case .foreignController:
-            engageForeignControl(now: now, evidence: "helper refused: foreign controller")
-        case .safetyOverride:
-            helperSafetyUntil = now.addingTimeInterval(10)                 // refreshed by every refusal
-            coordinator.suspend(until: now.addingTimeInterval(2))
-        case .sleeping, .rateLimited, .interrupted:
-            break                                                          // wake path / next tick re-applies
-        case .unavailable:
-            errorMessage = nil                                             // status becomes monitoring-only
-            engine?.resetState()
-        case .notControllable(let detail):
-            events.record(.error(String(localized: "Fan control error: \(detail)")))
-            giveUp(String(localized: "This Mac's fans cannot be controlled."))
-        case .failed(let detail):
-            genericFailures += 1
-            events.record(.error(String(localized: "Fan control error: \(detail)")))
-            if genericFailures >= Self.maxGenericFailures {
-                giveUp(String(localized: "Fan control stopped after repeated errors. The fans are back on Auto."))
-            } else {
-                errorMessage = String(localized: "The helper could not change the fan speed. Retrying…")
-                coordinator.backOff(until: now.addingTimeInterval(Self.genericRetryDelay))
-            }
-        }
+        handleCommandFailure(failure, at: Date())
         refreshStatus()
+    }
+
+    private func handleCommandFailure(_ failure: FanCommandFailure, at now: Date) {
+        switch failure {
+        case .unlockTimeout(let detail): unlockFailed(detail, at: now)
+        case .foreignController: engageForeignControl(now: now, evidence: "helper refused: foreign controller")
+        case .safetyOverride: safetyOverrideFailed(at: now)
+        case .sleeping, .rateLimited, .interrupted: break                 // wake path / next tick re-applies
+        case .unavailable: helperUnavailable()
+        case .notControllable(let detail): notControllable(detail)
+        case .failed(let detail): genericCommandFailed(detail, at: now)
+        }
+    }
+
+    private func unlockFailed(_ detail: String, at now: Date) {
+        unlockFailures += 1
+        events.record(.error(String(localized: "Fan control error: \(detail)")))
+        guard unlockFailures <= Self.maxUnlockRetries else {
+            giveUp(String(localized: "macOS did not hand over fan control. The fans are back on Auto."))
+            return
+        }
+        errorMessage = String(localized: "macOS did not hand over fan control yet. Retrying in 30 s.")
+        coordinator.backOff(until: now.addingTimeInterval(Self.unlockRetryDelay))
+    }
+
+    private func safetyOverrideFailed(at now: Date) {
+        helperSafetyUntil = now.addingTimeInterval(10)                 // refreshed by every refusal
+        coordinator.suspend(until: now.addingTimeInterval(2))
+    }
+
+    private func helperUnavailable() {
+        errorMessage = nil                                             // status becomes monitoring-only
+        engine?.resetState()
+    }
+
+    private func notControllable(_ detail: String) {
+        events.record(.error(String(localized: "Fan control error: \(detail)")))
+        giveUp(String(localized: "This Mac's fans cannot be controlled."))
+    }
+
+    private func genericCommandFailed(_ detail: String, at now: Date) {
+        genericFailures += 1
+        events.record(.error(String(localized: "Fan control error: \(detail)")))
+        guard genericFailures < Self.maxGenericFailures else {
+            giveUp(String(localized: "Fan control stopped after repeated errors. The fans are back on Auto."))
+            return
+        }
+        errorMessage = String(localized: "The helper could not change the fan speed. Retrying…")
+        coordinator.backOff(until: now.addingTimeInterval(Self.genericRetryDelay))
     }
 
     /// Mode back to System, keeping the explanation visible until the user picks a mode again.
@@ -476,17 +566,7 @@ import ThermikSMC
     }
 
     private func leaseLostResolved(_ state: HelperState?, lostAt: Date) {
-        // Still controlling: macOS reclaimed a fan and the helper holds the others. Otherwise the helper restored
-        // System, and its reason counts only if it is this revert's, not an older one's.
-        let reason: String
-        if state?.isControlling == true {
-            reason = "macOSReclaimed"
-        } else if let r = state?.lastRevertReason, let at = state?.lastRevertDate,
-                  abs(lostAt.timeIntervalSince(at)) <= Self.revertReasonFreshness {
-            reason = r
-        } else {
-            reason = "leaseLost"
-        }
+        let reason = leaseLossReason(state, lostAt: lostAt)
         events.record(.helperReverted(reason: reason))
         // The user (or a give-up) returned to Auto meanwhile: nothing to re-assert.
         guard mode != .system || isTestingFans else {
@@ -494,20 +574,41 @@ import ThermikSMC
             return
         }
         leaseLosses = leaseLosses.filter { lostAt.timeIntervalSince($0) <= Self.leaseLossWindow } + [lostAt]
-        if Self.helperSafetyReverts.contains(reason) {
-            logger.error("the helper returned the fans to System (\(reason, privacy: .public)): fan control stopped")
-            events.record(.error(String(localized: "Fan control error: \(HelperRevertReason.title(reason))")))
-            giveUp(String(localized: "The helper returned the fans to Auto because it could not read the temperatures or set the fan speed safely."),
-                   reason: .safety)
-        } else if leaseLosses.count > Self.maxLeaseLosses {
-            logger.error("lease lost \(self.leaseLosses.count, privacy: .public) times in \(Int(Self.leaseLossWindow), privacy: .public) s (last: \(reason, privacy: .public)): fan control stopped")
-            giveUp(String(localized: "Fan control stopped because the fans kept returning to Auto."))
-        } else {
-            logger.notice("lease lost (\(reason, privacy: .public)): re-sending")
-            coordinator.resumeAfterLeaseLoss()
-            router.requestTick()
-        }
+        resolveLeaseLoss(reason)
         refreshStatus()
+    }
+
+    private func leaseLossReason(_ state: HelperState?, lostAt: Date) -> String {
+        // Still controlling: macOS reclaimed a fan and the helper holds the others. Otherwise the helper restored
+        // System, and its reason counts only if it is this revert's, not an older one's.
+        if state?.isControlling == true { return "macOSReclaimed" }
+        if let reason = state?.lastRevertReason, let at = state?.lastRevertDate,
+           abs(lostAt.timeIntervalSince(at)) <= Self.revertReasonFreshness { return reason }
+        return "leaseLost"
+    }
+
+    private func resolveLeaseLoss(_ reason: String) {
+        if Self.helperSafetyReverts.contains(reason) { helperSafetyLeaseLost(reason); return }
+        if leaseLosses.count > Self.maxLeaseLosses { excessiveLeaseLosses(reason); return }
+        resumeAfterLeaseLoss(reason)
+    }
+
+    private func helperSafetyLeaseLost(_ reason: String) {
+        logger.error("the helper returned the fans to System (\(reason, privacy: .public)): fan control stopped")
+        events.record(.error(String(localized: "Fan control error: \(HelperRevertReason.title(reason))")))
+        giveUp(String(localized: "The helper returned the fans to Auto because it could not read the temperatures or set the fan speed safely."),
+               reason: .safety)
+    }
+
+    private func excessiveLeaseLosses(_ reason: String) {
+        logger.error("lease lost \(self.leaseLosses.count, privacy: .public) times in \(Int(Self.leaseLossWindow), privacy: .public) s (last: \(reason, privacy: .public)): fan control stopped")
+        giveUp(String(localized: "Fan control stopped because the fans kept returning to Auto."))
+    }
+
+    private func resumeAfterLeaseLoss(_ reason: String) {
+        logger.notice("lease lost (\(reason, privacy: .public)): re-sending")
+        coordinator.resumeAfterLeaseLoss()
+        router.requestTick()
     }
 
     // MARK: Commands (UI contract §2.9.4)
@@ -517,39 +618,56 @@ import ThermikSMC
     }
 
     private func changeMode(_ newMode: FanMode, reason: FanModeChangeReason) {
-        if newMode != .system, !canControl {
-            logger.notice("mode change to \(newMode.rawValue) refused: fan control unavailable")
-            refreshStatus()
-            return
-        }
-        if newMode == mode, newMode != .system {
-            // Re-selecting the mode in effect (a glass switcher tap, a menu item, a shortcut) changes nothing: the
-            // engine keeps its state (a curve inside its hysteresis band stays engaged). Max restarts its countdown.
-            if newMode == .max { armMaxRevert(from: Date()) }
-            if settings.fans.mode != newMode { settings.fans.mode = newMode }
-            refreshStatus()
-            return
-        }
-        if newMode != mode {
-            events.record(.fanModeChanged(FanModeChange(from: mode, to: newMode, reason: reason)))
-            mode = newMode
-        }
+        guard newMode == .system || canControl else { refuseModeChange(newMode); return }
+        if newMode == mode, newMode != .system { repeatCurrentMode(newMode); return }
+        recordModeChange(newMode, reason: reason)
+        resetForModeChange(newMode)
+        updateMaxRevertDeadline()
+        applyMode(newMode, reason: reason)
+        refreshStatus()
+    }
+
+    private func refuseModeChange(_ newMode: FanMode) {
+        logger.notice("mode change to \(newMode.rawValue) refused: fan control unavailable")
+        refreshStatus()
+    }
+
+    private func repeatCurrentMode(_ currentMode: FanMode) {
+        // Re-selecting the mode in effect (a glass switcher tap, a menu item, a shortcut) changes nothing: the
+        // engine keeps its state (a curve inside its hysteresis band stays engaged). Max restarts its countdown.
+        if currentMode == .max { armMaxRevert(from: Date()) }
+        if settings.fans.mode != currentMode { settings.fans.mode = currentMode }
+        refreshStatus()
+    }
+
+    private func recordModeChange(_ newMode: FanMode, reason: FanModeChangeReason) {
+        guard newMode != mode else { return }
+        events.record(.fanModeChanged(FanModeChange(from: mode, to: newMode, reason: reason)))
+        mode = newMode
+    }
+
+    private func resetForModeChange(_ newMode: FanMode) {
         if settings.fans.mode != newMode { settings.fans.mode = newMode }
         errorMessage = nil
         unlockFailures = 0
         genericFailures = 0
         leaseLosses.removeAll()
         engine?.resetState()
-        if newMode == .max { armMaxRevert(from: Date()) } else { maxRevertDeadline = nil }
-        if newMode == .system {
-            if !isTestingFans {
-                setLastCommands(systemCommands)
-                if helper.isReady || coordinator.mayHoldFans { coordinator.releaseAll(reason: "mode System (\(reason.rawValue))") }
-            }
+    }
+
+    private func updateMaxRevertDeadline() {
+        if mode == .max {
+            armMaxRevert(from: Date())
         } else {
-            router.requestTick()
+            maxRevertDeadline = nil
         }
-        refreshStatus()
+    }
+
+    private func applyMode(_ newMode: FanMode, reason: FanModeChangeReason) {
+        guard newMode == .system else { router.requestTick(); return }
+        guard !isTestingFans else { return }
+        setLastCommands(systemCommands)
+        if helper.isReady || coordinator.mayHoldFans { coordinator.releaseAll(reason: "mode System (\(reason.rawValue))") }
     }
 
     /// (Re)starts the Max countdown from `now` with the current "Return to Auto after" value.
@@ -580,16 +698,20 @@ import ThermikSMC
     func setFixedPercent(_ percent: Double, fan: Int?) {
         let p = percent.isFinite ? min(max(percent, 0), 100) : 50
         var config = settings.fans
-        if let fan {
-            config.fixedPercentPerFan[fan] = p
-        } else {
-            config.fixedPercent = p
-            config.linked = true
-        }
+        updateFixedPercent(&config, percent: p, fan: fan)
         // An unchanged value writes no settings and requests no tick.
         guard config != settings.fans else { return }
         settings.fans = config
         if mode == .fixed { router.requestTick() }
+    }
+
+    private func updateFixedPercent(_ config: inout FanUserConfig, percent: Double, fan: Int?) {
+        if let fan {
+            config.fixedPercentPerFan[fan] = percent
+        } else {
+            config.fixedPercent = percent
+            config.linked = true
+        }
     }
 
     func setLinked(_ linked: Bool) {
@@ -617,14 +739,22 @@ import ThermikSMC
     /// P1: each fan to max for 10 s (user-initiated, helper required), then back to the current mode.
     func runFanTest() async {
         guard canControl, !isTestingFans else { return }
-        isTestingFans = true
-        logger.notice("fan test started")
-        engine?.resetState()
-        router.requestTick()
+        beginFanTest()
         let task = Task { @MainActor in _ = try? await Task.sleep(for: Self.fanTestSeconds) }
         fanTestTask = task
         await task.value
         guard isTestingFans else { return }                              // cancelled by Reset to System
+        finishFanTest()
+    }
+
+    private func beginFanTest() {
+        isTestingFans = true
+        logger.notice("fan test started")
+        engine?.resetState()
+        router.requestTick()
+    }
+
+    private func finishFanTest() {
         isTestingFans = false
         fanTestTask = nil
         engine?.resetState()
@@ -647,15 +777,19 @@ import ThermikSMC
         inWakeHold = true
         wakeTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: Self.wakeReapplyDelay)
-            guard let self, !Task.isCancelled else { return }
-            self.inWakeHold = false
-            self.sleepStartedAt = nil
-            self.wakeTask = nil
-            self.coordinator.systemDidWake()
-            self.engine?.resetState()
-            self.router.requestTick()
-            self.refreshStatus()
+            self?.completeWake()
         }
+    }
+
+    private func completeWake() {
+        guard !Task.isCancelled else { return }
+        inWakeHold = false
+        sleepStartedAt = nil
+        wakeTask = nil
+        coordinator.systemDidWake()
+        engine?.resetState()
+        router.requestTick()
+        refreshStatus()
     }
 
     /// applicationWillTerminate: bounded synchronous restore (≤ 2 s).

@@ -118,41 +118,62 @@ import ThermikHelperShared
     }
 
     private func probeState() async -> State {
-        switch mode {
-        case .appService:
-            switch await Self.daemonStatus() {
-            case .notRegistered, .notFound: return .notInstalled          // .notFound == never registered (HELP §2.3)
-            case .requiresApproval: return .requiresApproval
-            case .enabled: break
-            @unknown default: return .unreachable("unknown SMAppService status")
-            }
-        case .legacy:
-            guard FileManager.default.fileExists(atPath: ThermikHelper.Legacy.plistPath) else { return .notInstalled }
-            if !FileManager.default.fileExists(atPath: ThermikHelper.Legacy.helperPath) {
-                return .needsUpgrade(installed: LegacyHelperInstaller.installedHelperBuild(at: ThermikHelper.Legacy.previousHelperPath) ?? "?", bundled: bundledHelperBuild ?? "?")
-            }
-            if await Self.legacyStatus() == .requiresApproval { return .requiresApproval }   // disabled in Login Items
-            if let mine = ownIdentity?.cdhashHex {
-                let trusted = LegacyHelperInstaller.trustedClientCDHashes() ?? []
-                if !trusted.contains(mine) {
-                    // Installed for another (ad-hoc) build of Thermik: it would reject us (4097) → re-authorize.
-                    return .needsUpgrade(installed: LegacyHelperInstaller.installedHelperBuild() ?? "?", bundled: bundledHelperBuild ?? "?")
-                }
-            }
+        if let installState = await probeInstallState() {
+            return installState
         }
         guard let connection else { return .unreachable("no helper connection") }
+        return await probeConnectionState(connection)
+    }
+
+    private func probeInstallState() async -> State? {
+        switch mode {
+        case .appService: return await appServiceInstallState()
+        case .legacy: return await legacyInstallState()
+        }
+    }
+
+    private func appServiceInstallState() async -> State? {
+        switch await Self.daemonStatus() {
+        case .notRegistered, .notFound: return .notInstalled              // .notFound == never registered (HELP §2.3)
+        case .requiresApproval: return .requiresApproval
+        case .enabled: return nil
+        @unknown default: return .unreachable("unknown SMAppService status")
+        }
+    }
+
+    private func legacyInstallState() async -> State? {
+        guard FileManager.default.fileExists(atPath: ThermikHelper.Legacy.plistPath) else { return .notInstalled }
+        guard FileManager.default.fileExists(atPath: ThermikHelper.Legacy.helperPath) else {
+            return .needsUpgrade(installed: LegacyHelperInstaller.installedHelperBuild(at: ThermikHelper.Legacy.previousHelperPath) ?? "?",
+                                 bundled: bundledHelperBuild ?? "?")
+        }
+        if await Self.legacyStatus() == .requiresApproval { return .requiresApproval }   // disabled in Login Items
+        return legacyTrustState()
+    }
+
+    private func legacyTrustState() -> State? {
+        guard let mine = ownIdentity?.cdhashHex else { return nil }
+        let trusted = LegacyHelperInstaller.trustedClientCDHashes() ?? []
+        guard !trusted.contains(mine) else { return nil }
+        // Installed for another (ad-hoc) build of Thermik: it would reject us (4097) → re-authorize.
+        return .needsUpgrade(installed: LegacyHelperInstaller.installedHelperBuild() ?? "?", bundled: bundledHelperBuild ?? "?")
+    }
+
+    private func probeConnectionState(_ connection: HelperConnection) async -> State {
         do {
             let info = try await connection.hello()
-            if let bundled = bundledHelperBuild, bundled != info.helperBuild {
-                return .needsUpgrade(installed: info.helperBuild, bundled: bundled)
-            }
-            return .ready(info)
+            return stateForHello(info)
         } catch let e as NSError where e.thermikHelperCode == .unsupportedProtocol {
             return .needsUpgrade(installed: "protocol mismatch", bundled: bundledHelperBuild ?? "?")
         } catch {
             // 4097 rejected / crashed, 4099 not running, 4101 timeout, 4102 the helper's signature is unexpected.
             return .unreachable(error.localizedDescription)
         }
+    }
+
+    private func stateForHello(_ info: HelperInfo) -> State {
+        guard let bundled = bundledHelperBuild, bundled != info.helperBuild else { return .ready(info) }
+        return .needsUpgrade(installed: info.helperBuild, bundled: bundled)
     }
 
     private func apply(_ new: State) {
@@ -182,17 +203,19 @@ import ThermikHelperShared
 
     func install() async throws {
         guard !isDemo else { return }
-        try await perform("install") {
-            switch self.mode {
-            case .appService:
-                try await self.registerWithRetry()
-                if await Self.daemonStatus() == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
-            case .legacy:
-                try self.runLegacyInstaller(prompt: String(localized: "Thermik needs administrator permission to install its fan-control helper."))
-            }
-        }
+        try await perform("install") { try await self.installHelper() }
         connection?.reset()
         await refreshUntilSettled { $0.isSettledAfterInstall }
+    }
+
+    private func installHelper() async throws {
+        switch mode {
+        case .appService:
+            try await registerWithRetry()
+            if await Self.daemonStatus() == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+        case .legacy:
+            try runLegacyInstaller(prompt: String(localized: "Thermik needs administrator permission to install its fan-control helper."))
+        }
     }
 
     /// Call while System Settings › Login Items is open: polls every 2 s until the user approves (or `timeout`).
@@ -200,59 +223,81 @@ import ThermikHelperShared
         guard !isDemo else { return true }
         isBusy = true
         defer { isBusy = false }
-        let deadline = ContinuousClock.now + timeout
-        while ContinuousClock.now < deadline, !Task.isCancelled {
-            let status = mode == .appService ? await Self.daemonStatus() : await Self.legacyStatus()
-            if status == .enabled {
-                connection?.reset()
-                await refreshUntilSettled { $0.isSettledAfterInstall }
-                return isReady
-            }
-            try? await Task.sleep(for: .seconds(2))
+        if let approved = await waitForApproval(until: ContinuousClock.now + timeout) {
+            return approved
         }
         await refresh()
         return isReady
     }
 
+    private func waitForApproval(until deadline: ContinuousClock.Instant) async -> Bool? {
+        while ContinuousClock.now < deadline, !Task.isCancelled {
+            let status = mode == .appService ? await Self.daemonStatus() : await Self.legacyStatus()
+            if status == .enabled {
+                return await finishApproval()
+            }
+            try? await Task.sleep(for: .seconds(2))
+        }
+        return nil
+    }
+
+    private func finishApproval() async -> Bool {
+        connection?.reset()
+        await refreshUntilSettled { $0.isSettledAfterInstall }
+        return isReady
+    }
+
     func upgrade() async throws {
         guard !isDemo else { return }
-        try await perform("upgrade") {
-            try? await self.connection?.resetAllFans()
-            switch self.mode {
-            case .appService:
-                // SMAppService.h: after the executable changed, unregister before re-registering.
-                try? await Self.unregisterDaemon()
-                try await self.registerWithRetry()
-                if await Self.daemonStatus() == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
-            case .legacy:
-                // Idempotent: bootout (the old helper restores the fans on SIGTERM) → verified copy → bootstrap.
-                try self.runLegacyInstaller(prompt: String(localized: "Thermik needs administrator permission to update its fan-control helper."))
-            }
-        }
+        try await perform("upgrade") { try await self.upgradeHelper() }
         connection?.reset()
         await refreshUntilSettled { $0.isSettledAfterInstall }
     }
 
+    private func upgradeHelper() async throws {
+        try? await connection?.resetAllFans()
+        switch mode {
+        case .appService:
+            try await upgradeDaemon()
+        case .legacy:
+            // Idempotent: bootout (the old helper restores the fans on SIGTERM) → verified copy → bootstrap.
+            try runLegacyInstaller(prompt: String(localized: "Thermik needs administrator permission to update its fan-control helper."))
+        }
+    }
+
+    /// SMAppService.h: after the executable changed, unregister before re-registering.
+    private func upgradeDaemon() async throws {
+        try? await Self.unregisterDaemon()
+        try await registerWithRetry()
+        if await Self.daemonStatus() == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+    }
+
     func uninstall() async throws {
         guard !isDemo else { return }
-        try await perform("uninstall") {
-            try? await self.connection?.resetAllFans()
-            switch self.mode {
-            case .appService:
-                try await Self.unregisterDaemon()          // launchd SIGTERMs the helper → it restores the fans
-            case .legacy:
-                do {
-                    guard let connection = self.connection else { throw NSError.thermikHelper(.notPermitted, "no connection") }
-                    try await connection.uninstallLegacyHelper()     // the trusted helper removes itself: no password
-                } catch {
-                    self.log.notice("XPC uninstall unavailable (\(error.localizedDescription, privacy: .public)); using the administrator script")
-                    NSApp.activate()
-                    try LegacyHelperInstaller.uninstall(prompt: String(localized: "Thermik needs administrator permission to remove its fan-control helper."))
-                }
-            }
-        }
+        try await perform("uninstall") { try await self.uninstallHelper() }
         connection?.reset()
         await refreshUntilSettled { $0 == .notInstalled }
+    }
+
+    private func uninstallHelper() async throws {
+        try? await connection?.resetAllFans()
+        switch mode {
+        case .appService:
+            try await Self.unregisterDaemon()              // launchd SIGTERMs the helper → it restores the fans
+        case .legacy:
+            try await uninstallLegacy()
+        }
+    }
+
+    private func uninstallLegacy() async throws {
+        do {
+            guard let connection else { throw NSError.thermikHelper(.notPermitted, "no connection") }
+            try await connection.uninstallLegacyHelper()   // the trusted helper removes itself: no password
+        } catch {
+            log.notice("XPC uninstall unavailable (\(error.localizedDescription, privacy: .public)); using the administrator script")
+            NSApp.activate()
+            try LegacyHelperInstaller.uninstall(prompt: String(localized: "Thermik needs administrator permission to remove its fan-control helper."))
+        }
     }
 
     func openLoginItems() { SMAppService.openSystemSettingsLoginItems() }
@@ -277,13 +322,17 @@ import ThermikHelperShared
         defer { isBusy = false }
         do {
             try await body()
-            lastError = nil
-            log.notice("helper \(name, privacy: .public) done")
+            operationSucceeded(name)
         } catch {
             lastError = Self.message(for: error)
             log.error("helper \(name, privacy: .public) failed: \(String(describing: error), privacy: .public)")
             throw error
         }
+    }
+
+    private func operationSucceeded(_ name: String) {
+        lastError = nil
+        log.notice("helper \(name, privacy: .public) done")
     }
 
     private func runLegacyInstaller(prompt: String) throws {
@@ -305,20 +354,29 @@ import ThermikHelperShared
     private func registerWithRetry() async throws {
         var lastError: (any Error)?
         for attempt in 1...6 {
-            do {
-                try await Self.registerDaemon()
-                log.notice("SMAppService.register ok (attempt \(attempt, privacy: .public))")
-                return
-            } catch {
-                let ns = error as NSError
-                log.error("SMAppService.register attempt \(attempt, privacy: .public) failed: \(ns, privacy: .public)")
-                if ns.code == kSMErrorAlreadyRegistered { return }
-                if await Self.daemonStatus() == .requiresApproval { return }   // registered, waiting for the user
-                lastError = error
-                if attempt < 6 { try await Task.sleep(for: .milliseconds(500 * attempt)) }
-            }
+            guard let error = await attemptRegistration(attempt) else { return }
+            lastError = error
+            if attempt < 6 { try await Task.sleep(for: .milliseconds(500 * attempt)) }
         }
         throw lastError ?? NSError.thermikHelper(.internalError, "SMAppService.register failed")
+    }
+
+    private func attemptRegistration(_ attempt: Int) async -> (any Error)? {
+        do {
+            try await Self.registerDaemon()
+            log.notice("SMAppService.register ok (attempt \(attempt, privacy: .public))")
+            return nil
+        } catch {
+            return await registrationFailure(error, attempt: attempt)
+        }
+    }
+
+    private func registrationFailure(_ error: Error, attempt: Int) async -> (any Error)? {
+        let ns = error as NSError
+        log.error("SMAppService.register attempt \(attempt, privacy: .public) failed: \(ns, privacy: .public)")
+        if ns.code == kSMErrorAlreadyRegistered { return nil }
+        if await Self.daemonStatus() == .requiresApproval { return nil }   // registered, waiting for the user
+        return error
     }
 
     // SMAppService does XPC to smd/BTM: keep it off the main actor.
@@ -340,19 +398,23 @@ import ThermikHelperShared
 
     /// User-facing text for a failed operation.
     private static func message(for error: any Error) -> String {
-        if let e = error as? LegacyHelperInstaller.InstallError {
-            switch e {
-            case .cancelled: return String(localized: "The administrator prompt was cancelled.")
-            case .missingHelper: return String(localized: "The helper is missing from the Thermik app bundle. Reinstall Thermik.")
-            case .unsignedApp: return String(localized: "Thermik's code signature cannot be read.")
-            case .failed(_, let message): return String(localized: "The helper could not be installed: \(message)")
-            }
+        if let error = error as? LegacyHelperInstaller.InstallError {
+            return legacyMessage(for: error)
         }
         let ns = error as NSError
         if ns.domain == ThermikHelper.errorDomain || ns.domain == NSCocoaErrorDomain {
             return String(localized: "The helper did not respond: \(ns.localizedDescription)")
         }
         return String(localized: "macOS refused to register the helper: \(ns.localizedDescription)")
+    }
+
+    private static func legacyMessage(for error: LegacyHelperInstaller.InstallError) -> String {
+        switch error {
+        case .cancelled: return String(localized: "The administrator prompt was cancelled.")
+        case .missingHelper: return String(localized: "The helper is missing from the Thermik app bundle. Reinstall Thermik.")
+        case .unsignedApp: return String(localized: "Thermik's code signature cannot be read.")
+        case .failed(_, let message): return String(localized: "The helper could not be installed: \(message)")
+        }
     }
 }
 

@@ -52,11 +52,22 @@ import ThermikCore
     private func makeMainWindow() -> NSWindow {
         let root = ThermikWindowContent(tracksMainWindow: true) { MainWindowRoot(model: model) }.thermikEnvironment(env)
         let host = NSHostingController(rootView: root)
+        configureMainHost(host)
+        let w = makeWindow(host, contentSize: NSSize(width: 1080, height: 700),               // SPEC §4.6 default
+                           style: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+        configureMainWindow(w)
+        observeMainWindow(w)
+        main = w
+        return w
+    }
+
+    private func configureMainHost(_ host: NSHostingController<some View>) {
         host.sizingOptions = [.minSize]
         // SwiftUI owns the title (navigationTitle = marketing name) and the toolbar (history range, search, export).
         host.sceneBridgingOptions = [.title, .toolbars]
-        let w = makeWindow(host, contentSize: NSSize(width: 1080, height: 700),               // SPEC §4.6 default
-                           style: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+    }
+
+    private func configureMainWindow(_ w: NSWindow) {
         w.minSize = NSSize(width: 880, height: 560)
         w.toolbarStyle = .unified
         w.title = env.system.machine?.marketingName ?? "Thermik"
@@ -64,6 +75,14 @@ import ThermikCore
         // A saved frame wins; otherwise the window stays centred where makeWindow put it.
         _ = w.setFrameUsingName("ThermikMain")
         w.setFrameAutosaveName("ThermikMain")
+    }
+
+    private func observeMainWindow(_ w: NSWindow) {
+        observeMainOcclusion(w)
+        observeMainMiniaturization(w)
+    }
+
+    private func observeMainOcclusion(_ w: NSWindow) {
         observers.append(NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification,
                                                                 object: w, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -72,13 +91,14 @@ import ThermikCore
                 self.syncVisibility()
             }
         })
+    }
+
+    private func observeMainMiniaturization(_ w: NSWindow) {
         for name in [NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: w, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.syncVisibility() }
             })
         }
-        main = w
-        return w
     }
 
     /// Pushes the main window's state into VisibilityTracker (only real changes, so observers stay quiet).
@@ -104,21 +124,27 @@ import ThermikCore
     // MARK: Onboarding
 
     func showOnboarding() {
-        if onboarding == nil {
-            let root = ThermikWindowContent {
-                OnboardingView(onFinish: { [weak self] in self?.onboarding?.close() })
-            }.thermikEnvironment(env)
-            let host = NSHostingController(rootView: root)
-            host.sizingOptions = [.minSize]
-            let w = makeWindow(host, contentSize: NSSize(width: 560, height: 460), style: [.titled, .closable, .fullSizeContentView])
-            w.titlebarAppearsTransparent = true
-            w.titleVisibility = .hidden
-            w.isMovableByWindowBackground = true
-            w.title = String(localized: "Welcome to Thermik")
-            w.tabbingMode = .disallowed
-            onboarding = w
-        }
+        if onboarding == nil { onboarding = makeOnboardingWindow() }
         present(onboarding)
+    }
+
+    private func makeOnboardingWindow() -> NSWindow {
+        let root = ThermikWindowContent {
+            OnboardingView(onFinish: { [weak self] in self?.onboarding?.close() })
+        }.thermikEnvironment(env)
+        let host = NSHostingController(rootView: root)
+        host.sizingOptions = [.minSize]
+        let w = makeWindow(host, contentSize: NSSize(width: 560, height: 460), style: [.titled, .closable, .fullSizeContentView])
+        configureOnboardingWindow(w)
+        return w
+    }
+
+    private func configureOnboardingWindow(_ w: NSWindow) {
+        w.titlebarAppearsTransparent = true
+        w.titleVisibility = .hidden
+        w.isMovableByWindowBackground = true
+        w.title = String(localized: "Welcome to Thermik")
+        w.tabbingMode = .disallowed
     }
 
     // MARK: Shared
@@ -149,25 +175,31 @@ import ThermikCore
     func windowWillClose(_ notification: Notification) {
         guard let w = notification.object as? NSWindow else { return }
         updateActivationPolicy(closing: w)
-        // Closed windows are released (the SwiftUI tree with its charts and timers goes away with them); the model
-        // keeps the page / range / selection, and the frame autosave restores the position next time.
+        closeWindow(w)
+        w.delegate = nil
+        Task { @MainActor in _ = w }        // keep the window alive until AppKit has finished closing it
+    }
+
+    // Closed windows release their SwiftUI trees; the model keeps page / range / selection for the next window.
+    private func closeWindow(_ w: NSWindow) {
         if w === main {
-            // isVisible is still true inside windowWillClose: report "hidden" explicitly.
-            env.visibility.mainWindowVisible = false
-            env.visibility.visiblePage = nil
-            env.visibility.inspectedSensor = nil
-            observers.forEach(NotificationCenter.default.removeObserver)
-            observers.removeAll()
-            // Free the autosave name now (it must be unique), so the next main window can take it over at once.
-            w.saveFrame(usingName: "ThermikMain")
-            w.setFrameAutosaveName("")
-            env.visibility.settingsOpen = false
-            main = nil
+            closeMainWindow(w)
         } else if w === onboarding {
             onboarding = nil
         }
-        w.delegate = nil
-        Task { @MainActor in _ = w }        // keep the window alive until AppKit has finished closing it
+    }
+
+    // Report hidden explicitly because isVisible is still true in windowWillClose. Free the unique autosave name now.
+    private func closeMainWindow(_ w: NSWindow) {
+        env.visibility.mainWindowVisible = false
+        env.visibility.visiblePage = nil
+        env.visibility.inspectedSensor = nil
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers.removeAll()
+        w.saveFrame(usingName: "ThermikMain")
+        w.setFrameAutosaveName("")
+        env.visibility.settingsOpen = false
+        main = nil
     }
 
     /// `.regular` while any Thermik window is on screen and the user wants the Dock icon; `.accessory` otherwise.

@@ -75,39 +75,65 @@ public actor CSVLogWriter {
         guard config.enabled else { return }
         let period = periodKey(for: row.date)
         if let p = bufferPeriod, p != period { flush() }          // day / week boundary: rotate with the old rows
-        if bufferPeriod != period { bufferPeriod = period; bufferFirstDate = row.date }
+        startBufferPeriod(period, firstDate: row.date)
         buffer.append(format(row))
-        if buffer.count > Self.maxBufferedRows { buffer.removeFirst(buffer.count - Self.maxBufferedRows) }
-        let now = ContinuousClock.now
-        // The very first row is written at once (the file appears immediately); then every 10 s or 64 rows.
-        if lastFlush == nil || buffer.count >= Self.flushRowCount
-            || lastFlush.map({ $0.duration(to: now) >= .seconds(Self.flushInterval) }) == true {
-            flush()
-        }
+        trimBufferIfNeeded()
+        if shouldFlush(now: ContinuousClock.now) { flush() }
+    }
+
+    private func startBufferPeriod(_ period: String, firstDate: Date) {
+        guard bufferPeriod != period else { return }
+        bufferPeriod = period
+        bufferFirstDate = firstDate
+    }
+
+    private func trimBufferIfNeeded() {
+        guard buffer.count > Self.maxBufferedRows else { return }
+        buffer.removeFirst(buffer.count - Self.maxBufferedRows)
+    }
+
+    /// The very first row is written at once (the file appears immediately); then every 10 s or 64 rows.
+    private func shouldFlush(now: ContinuousClock.Instant) -> Bool {
+        if lastFlush == nil || buffer.count >= Self.flushRowCount { return true }
+        return lastFlush.map({ $0.duration(to: now) >= .seconds(Self.flushInterval) }) == true
     }
 
     public func flush() {
         lastFlush = ContinuousClock.now
         guard !buffer.isEmpty, let period = bufferPeriod else { return }
         do {
-            let data = Data(buffer.joined().utf8)
-            var target = try openFile(period: period, firstRow: bufferFirstDate ?? Date())
-            if case .sizeMB(let mb) = config.rotation, target.size + data.count > Self.limitBytes(mb),
-               target.size > headerBytes() {                       // never rotate a file that holds only its header
-                closeHandle()
-                target = try createFile(url: uniqueURL(base: "Thermik-" + Self.dateAndTimeStamp(Date())), period: period)
-            }
-            try target.handle.write(contentsOf: data)
-            target.size += data.count
-            file = target
-            rowsWritten += buffer.count
-            buffer.removeAll(keepingCapacity: true)
-            bufferFirstDate = nil
-            lastError = nil
+            try writeBufferedData(period: period)
         } catch {
             fail("write failed: \(error.localizedDescription)")
             closeHandle()                              // reopen (and re-check the folder) on the next flush
         }
+    }
+
+    private func writeBufferedData(period: String) throws {
+        let data = Data(buffer.joined().utf8)
+        var target = try writeTarget(period: period, dataCount: data.count)
+        try target.handle.write(contentsOf: data)
+        target.size += data.count
+        file = target
+        rowsWritten += buffer.count
+        buffer.removeAll(keepingCapacity: true)
+        bufferFirstDate = nil
+        lastError = nil
+    }
+
+    private func writeTarget(period: String, dataCount: Int) throws -> OpenFile {
+        var target = try openFile(period: period, firstRow: bufferFirstDate ?? Date())
+        if shouldRotate(target: target, dataCount: dataCount) {
+            closeHandle()
+            target = try createFile(url: uniqueURL(base: "Thermik-" + Self.dateAndTimeStamp(Date())), period: period)
+        }
+        return target
+    }
+
+    /// Never rotate a file that holds only its header.
+    private func shouldRotate(target: OpenFile, dataCount: Int) -> Bool {
+        guard case .sizeMB(let mb) = config.rotation else { return false }
+        return target.size + dataCount > Self.limitBytes(mb) && target.size > headerBytes()
     }
 
     public func close() {
@@ -134,58 +160,80 @@ public actor CSVLogWriter {
             log.notice("log file \(f.url.lastPathComponent, privacy: .public) was moved or deleted; starting a new one")
         }
         closeHandle()
-        let fm = FileManager.default
-        try fm.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
         sweepRetentionIfNeeded()
-        // Newest compatible file of this period, else a new one. Never truncate, never rewrite an existing header.
-        if let url = newestCandidate(period: period) {
-            let size = (try? fm.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
-            let underLimit: Bool
-            if case .sizeMB(let mb) = config.rotation { underLimit = size < Self.limitBytes(mb) } else { underLimit = true }
-            if size == 0 {
-                return try createFile(url: url, period: period)
-            } else if underLimit, headerMatches(url) {
-                let handle = try FileHandle(forWritingTo: url)
-                var appended = size
-                do {
-                    try handle.seekToEnd()
-                    // A crash may have left half a line: start our rows on a fresh line.
-                    if !Self.endsWithNewline(url, size: size) {
-                        try handle.write(contentsOf: Data("\n".utf8))
-                        appended += 1
-                    }
-                } catch {
-                    try? handle.close()
-                    throw error
-                }
-                writeSidecar(for: url)
-                lastURL = url
-                log.info("appending to existing log (\(size, privacy: .public) bytes)")
-                return OpenFile(url: url, handle: handle, size: appended, period: period)
-            }
+        if let existing = try openExistingFile(period: period) { return existing }
+        return try createFile(url: newFileURL(period: period, firstRow: firstRow), period: period)
+    }
+
+    /// Use the newest compatible file of this period. Never truncate or rewrite an existing header.
+    private func openExistingFile(period: String) throws -> OpenFile? {
+        guard let url = newestCandidate(period: period) else { return nil }
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+        if size == 0 { return try createFile(url: url, period: period) }
+        guard underLimit(size: size), headerMatches(url) else { return nil }
+        return try appendToFile(url: url, size: size, period: period)
+    }
+
+    private func underLimit(size: Int) -> Bool {
+        guard case .sizeMB(let mb) = config.rotation else { return true }
+        return size < Self.limitBytes(mb)
+    }
+
+    private func appendToFile(url: URL, size: Int, period: String) throws -> OpenFile {
+        let handle = try FileHandle(forWritingTo: url)
+        let appended: Int
+        do {
+            appended = try prepareAppend(handle: handle, url: url, size: size)
+        } catch {
+            try? handle.close()
+            throw error
         }
-        let url: URL
+        return appendedOpenFile(url: url, handle: handle, originalSize: size, appendedSize: appended, period: period)
+    }
+
+    /// A crash may have left half a line: start our rows on a fresh line.
+    private func prepareAppend(handle: FileHandle, url: URL, size: Int) throws -> Int {
+        try handle.seekToEnd()
+        guard !Self.endsWithNewline(url, size: size) else { return size }
+        try handle.write(contentsOf: Data("\n".utf8))
+        return size + 1
+    }
+
+    private func appendedOpenFile(url: URL, handle: FileHandle, originalSize: Int, appendedSize: Int, period: String) -> OpenFile {
+        writeSidecar(for: url)
+        lastURL = url
+        log.info("appending to existing log (\(originalSize, privacy: .public) bytes)")
+        return OpenFile(url: url, handle: handle, size: appendedSize, period: period)
+    }
+
+    private func newFileURL(period: String, firstRow: Date) -> URL {
         switch config.rotation {
-        case .sizeMB:
-            url = uniqueURL(base: "Thermik-" + Self.dateAndTimeStamp(firstRow))
+        case .sizeMB: return uniqueURL(base: "Thermik-" + Self.dateAndTimeStamp(firstRow))
         case .daily, .weekly, .never:
             let base = baseName(period: period)
             let primary = folderURL.appendingPathComponent(base + ".csv")
-            url = fm.fileExists(atPath: primary.path) ? uniqueURL(base: base + "-" + Self.timeStamp(Date())) : primary
+            return FileManager.default.fileExists(atPath: primary.path) ? uniqueURL(base: base + "-" + Self.timeStamp(Date())) : primary
         }
-        return try createFile(url: url, period: period)
     }
 
     /// Writes the comment + column lines into a new (or empty) file and its sidecar.
     private func createFile(url: URL, period: String) throws -> OpenFile {
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: url.path) {
-            guard fm.createFile(atPath: url.path, contents: nil) else {
-                throw CocoaError(.fileWriteNoPermission, userInfo: [NSFilePathErrorKey: url.path])
-            }
-        }
+        try ensureFileExists(url: url)
         let handle = try FileHandle(forWritingTo: url)
         let head = Data((headerComment() + "\n" + columnLine + "\n").utf8)
+        try writeHeader(head, to: handle)
+        return createdOpenFile(url: url, handle: handle, head: head, period: period)
+    }
+
+    private func ensureFileExists(url: URL) throws {
+        if FileManager.default.fileExists(atPath: url.path) { return }
+        guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
+            throw CocoaError(.fileWriteNoPermission, userInfo: [NSFilePathErrorKey: url.path])
+        }
+    }
+
+    private func writeHeader(_ head: Data, to handle: FileHandle) throws {
         do {
             try handle.seekToEnd()
             try handle.write(contentsOf: head)
@@ -193,6 +241,9 @@ public actor CSVLogWriter {
             try? handle.close()
             throw error
         }
+    }
+
+    private func createdOpenFile(url: URL, handle: FileHandle, head: Data, period: String) -> OpenFile {
         writeSidecar(for: url)
         lastURL = url
         log.info("started log file \(url.lastPathComponent, privacy: .public)")
@@ -220,23 +271,24 @@ public actor CSVLogWriter {
     /// The most recently modified file of `period` this writer may append to (its own naming patterns only).
     private func newestCandidate(period: String) -> URL? {
         let fm = FileManager.default
-        let names = (try? fm.contentsOfDirectory(atPath: folderURL.path)) ?? []
-        let matching: [String]
-        switch config.rotation {
-        case .sizeMB:
-            matching = names.filter { Self.matches($0, prefix: "Thermik-", stamp: "dddd-dd-dd-dddddd") }
-        case .daily, .weekly, .never:
-            let base = baseName(period: period)
-            matching = names.filter { $0 == base + ".csv" || Self.matches($0, prefix: base + "-", stamp: "dddddd") }
-        }
         var best: (name: String, modified: Date)?
-        for name in matching {
+        for name in candidateNames(period: period) {
             let attributes = try? fm.attributesOfItem(atPath: folderURL.appendingPathComponent(name).path)
             let modified: Date = attributes?[.modificationDate] as? Date ?? .distantPast
             if let b = best, b.modified > modified || (b.modified == modified && b.name > name) { continue }
             best = (name, modified)
         }
         return best.map { folderURL.appendingPathComponent($0.name) }
+    }
+
+    private func candidateNames(period: String) -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folderURL.path)) ?? []
+        switch config.rotation {
+        case .sizeMB: return names.filter { Self.matches($0, prefix: "Thermik-", stamp: "dddd-dd-dd-dddddd") }
+        case .daily, .weekly, .never:
+            let base = baseName(period: period)
+            return names.filter { $0 == base + ".csv" || Self.matches($0, prefix: base + "-", stamp: "dddddd") }
+        }
     }
 
     /// `<prefix><stamp>[-N].csv`, where `stamp` uses "d" for one digit and any other character literally.
@@ -249,7 +301,11 @@ public actor CSVLogWriter {
             let ok: Bool = pattern[i] == "d" ? middle[i].isASCIIDigit : middle[i] == pattern[i]
             if !ok { return false }
         }
-        let rest: ArraySlice<Character> = middle.dropFirst(pattern.count)   // optional uniqueness suffix "-2", "-3"…
+        return validUniquenessSuffix(middle.dropFirst(pattern.count))
+    }
+
+    /// Optional uniqueness suffix "-2", "-3"… after the timestamp.
+    private static func validUniquenessSuffix(_ rest: ArraySlice<Character>) -> Bool {
         if rest.isEmpty { return true }
         guard rest.first == "-", rest.count > 1 else { return false }
         return rest.dropFirst().allSatisfy { $0.isASCIIDigit }
@@ -344,23 +400,31 @@ public actor CSVLogWriter {
         let now = Date()
         if let last = lastRetentionSweep, now.timeIntervalSince(last) < 6 * 3600 { return }
         lastRetentionSweep = now
-        let fm = FileManager.default
         let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
-        let names = (try? fm.contentsOfDirectory(atPath: folderURL.path)) ?? []
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folderURL.path)) ?? []
         for name in names where Self.isOwnLogName(name) {
-            let url = folderURL.appendingPathComponent(name)
-            guard url != file?.url, url != lastURL,
-                  let modified = (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
-                  modified < cutoff, Self.hasLogHeader(url),
-                  fm.fileExists(atPath: Self.sidecarURL(for: url).path) else { continue }   // the writer's own record
-            do {
-                try fm.removeItem(at: url)
-                try? fm.removeItem(at: Self.sidecarURL(for: url))
-                log.info("retention: removed \(name, privacy: .public)")
-            } catch {
-                log.error("retention: cannot remove \(name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            }
+            sweepRetainedFile(name: name, cutoff: cutoff)
         }
+    }
+
+    private func sweepRetainedFile(name: String, cutoff: Date) {
+        let url = folderURL.appendingPathComponent(name)
+        guard shouldRemoveRetainedFile(url: url, cutoff: cutoff) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: Self.sidecarURL(for: url))
+            log.info("retention: removed \(name, privacy: .public)")
+        } catch {
+            log.error("retention: cannot remove \(name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Both the log header and sidecar are the writer's own record; active paths are always excluded.
+    private func shouldRemoveRetainedFile(url: URL, cutoff: Date) -> Bool {
+        guard url != file?.url, url != lastURL else { return false }
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        guard let modified = attributes?[.modificationDate] as? Date, modified < cutoff else { return false }
+        return Self.hasLogHeader(url) && FileManager.default.fileExists(atPath: Self.sidecarURL(for: url).path)
     }
 
     // MARK: Formatting
@@ -421,39 +485,55 @@ public actor CSVLogWriter {
         csv.deletingPathExtension().appendingPathExtension("columns.json")
     }
 
+    private static let columnGroups: [String: String] = [
+        "timestamp": "time",
+        "cpu_avg": LogColumnGroup.headline.rawValue, "cpu_hottest": LogColumnGroup.headline.rawValue,
+        "gpu_avg": LogColumnGroup.headline.rawValue, "gpu_hottest": LogColumnGroup.headline.rawValue,
+        "soc": LogColumnGroup.headline.rawValue, "memory": LogColumnGroup.headline.rawValue,
+        "ssd": LogColumnGroup.headline.rawValue, "battery": LogColumnGroup.headline.rawValue,
+        "fan_mode": LogColumnGroup.fans.rawValue,
+        "cpu_usage": LogColumnGroup.usage.rawValue, "gpu_usage": LogColumnGroup.usage.rawValue,
+        "mem_used_gb": LogColumnGroup.usage.rawValue, "thermal_pressure": LogColumnGroup.thermal.rawValue,
+        "battery_pct": LogColumnGroup.battery.rawValue, "on_ac": LogColumnGroup.battery.rawValue,
+        "event": LogColumnGroup.events.rawValue,
+    ]
+
     /// the `LogColumnGroup` (or "time") a column id belongs to, for the sidecar.
     public static func columnGroup(for id: String) -> String {
-        switch id {
-        case "timestamp": return "time"
-        case "cpu_avg", "cpu_hottest", "gpu_avg", "gpu_hottest", "soc", "memory", "ssd", "battery":
-            return LogColumnGroup.headline.rawValue
-        case "fan_mode": return LogColumnGroup.fans.rawValue
-        case "cpu_usage", "gpu_usage", "mem_used_gb": return LogColumnGroup.usage.rawValue
-        case "thermal_pressure": return LogColumnGroup.thermal.rawValue
-        case "battery_pct", "on_ac": return LogColumnGroup.battery.rawValue
-        case "event": return LogColumnGroup.events.rawValue
-        default:
-            if id.contains(":") { return LogColumnGroup.sensors.rawValue }
-            if id.hasPrefix("fan") { return LogColumnGroup.fans.rawValue }
-            if id.hasSuffix("_w") { return LogColumnGroup.power.rawValue }
-            return "other"
-        }
+        if let group = columnGroups[id] { return group }
+        if id.contains(":") { return LogColumnGroup.sensors.rawValue }
+        if id.hasPrefix("fan") { return LogColumnGroup.fans.rawValue }
+        if id.hasSuffix("_w") { return LogColumnGroup.power.rawValue }
+        return "other"
     }
 
     private func writeSidecar(for csv: URL) {
-        var columns: [(String, String, String)] = [("timestamp", "Time", "Время")]
-        columns += header.numericColumns.map { ($0.id, $0.nameEN, $0.nameRU) }
-        if header.includesFanMode { columns.append(("fan_mode", "Fan mode", "Режим вентиляторов")) }
-        if header.includesEvents { columns.append(("event", "Events", "События")) }
+        let columns = sidecarColumns()
         var map: [String: [String: Any]] = [:]
         for (i, c) in columns.enumerated() {
             map[c.0] = ["en": c.1, "ru": c.2, "group": Self.columnGroup(for: c.0), "index": i]
         }
+        writeSidecarData(map, for: csv)
+    }
+
+    private func sidecarColumns() -> [(String, String, String)] {
+        var columns: [(String, String, String)] = [("timestamp", "Time", "Время")]
+        columns += header.numericColumns.map { ($0.id, $0.nameEN, $0.nameRU) }
+        if header.includesFanMode { columns.append(("fan_mode", "Fan mode", "Режим вентиляторов")) }
+        if header.includesEvents { columns.append(("event", "Events", "События")) }
+        return columns
+    }
+
+    private func writeSidecarData(_ map: [String: [String: Any]], for csv: URL) {
         guard let data = try? JSONSerialization.data(withJSONObject: map, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         else { return }
         let url = Self.sidecarURL(for: csv)
         if (try? Data(contentsOf: url)) == data { return }
-        do { try data.write(to: url, options: .atomic) } catch { fail("sidecar: \(error.localizedDescription)") }
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            fail("sidecar: \(error.localizedDescription)")
+        }
     }
 
     private func fail(_ message: String) {

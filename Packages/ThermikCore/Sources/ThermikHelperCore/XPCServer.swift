@@ -23,15 +23,19 @@ public final class HelperXPCServer: NSObject, NSXPCListenerDelegate, @unchecked 
     public func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         guard validator.accept(connection) else { return false }
         let token = lock.withLock { () -> UInt64 in nextToken += 1; return nextToken }
+        configure(connection, token: token)
+        service.connectionOpened(token)
+        connection.activate()
+        xpcLog.notice("accepted client pid \(connection.processIdentifier, privacy: .public) euid \(connection.effectiveUserIdentifier, privacy: .public)")
+        return true
+    }
+
+    private func configure(_ connection: NSXPCConnection, token: UInt64) {
         connection.exportedInterface = HelperWire.makeInterface()
         connection.exportedObject = HelperEndpoint(service: service, uninstallHandler: uninstallHandler)
         // Both handlers may fire for one connection; HelperService treats connectionClosed idempotently.
         connection.invalidationHandler = { [service] in service.connectionClosed(token) }
         connection.interruptionHandler = { [service] in service.connectionClosed(token) }
-        service.connectionOpened(token)
-        connection.activate()
-        xpcLog.notice("accepted client pid \(connection.processIdentifier, privacy: .public) euid \(connection.effectiveUserIdentifier, privacy: .public)")
-        return true
     }
 }
 

@@ -43,6 +43,18 @@ import os
     static func forCurrentLaunch(settings: SettingsStore) -> AppUpdater {
         #if DEBUG
         if let fixture = debugFixture(settings: settings) { return fixture }
+        #endif
+        let identity = releaseIdentity()
+        do {
+            let configuration = try ReleaseConfiguration(repository: identity.repository, currentVersion: identity.version)
+            return AppUpdater(settings: settings, checker: GitHubReleaseChecker(configuration: configuration))
+        } catch {
+            return AppUpdater(settings: settings, unavailableMessage: String(localized: "Update checks are unavailable for this build."))
+        }
+    }
+
+    private static func releaseIdentity() -> (repository: String, version: String) {
+        #if DEBUG
         let repository = UserDefaults.standard.string(forKey: "ThermikUpdateRepository") ?? "stansful/thermik-swift"
         let version = UserDefaults.standard.string(forKey: "ThermikUpdateVersion")
             ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
@@ -50,12 +62,7 @@ import os
         let repository = "stansful/thermik-swift"
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         #endif
-        do {
-            let configuration = try ReleaseConfiguration(repository: repository, currentVersion: version)
-            return AppUpdater(settings: settings, checker: GitHubReleaseChecker(configuration: configuration))
-        } catch {
-            return AppUpdater(settings: settings, unavailableMessage: String(localized: "Update checks are unavailable for this build."))
-        }
+        return (repository, version)
     }
 
     static func forDemo(settings: SettingsStore) -> AppUpdater {
@@ -102,23 +109,38 @@ import os
         guard started, let checker else { return }
         state = .checking
         let task = Task { @MainActor [weak self] in
-            do {
-                let result = try await checker.check()
-                guard !Task.isCancelled, let self else { return }
-                switch result {
-                case .upToDate: state = .upToDate
-                case .available(let release): state = .available(release)
-                }
-                settings.lastUpdateCheck = Date()
-            } catch {
-                guard !Task.isCancelled, let self else { return }
-                state = .failed(Self.message(for: error))
-                log.notice("release check failed: \(String(describing: error), privacy: .public)")
-            }
-            self?.checkTask = nil
+            let result = await Self.requestResult(using: checker)
+            guard !Task.isCancelled, let self else { return }
+            self.applyCheckResult(result)
         }
         checkTask = task
         await task.value
+    }
+
+    private static func requestResult(using checker: any ReleaseChecking) async -> Result<UpdateCheckResult, any Error> {
+        do { return .success(try await checker.check()) }
+        catch { return .failure(error) }
+    }
+
+    private func applyCheckResult(_ result: Result<UpdateCheckResult, any Error>) {
+        switch result {
+        case .success(let update): completeCheck(with: update)
+        case .failure(let error): failCheck(with: error)
+        }
+        checkTask = nil
+    }
+
+    private func completeCheck(with result: UpdateCheckResult) {
+        switch result {
+        case .upToDate: state = .upToDate
+        case .available(let release): state = .available(release)
+        }
+        settings.lastUpdateCheck = Date()
+    }
+
+    private func failCheck(with error: any Error) {
+        state = .failed(Self.message(for: error))
+        log.notice("release check failed: \(String(describing: error), privacy: .public)")
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool { canCheckForUpdates }
@@ -130,42 +152,66 @@ import os
         scheduledTask = nil
         guard started, isAvailable, automaticallyChecksForUpdates else { return }
         scheduledTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: delay) } catch { return }
-            guard let self, started, automaticallyChecksForUpdates, !Task.isCancelled else { return }
-            let due = lastChecked.map { checked in
-                let elapsed = Date().timeIntervalSince(checked)
-                return elapsed >= 86_400 || elapsed < 0
-            } ?? true
-            if due { await check() }
-            guard !Task.isCancelled else { return }
-            // Retry failed checks hourly, and check successful ones at most once a day.
-            scheduleAutomaticCheck(after: .seconds(3_600))
+            guard await Self.wait(for: delay) else { return }
+            guard let self, self.started, self.automaticallyChecksForUpdates, !Task.isCancelled else { return }
+            await self.runScheduledCheck()
         }
     }
 
+    private static func wait(for delay: Duration) async -> Bool {
+        do { try await Task.sleep(for: delay) }
+        catch { return false }
+        return true
+    }
+
+    private var checkIsDue: Bool {
+        lastChecked.map { checked in
+            let elapsed = Date().timeIntervalSince(checked)
+            return elapsed >= 86_400 || elapsed < 0
+        } ?? true
+    }
+
+    private func runScheduledCheck() async {
+        if checkIsDue { await check() }
+        guard !Task.isCancelled else { return }
+        // Retry failed checks hourly, and check successful ones at most once a day.
+        scheduleAutomaticCheck(after: .seconds(3_600))
+    }
+
     private func presentResult() {
-        let alert = NSAlert()
         switch state {
-        case .available(let release):
-            alert.messageText = String(localized: "Thermik \(release.version) is available")
-            alert.informativeText = String(localized: "Download the new version from GitHub Releases and replace Thermik in Applications.")
-            alert.addButton(withTitle: String(localized: "Download…"))
-            alert.addButton(withTitle: String(localized: "Later"))
-            NSApp.activate()
-            if alert.runModal() == .alertFirstButtonReturn { openRelease(release) }
-        case .upToDate:
-            alert.messageText = String(localized: "Thermik is up to date")
-            alert.addButton(withTitle: String(localized: "OK"))
-            NSApp.activate()
-            alert.runModal()
-        case .failed(let message):
-            alert.messageText = String(localized: "Could not check for updates")
-            alert.informativeText = message
-            alert.addButton(withTitle: String(localized: "OK"))
-            NSApp.activate()
-            alert.runModal()
+        case .available(let release): presentAvailable(release)
+        case .upToDate: presentUpToDate()
+        case .failed(let message): presentFailure(message)
         case .idle, .checking: break
         }
+    }
+
+    private func presentAvailable(_ release: AvailableUpdate) {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Thermik \(release.version) is available")
+        alert.informativeText = String(localized: "Download the new version from GitHub Releases and replace Thermik in Applications.")
+        alert.addButton(withTitle: String(localized: "Download…"))
+        alert.addButton(withTitle: String(localized: "Later"))
+        NSApp.activate()
+        if alert.runModal() == .alertFirstButtonReturn { openRelease(release) }
+    }
+
+    private func presentUpToDate() {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Thermik is up to date")
+        alert.addButton(withTitle: String(localized: "OK"))
+        NSApp.activate()
+        alert.runModal()
+    }
+
+    private func presentFailure(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Could not check for updates")
+        alert.informativeText = message
+        alert.addButton(withTitle: String(localized: "OK"))
+        NSApp.activate()
+        alert.runModal()
     }
 
     private static func message(for error: any Error) -> String {

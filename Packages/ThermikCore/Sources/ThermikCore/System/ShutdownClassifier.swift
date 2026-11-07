@@ -19,25 +19,49 @@ public enum ShutdownClassifier {
     /// `wdog` → watchdog **only if no `ap_*` token** is present (a plain software restart on M4 Max / macOS 27 reports
     /// both `wdog` and `ap_restart`; calling that a watchdog reset is the known false positive); anything else → `.other`.
     public static func classify(reason: String) -> ShutdownVerdict {
-        let tokens = reason.lowercased()
+        let tokens = tokens(in: reason)
+        guard !tokens.isEmpty else { return .unknown }
+        if let verdict = softwareVerdict(tokens) { return verdict }
+        return hardwareVerdict(tokens)
+    }
+
+    private static func tokens(in reason: String) -> [String] {
+        reason.lowercased()
             .split { $0 == " " || $0 == "," || $0 == "\t" || $0 == "\n" || $0 == ";" }
             .map(String.init)
-        guard !tokens.isEmpty else { return .unknown }
-        func has(_ needles: String...) -> Bool { tokens.contains { t in needles.contains { t.contains($0) } } }
-        if has("panic") { return .kernelPanic }
-        if has("ap_restart") { return .normalRestart }
-        if has("ap_shutdown", "ap_poweroff") { return .normalShutdown }
-        if has("button", "pwr_btn") { return .forced }
-        if has("therm") { return .thermal }
-        if has("batt", "uvlo", "brownout") { return .powerLoss }
-        if has("wdog"), !tokens.contains(where: { $0.hasPrefix("ap_") }) { return .watchdog }
+    }
+
+    private static func softwareVerdict(_ tokens: [String]) -> ShutdownVerdict? {
+        if has("panic", in: tokens) { return .kernelPanic }
+        if has("ap_restart", in: tokens) { return .normalRestart }
+        if has("ap_shutdown", "ap_poweroff", in: tokens) { return .normalShutdown }
+        return nil
+    }
+
+    private static func hardwareVerdict(_ tokens: [String]) -> ShutdownVerdict {
+        if has("button", "pwr_btn", in: tokens) { return .forced }
+        if has("therm", in: tokens) { return .thermal }
+        if has("batt", "uvlo", "brownout", in: tokens) { return .powerLoss }
+        if has("wdog", in: tokens), !tokens.contains(where: { $0.hasPrefix("ap_") }) { return .watchdog }
         return .other
+    }
+
+    private static func has(_ needles: String..., in tokens: [String]) -> Bool {
+        tokens.contains { token in needles.contains { token.contains($0) } }
     }
 
     /// Localized meaning of an Intel / T2 "Previous shutdown cause" code (community-sourced table, SYS §7.2:
     /// George Garside "shutdown causes", Eclectic Light "Mac shutdown and sleep cause codes"). nil for unlisted codes.
     /// Resolved against the app's String Catalog (main bundle); English elsewhere.
     public static func intelCodeDescription(_ code: Int) -> String? {
+        if let description = userCodeDescription(code) { return description }
+        if let description = thermalCodeDescription(code) { return description }
+        if let description = batteryCodeDescription(code) { return description }
+        if let description = powerCodeDescription(code) { return description }
+        return systemCodeDescription(code)
+    }
+
+    private static func userCodeDescription(_ code: Int) -> String? {
         switch code {
         case 7: String(localized: "CPU thread error")
         case 6: String(localized: "Unknown cause")
@@ -46,26 +70,61 @@ public enum ShutdownClassifier {
         case 2: String(localized: "Power supply disconnected")
         case 1: String(localized: "Normal restart")
         case 0: String(localized: "Power lost (battery or adapter disconnected)")
+        default: nil
+        }
+    }
+
+    private static func thermalCodeDescription(_ code: Int) -> String? {
+        if let description = sensorThermalCodeDescription(code) { return description }
+        return componentThermalCodeDescription(code)
+    }
+
+    private static func sensorThermalCodeDescription(_ code: Int) -> String? {
+        switch code {
         case -3: String(localized: "Multiple temperature sensors over limit")
-        case -14: String(localized: "Electricity spike or surge")
-        case -20: String(localized: "Shutdown initiated by the T2 chip (BridgeOS)")
-        case -60: String(localized: "Battery fully drained")
-        case -61: String(localized: "Watchdog: unresponsive app, shutdown")
-        case -62: String(localized: "Watchdog: unresponsive app, restart")
-        case -64: String(localized: "Kernel panic")
         case -71: String(localized: "Memory over temperature")
         case -74: String(localized: "Battery over temperature")
-        case -75: String(localized: "Power adapter communication problem")
-        case -78: String(localized: "Incorrect current from the power adapter")
-        case -79: String(localized: "Incorrect current from the battery")
         case -81: String(localized: "Thermal shutdown (over-temperature)")
+        default: nil
+        }
+    }
+
+    private static func componentThermalCodeDescription(_ code: Int) -> String? {
+        switch code {
         case -86: String(localized: "Heat sink over temperature")
         case -95: String(localized: "CPU over temperature")
         case -100: String(localized: "Power supply over temperature")
         case -101: String(localized: "Display over temperature")
-        case -102: String(localized: "Overvoltage")
+        default: nil
+        }
+    }
+
+    private static func batteryCodeDescription(_ code: Int) -> String? {
+        switch code {
+        case -60: String(localized: "Battery fully drained")
+        case -79: String(localized: "Incorrect current from the battery")
         case -103: String(localized: "Battery cell under-voltage")
         case -104: String(localized: "Unknown battery fault")
+        default: nil
+        }
+    }
+
+    private static func powerCodeDescription(_ code: Int) -> String? {
+        switch code {
+        case -14: String(localized: "Electricity spike or surge")
+        case -75: String(localized: "Power adapter communication problem")
+        case -78: String(localized: "Incorrect current from the power adapter")
+        case -102: String(localized: "Overvoltage")
+        default: nil
+        }
+    }
+
+    private static func systemCodeDescription(_ code: Int) -> String? {
+        switch code {
+        case -20: String(localized: "Shutdown initiated by the T2 chip (BridgeOS)")
+        case -61: String(localized: "Watchdog: unresponsive app, shutdown")
+        case -62: String(localized: "Watchdog: unresponsive app, restart")
+        case -64: String(localized: "Kernel panic")
         case -127: String(localized: "Forced shutdown by the PMU/SMC")
         case -128: String(localized: "Unknown cause (possibly memory-related)")
         default: nil

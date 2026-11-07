@@ -31,16 +31,21 @@ public enum PeerPolicy: Sendable, Equatable, CustomStringConvertible {
         let ids = clientIdentifiers.map { "identifier \"\($0)\"" }.joined(separator: " or ")
         let noDebug = allowDebuggable ? "" : " and !(entitlement[\"com.apple.security.get-task-allow\"] /* exists */)"
         switch self {
-        case .sameTeam(let team):
-            guard !team.isEmpty, team.allSatisfy({ $0.isLetter || $0.isNumber }) else { return nil }
-            return "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\" and (\(ids))\(noDebug)"
-        case .pinnedCDHashes(let hashes):
-            let valid = hashes.filter(CodeIdentity.isValidCDHash)
-            guard !valid.isEmpty else { return nil }
-            return "(" + valid.map { "cdhash H\"\($0)\"" }.joined(separator: " or ") + ") and (\(ids))\(noDebug)"
-        case .denyAll:
-            return nil
+        case .sameTeam(let team): return Self.sameTeamRequirement(team, ids: ids, noDebug: noDebug)
+        case .pinnedCDHashes(let hashes): return Self.pinnedRequirement(hashes, ids: ids, noDebug: noDebug)
+        case .denyAll: return nil
         }
+    }
+
+    private static func sameTeamRequirement(_ team: String, ids: String, noDebug: String) -> String? {
+        guard !team.isEmpty, team.allSatisfy({ $0.isLetter || $0.isNumber }) else { return nil }
+        return "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\" and (\(ids))\(noDebug)"
+    }
+
+    private static func pinnedRequirement(_ hashes: [String], ids: String, noDebug: String) -> String? {
+        let valid = hashes.filter(CodeIdentity.isValidCDHash)
+        guard !valid.isEmpty else { return nil }
+        return "(" + valid.map { "cdhash H\"\($0)\"" }.joined(separator: " or ") + ") and (\(ids))\(noDebug)"
     }
 
     public var description: String {
@@ -108,39 +113,60 @@ public final class PeerValidator: Sendable {
             securityLog.error("rejecting pid \(pid, privacy: .public): policy \(self.policy.description, privacy: .public)")
             return false
         }
-        // Dynamic checks through the audit token (private-but-stable KVC key "auditToken", verified on macOS 27,
-        // HELP §1). If it ever disappears, the public per-message requirement below still applies.
-        if let token = Self.auditToken(of: connection) {
-            guard let (identity, code) = CodeIdentity.of(auditToken: token) else {
-                securityLog.error("rejecting pid \(pid, privacy: .public): cannot read its signature")
-                return false
-            }
-            var required = requiredStatus
-            if identity.status.contains(.debugged) {
-                guard allowDebuggable else {
-                    securityLog.error("rejecting \(identity.identifier ?? "?", privacy: .public) (pid \(pid, privacy: .public)): a debugger is attached")
-                    return false
-                }
-                required = required.intersection(.runtime)   // attaching a debugger may clear VALID / HARD / KILL
-            }
-            guard identity.status.isSuperset(of: required) else {
-                securityLog.error("rejecting \(identity.identifier ?? "?", privacy: .public) (pid \(pid, privacy: .public)): CS status 0x\(String(identity.statusFlags, radix: 16), privacy: .public)")
-                return false
-            }
-            var req: SecRequirement?
-            guard SecRequirementCreateWithString(requirement as CFString, [], &req) == errSecSuccess, let req else {
-                securityLog.error("invalid requirement string: \(requirement, privacy: .public)")
-                return false
-            }
-            guard SecCodeCheckValidity(code, [], req) == errSecSuccess else {
-                securityLog.error("rejecting \(identity.identifier ?? "?", privacy: .public) cdhash \(identity.cdhashHex ?? "?", privacy: .public) (pid \(pid, privacy: .public)): requirement not met")
-                return false
-            }
-            securityLog.info("accepted \(identity.identifier ?? "?", privacy: .public) cdhash \(identity.cdhashHex ?? "?", privacy: .public) (pid \(pid, privacy: .public))")
-        } else {
-            securityLog.notice("no audit token for pid \(pid, privacy: .public): relying on the per-message requirement only")
-        }
+        guard passesDynamicChecks(connection, requirement: requirement) else { return false }
         connection.setCodeSigningRequirement(requirement)   // re-checked by XPC for every message
+        return true
+    }
+
+    /// Dynamic checks through the audit token (private-but-stable KVC key "auditToken", verified on macOS 27,
+    /// HELP §1). If it ever disappears, the public per-message requirement still applies.
+    private func passesDynamicChecks(_ connection: NSXPCConnection, requirement: String) -> Bool {
+        guard let token = Self.auditToken(of: connection) else {
+            securityLog.notice("no audit token for pid \(connection.processIdentifier, privacy: .public): relying on the per-message requirement only")
+            return true
+        }
+        return validateAuditedPeer(token, requirement: requirement, pid: connection.processIdentifier)
+    }
+
+    private func validateAuditedPeer(_ token: audit_token_t, requirement: String, pid: pid_t) -> Bool {
+        guard let (identity, peerCode) = CodeIdentity.of(auditToken: token) else {
+            securityLog.error("rejecting pid \(pid, privacy: .public): cannot read its signature")
+            return false
+        }
+        guard hasRequiredStatus(identity, pid: pid) else { return false }
+        guard code(peerCode, meets: requirement, identity: identity, pid: pid) else { return false }
+        securityLog.info("accepted \(identity.identifier ?? "?", privacy: .public) cdhash \(identity.cdhashHex ?? "?", privacy: .public) (pid \(pid, privacy: .public))")
+        return true
+    }
+
+    private func hasRequiredStatus(_ identity: CodeIdentity, pid: pid_t) -> Bool {
+        guard let required = requiredStatus(for: identity, pid: pid) else { return false }
+        guard identity.status.isSuperset(of: required) else {
+            securityLog.error("rejecting \(identity.identifier ?? "?", privacy: .public) (pid \(pid, privacy: .public)): CS status 0x\(String(identity.statusFlags, radix: 16), privacy: .public)")
+            return false
+        }
+        return true
+    }
+
+    private func requiredStatus(for identity: CodeIdentity, pid: pid_t) -> CodeIdentity.Status? {
+        guard identity.status.contains(.debugged) else { return requiredStatus }
+        guard allowDebuggable else {
+            securityLog.error("rejecting \(identity.identifier ?? "?", privacy: .public) (pid \(pid, privacy: .public)): a debugger is attached")
+            return nil
+        }
+        return requiredStatus.intersection(.runtime)   // attaching a debugger may clear VALID / HARD / KILL
+    }
+
+    private func code(_ code: SecCode, meets requirement: String, identity: CodeIdentity, pid: pid_t) -> Bool {
+        var req: SecRequirement?
+        guard SecRequirementCreateWithString(requirement as CFString, [], &req) == errSecSuccess, let req else {
+            securityLog.error("invalid requirement string: \(requirement, privacy: .public)")
+            return false
+        }
+        guard SecCodeCheckValidity(code, [], req) == errSecSuccess else {
+            securityLog.error("rejecting \(identity.identifier ?? "?", privacy: .public) cdhash \(identity.cdhashHex ?? "?", privacy: .public) (pid \(pid, privacy: .public)): requirement not met")
+            return false
+        }
         return true
     }
 

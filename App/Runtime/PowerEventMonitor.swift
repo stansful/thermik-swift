@@ -27,40 +27,59 @@ enum PowerEvent: Sendable, Equatable {
 
     init() {}
 
+    private static let workspaceEvents: [(NSNotification.Name, PowerEvent)] = [
+        (NSWorkspace.willSleepNotification, .willSleep), (NSWorkspace.didWakeNotification, .didWake),
+        (NSWorkspace.screensDidSleepNotification, .screensDidSleep),
+        (NSWorkspace.screensDidWakeNotification, .screensDidWake), (NSWorkspace.willPowerOffNotification, .willPowerOff),
+    ]
+
     func start() {
         guard workspaceObservers.isEmpty else { return }
+        observeWorkspaceEvents()
+        observeLowPowerMode()
+        startPowerSourceNotifications()
+    }
+
+    private func observeWorkspaceEvents() {
         // Sleep/wake/power-off are posted on NSWorkspace's own center, NOT NotificationCenter.default.
         let ws = NSWorkspace.shared.notificationCenter
-        let map: [(NSNotification.Name, PowerEvent)] = [(NSWorkspace.willSleepNotification, .willSleep),
-                                                        (NSWorkspace.didWakeNotification, .didWake),
-                                                        (NSWorkspace.screensDidSleepNotification, .screensDidSleep),
-                                                        (NSWorkspace.screensDidWakeNotification, .screensDidWake),
-                                                        (NSWorkspace.willPowerOffNotification, .willPowerOff)]
-        for (name, event) in map {
+        for (name, event) in Self.workspaceEvents {
             workspaceObservers.append(ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.emit(event) }
             })
         }
+    }
+
+    private func observeLowPowerMode() {
         defaultObservers.append(NotificationCenter.default.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil,
                                                                        queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.lowPowerModeMayHaveChanged() }
         })
-        // IOPS change notifications (public IOKit.ps): any change of percentage, AC attach, time remaining. The C
-        // callback cannot capture, so a retained box carries a weak reference back; the source runs on the main loop.
+    }
+
+    /// IOPS reports any change of percentage, AC attach or time remaining; the source runs on the main loop.
+    private func startPowerSourceNotifications() {
+        // The C callback cannot capture, so a retained box carries a weak reference back to this monitor.
         let box = Unmanaged.passRetained(IOPSContext(monitor: self))
-        if let src = IOPSNotificationCreateRunLoopSource({ ctx in
-            guard let ctx else { return }
-            MainActor.assumeIsolated {
-                Unmanaged<IOPSContext>.fromOpaque(ctx).takeUnretainedValue().monitor?.emit(.powerSourceChanged)
-            }
-        }, box.toOpaque())?.takeRetainedValue() {
-            CFRunLoopAddSource(CFRunLoopGetMain(), src, .defaultMode)
-            powerSourceLoop = src
-            context = box
-        } else {
+        guard let src = makePowerSourceLoop(context: box) else {
             box.release()
             log.error("IOPSNotificationCreateRunLoopSource failed; power source changes are polled only")
+            return
         }
+        CFRunLoopAddSource(CFRunLoopGetMain(), src, .defaultMode)
+        powerSourceLoop = src
+        context = box
+    }
+
+    private func makePowerSourceLoop(context: Unmanaged<IOPSContext>) -> CFRunLoopSource? {
+        IOPSNotificationCreateRunLoopSource({ context in
+            MainActor.assumeIsolated { PowerEventMonitor.powerSourceDidChange(context) }
+        }, context.toOpaque())?.takeRetainedValue()
+    }
+
+    private static func powerSourceDidChange(_ context: UnsafeMutableRawPointer?) {
+        guard let context else { return }
+        Unmanaged<IOPSContext>.fromOpaque(context).takeUnretainedValue().monitor?.emit(.powerSourceChanged)
     }
 
     func stop() {

@@ -161,19 +161,25 @@ private struct AlertRuleRow: View {
 /// Localized rule descriptions.
 enum AlertRuleText {
     static func condition(_ r: AlertRule, unit: UnitTemperature) -> String {
-        var parts: [String] = []
         let duration = r.forSeconds > 0 ? WindowFormat.duration(r.forSeconds) : nil
-        if r.subject.isTemperature, let t = r.thresholdC {
-            let temp = ThermikFormat.temp(t, unit: unit)
-            parts.append(duration.map { String(localized: "above \(temp) for \($0)") } ?? String(localized: "above \(temp)"))
-        } else if let duration {
-            parts.append(String(localized: "for \(duration)"))
-        } else {
-            parts.append(String(localized: "as soon as it happens"))
-        }
-        parts.append(r.cooldownSeconds > 0 ? String(localized: "at most every \(WindowFormat.duration(r.cooldownSeconds))")
-                                           : String(localized: "every time"))
-        return parts.joined(separator: " · ")
+        return [trigger(r, unit: unit, duration: duration), cooldown(r)].joined(separator: " · ")
+    }
+
+    private static func trigger(_ r: AlertRule, unit: UnitTemperature, duration: String?) -> String {
+        if r.subject.isTemperature, let t = r.thresholdC { return temperatureTrigger(t, unit: unit, duration: duration) }
+        guard let duration else { return String(localized: "as soon as it happens") }
+        return String(localized: "for \(duration)")
+    }
+
+    private static func temperatureTrigger(_ celsius: Double, unit: UnitTemperature, duration: String?) -> String {
+        let temp = ThermikFormat.temp(celsius, unit: unit)
+        guard let duration else { return String(localized: "above \(temp)") }
+        return String(localized: "above \(temp) for \(duration)")
+    }
+
+    private static func cooldown(_ r: AlertRule) -> String {
+        guard r.cooldownSeconds > 0 else { return String(localized: "every time") }
+        return String(localized: "at most every \(WindowFormat.duration(r.cooldownSeconds))")
     }
 }
 
